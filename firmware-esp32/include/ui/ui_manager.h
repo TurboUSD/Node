@@ -70,7 +70,7 @@ public:
     void setScreenBrightness(uint8_t level) {
         static const uint8_t DUTY[5] = { 25, 70, 130, 185, 255 };
         level = constrain(level, 1, 5);
-        ledcWrite(LCD_PIN_BL, DUTY[level - 1]);
+        ledcWrite(0, DUTY[level - 1]);  // channel 0 = backlight (see ledcSetup in initDisplayAndTouch)
     }
 
     // Read brightness from NVS and apply it immediately.
@@ -193,7 +193,7 @@ public:
         uint32_t timeoutMs = (uint32_t)storage.getScreenTimeoutMins() * 60UL * 1000UL;
         if (_screenIsOn && (millis() - _lastTouchMs > timeoutMs)) {
             _screenIsOn = false;
-            ledcWrite(LCD_PIN_BL, 0);
+            ledcWrite(0, 0);  // channel 0 = backlight
         }
     }
 
@@ -520,10 +520,9 @@ private:
         // 8. Create RGB panel via ESP-IDF 5.x esp_lcd component.
         //    Frame buffer lives in PSRAM (480×480×2 = ~450 KB).
         esp_lcd_rgb_panel_config_t panelCfg = {};
-        panelCfg.clk_src                    = LCD_CLK_SRC_DEFAULT;
+        panelCfg.clk_src                    = LCD_CLK_SRC_XTAL;  // DEFAULT renamed in IDF 5.1+
         panelCfg.data_width                 = 16;
-        panelCfg.bits_per_pixel             = 16;
-        panelCfg.num_fbs                    = 1;        // 1 framebuffer in PSRAM
+        // bits_per_pixel and num_fbs removed from struct in newer IDF — data_width suffices
         panelCfg.psram_trans_align          = 64;
         panelCfg.hsync_gpio_num             = LCD_PIN_HSYNC;
         panelCfg.vsync_gpio_num             = LCD_PIN_VSYNC;
@@ -623,8 +622,10 @@ private:
 
         // 11. Enable backlight via LEDC PWM (GPIO 45, active HIGH).
         //     5 kHz / 8-bit resolution gives smooth dimming with no audible whine.
-        //     Arduino-ESP32 3.x API: ledcAttach(pin, freq, bits) + ledcWrite(pin, duty).
-        ledcAttach(LCD_PIN_BL, 5000, 8);
+        //     Arduino-ESP32 2.x API: ledcSetup(ch,freq,bits) + ledcAttachPin(pin,ch).
+        //     Channel 0 is reserved for the backlight (LCD_BL_LEDC_CH = 0).
+        ledcSetup(0, 5000, 8);
+        ledcAttachPin(LCD_PIN_BL, 0);
         applyStoredBrightness();
     }
 
