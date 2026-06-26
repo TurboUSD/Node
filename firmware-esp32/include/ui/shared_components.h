@@ -148,7 +148,9 @@ inline SharedFooterRefs buildSharedFooter(lv_obj_t* parent, lv_event_cb_t onQrTa
 
 // Call once a second (or whenever the data actually changes) to keep the
 // header/footer text current without needing each screen to duplicate this.
-inline void refreshSharedHeader(SharedHeaderRefs& refs, struct tm& t, float tempC, int humidityPct, bool is24h, char tempUnit) {
+// `sensorValid` = false when the RP2040 has no current reading (e.g. no AHT20
+// plugged in, or the link is down); the temp/humidity then render as "--".
+inline void refreshSharedHeader(SharedHeaderRefs& refs, struct tm& t, float tempC, int humidityPct, bool is24h, char tempUnit, bool sensorValid = true) {
     const char* days[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
     char dateBuf[16];
     snprintf(dateBuf, sizeof(dateBuf), "%s %02d/%02d", days[t.tm_wday], t.tm_mday, t.tm_mon + 1);
@@ -163,13 +165,17 @@ inline void refreshSharedHeader(SharedHeaderRefs& refs, struct tm& t, float temp
     }
     lv_label_set_text(refs.timeLabel, timeBuf);
 
-    float displayTemp = (tempUnit == 'F') ? (tempC * 9.0f / 5.0f + 32.0f) : tempC;
     char tempBuf[12];
-    snprintf(tempBuf, sizeof(tempBuf), "%d\xC2\xB0", (int)roundf(displayTemp));
-    lv_label_set_text(refs.tempLabel, tempBuf);
-
     char humBuf[12];
-    snprintf(humBuf, sizeof(humBuf), "%d%%", humidityPct);
+    if (sensorValid) {
+        float displayTemp = (tempUnit == 'F') ? (tempC * 9.0f / 5.0f + 32.0f) : tempC;
+        snprintf(tempBuf, sizeof(tempBuf), "%d\xC2\xB0", (int)roundf(displayTemp));
+        snprintf(humBuf, sizeof(humBuf), "%d%%", humidityPct);
+    } else {
+        snprintf(tempBuf, sizeof(tempBuf), "--\xC2\xB0");
+        snprintf(humBuf, sizeof(humBuf), "--%%");
+    }
+    lv_label_set_text(refs.tempLabel, tempBuf);
     lv_label_set_text(refs.humidityLabel, humBuf);
 }
 

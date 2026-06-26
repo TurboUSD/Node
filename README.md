@@ -22,12 +22,12 @@ The device is a **[SenseCAP Indicator D1](https://wiki.seeedstudio.com/SenseCAP_
 | Component | Details |
 |---|---|
 | ESP32-S3 | Dual-core 240 MHz, 8 MB PSRAM — runs the main firmware |
-| RP2040 | Co-processor — handles buzzer, ambient sensors, SD card via UART/COBS |
+| RP2040 | Co-processor — drives the buzzer and reads the Grove AHT20 temp/humidity sensor, reporting both to the ESP32-S3 over UART (the SD card is also wired to it, not yet used by the firmware) |
 | Display | 3.95" RGB 480×480 touchscreen (ST7701S driver, FT6336U touch controller) |
 | IO expander | TCA9535 — routes LCD control lines and backlight |
 | Connectivity | WiFi 802.11 b/g/n, Bluetooth 5.0, USB-C |
 
-No additional hardware modifications are required. The firmware communicates with the RP2040 over UART using COBS framing for robust binary packet delivery.
+No additional hardware modifications are required. The firmware communicates with the RP2040 over UART (115200 8N1) using a fixed 3-byte frame — `[0x7E][command][checksum]`, where the checksum is `0x7E XOR command`. See `firmware-rp2040/PROTOCOL.md` for the full command set.
 
 ---
 
@@ -39,7 +39,7 @@ The device has **7 screens** navigated by horizontal swipe gestures. The default
 The default screen. Displays:
 - **Clock** — current time in large digits, date
 - **Alarm** — status shown below the time; tap to open the alarm picker (time, days of the week, on/off toggle, volume 1–5). The alarm fires the RP2040 buzzer at the configured volume level.
-- **Temperature & humidity** — ambient readings from the onboard BMP sensor (via RP2040)
+- **Temperature & humidity** — ambient readings from the Grove AHT20 sensor on the RP2040, polled over UART (shows `--` until the RP2040 firmware is flashed and an AHT20 is connected)
 - **Weather** — current conditions fetched from the network
 
 ### 2 — TurboStats
@@ -94,7 +94,7 @@ Device settings — display preferences (°C/°F, date format, time format), ala
 ```
 backend/              Supabase Edge Functions (TypeScript / Deno) + SQL schema comments
 firmware-esp32/       ESP32-S3 firmware: WiFi, 7 LVGL screens, OTA, API client
-firmware-rp2040/      RP2040 firmware: buzzer alarm, UART/COBS bridge to ESP32-S3
+firmware-rp2040/      RP2040 firmware: buzzer alarm, 3-byte UART command protocol from ESP32-S3
 web/                  Next.js app (Vercel): node setup, setup wizard, network explorer
 .github/workflows/    CI: builds both firmwares, publishes OTA releases
 ```

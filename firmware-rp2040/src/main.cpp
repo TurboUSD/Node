@@ -1,7 +1,10 @@
-// src/main.cpp — TurboUSD Node firmware, RP2040 side (buzzer only).
-// See PROTOCOL.md for the UART command format this implements.
+// src/main.cpp — TurboUSD Node firmware, RP2040 side.
+// Drives the buzzer on command and reports the Grove AHT20 temp/humidity
+// sensor back to the ESP32-S3. See PROTOCOL.md for the UART format.
 
 #include <Arduino.h>
+#include <Wire.h>
+#include "AHT20.h"
 #include "board_pins.h"
 
 enum class Command : uint8_t {
@@ -9,6 +12,7 @@ enum class Command : uint8_t {
     STOP_ALARM   = 0x02,
     PLAY_CHIME   = 0x03,
     PING         = 0xF0,
+    READ_TH      = 0x20,  // reply is a 7-byte sensor frame, not an ACK (see PROTOCOL.md)
     // Volume-aware alarm commands (backward-compatible — old ESP32 firmware
     // never sends these, so old builds keep using PLAY_ALARM at volume 2).
     PLAY_ALARM_V1 = 0x11,  // volume 1 — whisper
@@ -87,6 +91,44 @@ void sendAck() {
     Serial1.write(0xAA);
 }
 
+// ── Ambient sensor (Grove AHT20 on the RP2040 I2C port) ─────────────────────
+// Read on a slow cadence into a cache so answering READ_TH is instant and the
+// ~80 ms AHT20 conversion never stalls the alarm-tone loop. The S3 polls this.
+AHT20 aht;
+const int16_t  TEMP_SENTINEL_NO_DATA = (int16_t)0x8000; // -32768 → "no valid reading"
+int16_t  cachedTempCenti = TEMP_SENTINEL_NO_DATA;        // centi-°C, signed
+uint16_t cachedHumCenti  = 0;                            // centi-% RH, unsigned
+uint32_t lastSensorReadAt = 0;
+const uint32_t SENSOR_READ_INTERVAL_MS = 2000;
+
+// Pull a fresh reading from the AHT20 into the cache. AHT20::getSensor returns
+// non-zero on success and reports humidity as a 0–1 fraction, temp in °C.
+void readSensorInto() {
+    float humiFrac, tempC;
+    int ok = aht.getSensor(&humiFrac, &tempC);
+    if (ok) {
+        cachedTempCenti = (int16_t)lroundf(tempC * 100.0f);
+        long h = lroundf(humiFrac * 100.0f * 100.0f); // fraction → % → centi-%
+        cachedHumCenti  = (uint16_t)constrain(h, 0, 10000);
+    } else {
+        cachedTempCenti = TEMP_SENTINEL_NO_DATA;       // surfaces as "--" on the S3
+        cachedHumCenti  = 0;
+    }
+}
+
+// Reply to READ_TH: [0x7E][0x20][tHi][tLo][hHi][hLo][checksum]. See PROTOCOL.md.
+void sendSensorFrame() {
+    uint8_t f[7];
+    f[0] = 0x7E;
+    f[1] = static_cast<uint8_t>(Command::READ_TH);
+    f[2] = (uint8_t)((uint16_t)cachedTempCenti >> 8);
+    f[3] = (uint8_t)((uint16_t)cachedTempCenti & 0xFF);
+    f[4] = (uint8_t)(cachedHumCenti >> 8);
+    f[5] = (uint8_t)(cachedHumCenti & 0xFF);
+    f[6] = f[0] ^ f[1] ^ f[2] ^ f[3] ^ f[4] ^ f[5];
+    Serial1.write(f, sizeof(f));
+}
+
 void processCommand(uint8_t cmd) {
     switch (static_cast<Command>(cmd)) {
         case Command::PLAY_ALARM:
@@ -110,6 +152,10 @@ void processCommand(uint8_t cmd) {
         case Command::PING:
             sendAck();
             break;
+        case Command::READ_TH:
+            // Answer from the cache with a data frame instead of an ACK.
+            sendSensorFrame();
+            break;
         default:
             // Unknown command byte -- ignore rather than ack, so the S3
             // side's ping()-style waits correctly time out instead of
@@ -123,6 +169,12 @@ void setup() {
     Serial1.setRX(UART_FROM_S3_RX);
     Serial1.setTX(UART_TO_S3_TX);
     Serial1.begin(UART_BAUD);
+
+    // Grove I2C bus for the AHT20 temp/humidity sensor.
+    Wire.setSDA(GROVE_I2C_SDA);
+    Wire.setSCL(GROVE_I2C_SCL);
+    Wire.begin();
+    aht.begin();
 }
 
 void loop() {
@@ -147,4 +199,12 @@ void loop() {
     }
 
     handleAlarmPattern();
+
+    // Refresh the cached sensor reading on a slow cadence. Skip while the alarm
+    // is sounding so the ~80 ms AHT20 conversion can't glitch the tone pattern;
+    // a slightly stale temperature during a 5-minute alarm is harmless.
+    if (!alarmActive && (millis() - lastSensorReadAt > SENSOR_READ_INTERVAL_MS)) {
+        lastSensorReadAt = millis();
+        readSensorInto();
+    }
 }

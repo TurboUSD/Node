@@ -50,7 +50,12 @@
    LOGGING / DEBUG
  *====================*/
 #define LV_USE_LOG         0   /* Flip to 1 temporarily to debug LVGL alloc warnings */
+/* Only define LV_LOG_LEVEL when logging is enabled. When LV_USE_LOG==0,
+ * lv_conf_internal.h forces LV_LOG_LEVEL to LV_LOG_LEVEL_NONE; defining it
+ * here unconditionally caused a "LV_LOG_LEVEL redefined" warning at build. */
+#if LV_USE_LOG
 #define LV_LOG_LEVEL       LV_LOG_LEVEL_WARN
+#endif
 #define LV_USE_PERF_MONITOR 0  /* Flip to 1 to show FPS overlay for jank diagnosis */
 #define LV_USE_MEM_MONITOR  0
 
@@ -75,7 +80,10 @@
 #define LV_USE_BAR         1
 #define LV_USE_BTN         1
 #define LV_USE_BTNMATRIX   1
-#define LV_USE_CANVAS      0
+#define LV_USE_CANVAS      1   /* REQUIRED: lv_qrcode (below) is a canvas wrapper —
+                                * it calls lv_canvas_create/set_buffer/set_palette.
+                                * With this at 0 the build failed with
+                                * "'lv_canvas_class' undeclared" in lv_qrcode.c. */
 #define LV_USE_CHECKBOX    1
 #define LV_USE_CHART       1   /* screen_turbo.h candle chart */
 #define LV_USE_COLORWHEEL  0
@@ -103,7 +111,9 @@
 #define LV_USE_TILEVIEW    1   /* ui_manager.h screen-swipe navigation */
 #define LV_USE_WIN         0
 
-#define LV_USE_QRCODE      1   /* modal.h setup QR — backed by ricmoo/QRCode */
+#define LV_USE_QRCODE      1   /* modal.h setup QR — uses LVGL's bundled qrcodegen
+                                * (src/extra/libs/qrcode) and renders onto a canvas,
+                                * so LV_USE_CANVAS above must also be 1. */
 
 /*====================
    THEME

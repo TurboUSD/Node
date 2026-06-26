@@ -51,6 +51,7 @@
 #define OHLCV_CHART_REFRESH_MS       (60UL * 60UL * 1000UL)     // once an hour -- the underlying cache is only synced once a day anyway, no need to poll more often than that, but an hourly check keeps a freshly-booted device from waiting a full day to see the chart
 #define US_DEBT_REFRESH_MS           (60UL * 60UL * 1000UL)     // every hour (slow-moving figure)
 #define MINING_FEED_REFRESH_MS       (15UL * 1000UL)            // every 15s while on the Node screen
+#define SENSOR_POLL_INTERVAL_MS      (10UL * 1000UL)            // poll RP2040 for temp/humidity every 10s
 #define OTA_CHECK_INTERVAL_MS        (24UL * 60UL * 60UL * 1000UL) // once a day
 #define NTP_RESYNC_INTERVAL_MS       (6UL * 60UL * 60UL * 1000UL)  // every 6 hours
 

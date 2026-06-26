@@ -31,6 +31,7 @@ uint32_t lastDebtRefreshAt      = 0;
 uint32_t lastOhlcvRefreshAt     = 0;
 uint32_t lastOtaCheckAt         = 0;
 uint32_t lastNtpSyncAt          = 0;
+uint32_t lastSensorPollAt       = 0;
 uint32_t bootMillis             = 0;
 
 bool nodeRegistered         = false;
@@ -219,6 +220,19 @@ void loop() {
             pendingOtaSha256  = sha;
             // Show a persistent badge on all screens; user can dismiss or install.
             uiManager.showOtaBadge(ver.c_str());
+        }
+    }
+
+    // Ambient temp/humidity comes from the AHT20 on the RP2040 (the S3 has no
+    // sensor of its own). Poll it on a slow cadence; the UI keeps the last good
+    // value when a read fails (e.g. no sensor plugged in → header shows "--").
+    if (lastSensorPollAt == 0 || now - lastSensorPollAt > SENSOR_POLL_INTERVAL_MS) {
+        lastSensorPollAt = now;
+        float tempC; int humidityPct;
+        if (rp2040Link.readTempHumidity(tempC, humidityPct)) {
+            uiManager.updateAmbient(tempC, humidityPct);
+        } else {
+            uiManager.markAmbientUnavailable();
         }
     }
 

@@ -154,6 +154,21 @@ public:
         nodeScreen.updateMiningFeed(entries, count);
     }
 
+    // Called from the main loop after a successful RP2040 sensor poll. The new
+    // values appear on the next per-second header/Home refresh, so there's no
+    // need to redraw here.
+    void updateAmbient(float tempC, int humidityPct) {
+        _tempC = tempC;
+        _humidityPct = humidityPct;
+        _sensorValid = true;
+    }
+
+    // Called when a sensor poll fails (link down, or no AHT20 plugged in).
+    // Drops back to showing "--" rather than a stale reading.
+    void markAmbientUnavailable() {
+        _sensorValid = false;
+    }
+
     void showAlarmFiringOverlay() {
         lv_obj_t* overlay = lv_obj_create(lv_scr_act());
         lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
@@ -247,8 +262,16 @@ private:
     lv_obj_t* clockTimeLabel = nullptr;
     lv_obj_t* clockDateLabel = nullptr;
     lv_obj_t* clockAlarmLabel = nullptr;
+    lv_obj_t* clockWeatherLabel = nullptr;  // "23° · 48%" line on the Home screen
     uint32_t lastClockRedrawSecond = 255;
     SharedFooterRefs clockFooterRefs;
+
+    // Ambient readings from the AHT20 on the RP2040 (polled over UART in the
+    // main loop). _sensorValid is false until the first good read, or whenever
+    // a read fails — the UI then shows "--" instead of a stale/zero value.
+    float _tempC        = 0.0f;
+    int   _humidityPct  = 0;
+    bool  _sensorValid  = false;
 
     // ── Screen swipe order ───────────────────────────────────────────────────
 
@@ -711,6 +734,13 @@ private:
         lv_obj_add_flag(clockAlarmLabel, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(clockAlarmLabel, onAlarmLabelTapped, LV_EVENT_CLICKED, this);
 
+        // Ambient temp/humidity line, e.g. "23° · 48%" (from the RP2040 AHT20).
+        clockWeatherLabel = lv_label_create(scr);
+        lv_obj_set_style_text_color(clockWeatherLabel, lv_color_hex(0x9a9a9e), 0);
+        lv_obj_set_style_text_font(clockWeatherLabel, &lv_font_montserrat_16, 0);
+        lv_obj_align(clockWeatherLabel, LV_ALIGN_CENTER, 0, 64);
+        lv_label_set_text(clockWeatherLabel, "--\xC2\xB0 \xC2\xB7 --%");
+
         clockFooterRefs = buildSharedFooter(scr, onQrTapped, this);
 
         return scr;
@@ -733,11 +763,35 @@ private:
         refreshSharedAlarmIcon(tickerScreen.header, alarmOn, todayOn);
         refreshSharedAlarmIcon(nftScreen.header,    alarmOn, todayOn);
 
-        // Clock screen text only below
+        // Refresh the date/time/temp/humidity text in every non-clock header.
+        // (Previously nothing called this, so those headers showed no clock and
+        // the temp/humidity labels stayed blank.) Temp/humidity come from the
+        // RP2040 AHT20 poll; when there's no valid reading they render as "--".
+        bool is24h      = storage.getTimeFormat() == "24H";
+        char tempUnit   = storage.getTempUnit();
+        refreshSharedHeader(turboScreen.header,  t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
+        refreshSharedHeader(debtScreen.header,   t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
+        refreshSharedHeader(gameScreen.header,   t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
+        refreshSharedHeader(nodeScreen.header,   t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
+        refreshSharedHeader(tickerScreen.header, t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
+        refreshSharedHeader(nftScreen.header,    t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
+
+        // Clock/Home screen text only below
         if (currentScreen != ScreenId::CLOCK) return;
 
+        // Home ambient line, e.g. "23° · 48%" (or "--° · --%" with no sensor).
+        if (clockWeatherLabel) {
+            char wBuf[24];
+            if (_sensorValid) {
+                float dT = (tempUnit == 'F') ? (_tempC * 9.0f / 5.0f + 32.0f) : _tempC;
+                snprintf(wBuf, sizeof(wBuf), "%d\xC2\xB0 \xC2\xB7 %d%%", (int)roundf(dT), _humidityPct);
+            } else {
+                snprintf(wBuf, sizeof(wBuf), "--\xC2\xB0 \xC2\xB7 --%%");
+            }
+            lv_label_set_text(clockWeatherLabel, wBuf);
+        }
+
         char timeBuf[12];
-        bool is24h = storage.getTimeFormat() == "24H";
         if (is24h) snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", t.tm_hour, t.tm_min);
         else {
             int hour12 = t.tm_hour % 12; if (hour12 == 0) hour12 = 12;

@@ -1,8 +1,8 @@
 // include/rp2040_link.h — UART protocol between the ESP32-S3 (which knows
 // what time it is and when the alarm should fire) and the RP2040 (which
-// physically drives the buzzer). See firmware-rp2040/PROTOCOL.md for the
-// byte-level spec this implements; keep both sides in sync if you change
-// the framing here.
+// physically drives the buzzer and reads the ambient temp/humidity sensor).
+// See firmware-rp2040/PROTOCOL.md for the byte-level spec this implements;
+// keep both sides in sync if you change the framing here.
 
 #pragma once
 #include <HardwareSerial.h>
@@ -13,6 +13,7 @@ enum class Rp2040Command : uint8_t {
     STOP_ALARM    = 0x02,
     PLAY_CHIME    = 0x03,  // short single beep, e.g. for UI feedback / button taps
     PING          = 0xF0,
+    READ_TH       = 0x20,  // request temp/humidity; reply is a 7-byte frame, not an ACK
     // Volume-aware alarm commands — RP2040 firmware 1.2+
     PLAY_ALARM_V1 = 0x11,
     PLAY_ALARM_V2 = 0x12,
@@ -53,6 +54,41 @@ public:
             if (link.available() && link.read() == 0xAA) return true; // 0xAA = ack byte
         }
         return false;
+    }
+
+    // Request the latest ambient reading from the RP2040. Returns true and
+    // fills tempC + humidityPct on success; false on timeout, bad checksum, or
+    // the RP2040's "no sensor" sentinel (e.g. no AHT20 plugged in). The caller
+    // should keep showing the previous value (or "--") when this returns false.
+    // See PROTOCOL.md → "Sensor response" for the 7-byte frame layout.
+    bool readTempHumidity(float& tempC, int& humidityPct, uint32_t timeoutMs = 250) {
+        while (link.available()) link.read();   // drain stale bytes so we don't desync
+        sendCommand(Rp2040Command::READ_TH);
+
+        uint8_t frame[7];
+        uint8_t idx = 0;
+        uint32_t start = millis();
+        while (millis() - start < timeoutMs) {
+            if (!link.available()) continue;
+            uint8_t b = (uint8_t)link.read();
+            if (idx == 0 && b != 0x7E) continue;            // wait for start byte
+            frame[idx++] = b;
+            if (idx < sizeof(frame)) continue;
+
+            // Full frame received.
+            if (frame[1] != static_cast<uint8_t>(Rp2040Command::READ_TH)) return false;
+            uint8_t cs = frame[0] ^ frame[1] ^ frame[2] ^ frame[3] ^ frame[4] ^ frame[5];
+            if (frame[6] != cs) return false;               // corrupted frame
+
+            int16_t  tCenti = (int16_t)(((uint16_t)frame[2] << 8) | frame[3]);
+            uint16_t hCenti = (uint16_t)(((uint16_t)frame[4] << 8) | frame[5]);
+            if (tCenti == (int16_t)0x8000) return false;    // RP2040 has no valid reading
+
+            tempC = tCenti / 100.0f;
+            humidityPct = (int)((hCenti + 50) / 100);       // centi-% → % (rounded)
+            return true;
+        }
+        return false; // timed out
     }
 
 private:
