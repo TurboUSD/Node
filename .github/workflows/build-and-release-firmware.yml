@@ -22,6 +22,15 @@ on:
       - '.github/workflows/build-and-release-firmware.yml'
   workflow_dispatch:   # allows manual trigger from GitHub Actions UI
 
+# The publish-release job uses softprops/action-gh-release to create a Release.
+# Creating releases / uploading assets requires the workflow's GITHUB_TOKEN to
+# have write access to repo contents. Without this block the token is read-only
+# and the step fails with "Resource not accessible by integration".
+# (If it still fails, also check Settings → Actions → General → Workflow
+# permissions is set to "Read and write".)
+permissions:
+  contents: write
+
 jobs:
   build-esp32:
     runs-on: ubuntu-latest
