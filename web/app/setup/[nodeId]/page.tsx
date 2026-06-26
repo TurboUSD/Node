@@ -49,6 +49,9 @@ interface NodeConfig {
   alarm_minute:           number
   alarm_enabled:          boolean
   alarm_volume:           number  // 1–5, default 2
+  screen_brightness:      number   // 1–5, default 5 (full)
+  screen_always_on:       boolean  // default true
+  screen_timeout_mins:    number   // 1 | 5 | 10 | 30, default 10
   // NFT Gallery (optional — requires DB migration)
   nft_wallet_address?:    string | null
   nft_grid_size?:         1 | 4 | 9
@@ -114,7 +117,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
 
     supabase
       .from('nodes')
-      .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, is_verified, is_genesis, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume')
+      .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, is_verified, is_genesis, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume, screen_brightness, screen_always_on, screen_timeout_mins')
       .eq('node_code', nodeCode)
       .maybeSingle()
       .then(({ data, error }) => {
@@ -175,6 +178,9 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         alarm_minute:          node.alarm_minute,
         alarm_enabled:         node.alarm_enabled,
         alarm_volume:          node.alarm_volume ?? 2,
+        screen_brightness:     node.screen_brightness ?? 5,
+        screen_always_on:      node.screen_always_on  ?? true,
+        screen_timeout_mins:   node.screen_timeout_mins ?? 10,
         nft_wallet_address:    node.nft_wallet_address,
         nft_grid_size:         node.nft_grid_size,
         nft_carousel_enabled:  node.nft_carousel_enabled,
@@ -329,6 +335,74 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
 
           {/* ── Display preferences ── */}
           <Section title="Display preferences" accent={C.yellow}>
+            {/* Brightness slider */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, color: C.muted }}>Brightness</span>
+                <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>
+                  {['', '🌑 Dim', '🌒 Low', '🌓 Medium', '🌔 High', '🌕 Full'][(node.screen_brightness ?? 5)]}
+                </span>
+              </div>
+              <input
+                type="range" min={1} max={5} step={1}
+                value={node.screen_brightness ?? 5}
+                onChange={e => setNode({ ...node, screen_brightness: Number(e.target.value) })}
+                style={{ width: '100%', accentColor: C.yellow, cursor: 'pointer' }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+                {['1', '2', '3', '4', '5'].map(n => (
+                  <span key={n} style={{ fontSize: 11, color: C.muted, width: 20, textAlign: 'center' }}>{n}</span>
+                ))}
+              </div>
+            </div>
+
+            {/* Always-on toggle */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: `1px solid ${C.border}` }}>
+              <span style={{ fontSize: 14, color: C.text }}>Always on</span>
+              <label style={{ position: 'relative', display: 'inline-block', width: 44, height: 24, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={node.screen_always_on ?? true}
+                  onChange={e => setNode({ ...node, screen_always_on: e.target.checked })}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span style={{
+                  position: 'absolute', inset: 0, borderRadius: 12,
+                  background: (node.screen_always_on ?? true) ? C.green : C.border,
+                  transition: 'background 0.2s',
+                }}>
+                  <span style={{
+                    position: 'absolute', top: 3, width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                    left: (node.screen_always_on ?? true) ? 23 : 3,
+                    transition: 'left 0.2s',
+                  }} />
+                </span>
+              </label>
+            </div>
+
+            {/* Turn off after — only visible when always-on is OFF */}
+            {!(node.screen_always_on ?? true) && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: `1px solid ${C.border}` }}>
+                <span style={{ fontSize: 14, color: C.text }}>Turn off after</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {([1, 5, 10, 30] as const).map(mins => (
+                    <button
+                      key={mins}
+                      onClick={() => setNode({ ...node, screen_timeout_mins: mins })}
+                      style={{
+                        padding: '4px 10px', borderRadius: 6, fontSize: 13, cursor: 'pointer', border: 'none',
+                        background: (node.screen_timeout_mins ?? 10) === mins ? C.yellow : C.card,
+                        color:      (node.screen_timeout_mins ?? 10) === mins ? '#000'    : C.muted,
+                        fontWeight: (node.screen_timeout_mins ?? 10) === mins ? 700       : 400,
+                      }}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <ToggleRow label="Temperature" value={node.temp_unit}
               options={[['C', '°C'], ['F', '°F']]}
               onChange={v => setNode({ ...node, temp_unit: v as 'C' | 'F' })}
