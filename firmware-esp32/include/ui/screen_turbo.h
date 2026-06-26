@@ -127,9 +127,11 @@ public:
         lv_chart_refresh(chart);
     }
 
-private:
-    SharedHeaderRefs header;
+public:
+    SharedHeaderRefs header;   // accessed by UIManager::refreshSharedAlarmIcon
     SharedFooterRefs footer;
+
+private:
     lv_obj_t* chart = nullptr;
     lv_chart_series_t* openCloseSeries = nullptr;  // sole series; bar height = HIGH
 

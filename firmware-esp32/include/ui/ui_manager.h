@@ -66,6 +66,18 @@ public:
         _checkScreenTimeout();
     }
 
+    // Set backlight brightness level 1–5 immediately via LEDC PWM.
+    void setScreenBrightness(uint8_t level) {
+        static const uint8_t DUTY[5] = { 25, 70, 130, 185, 255 };
+        level = constrain(level, 1, 5);
+        ledcWrite(LCD_PIN_BL, DUTY[level - 1]);
+    }
+
+    // Read brightness from NVS and apply it immediately.
+    void applyStoredBrightness() {
+        setScreenBrightness(storage.getScreenBrightness());
+    }
+
     void showProvisioningScreen() {
         static bool shown = false;
         if (shown) return;
@@ -614,22 +626,6 @@ private:
         //     Arduino-ESP32 3.x API: ledcAttach(pin, freq, bits) + ledcWrite(pin, duty).
         ledcAttach(LCD_PIN_BL, 5000, 8);
         applyStoredBrightness();
-    }
-
-    // Set backlight brightness level 1–5 and apply immediately via LEDC PWM.
-    // Duty cycle table (8-bit, 0-255): 10 / 27 / 51 / 73 / 100 percent.
-    // Level 5 (255) reproduces the factory firmware's full-on behaviour.
-    void setScreenBrightness(uint8_t level) {
-        static const uint8_t DUTY[5] = { 25, 70, 130, 185, 255 };
-        level = constrain(level, 1, 5);
-        ledcWrite(LCD_PIN_BL, DUTY[level - 1]);
-    }
-
-    // Reads brightness from NVS and applies it immediately.
-    // Call once at boot (already done inside begin()) and after a heartbeat
-    // config sync that may have updated the stored value.
-    void applyStoredBrightness() {
-        setScreenBrightness(storage.getScreenBrightness());
     }
 
     void dismissAlarmOverlay() {
