@@ -117,16 +117,17 @@ jobs:
       - name: Compute SHA256
         id: sha
         run: |
-          SHA=$(sha256sum firmware-rp2040/.pio/build/rp2040_buzzer/firmware.bin | awk '{print $1}')
+          # earlephilhower/arduino-pico outputs a .uf2 (drag-and-drop flashable)
+          SHA=$(sha256sum firmware-rp2040/.pio/build/rp2040_buzzer/firmware.uf2 | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Rename binary for release
-        run: cp firmware-rp2040/.pio/build/rp2040_buzzer/firmware.bin rp2040-${{ steps.extract_version.outputs.version }}.bin
+      - name: Rename UF2 for release
+        run: cp firmware-rp2040/.pio/build/rp2040_buzzer/firmware.uf2 rp2040-${{ steps.extract_version.outputs.version }}.uf2
 
       - uses: actions/upload-artifact@v4
         with:
           name: rp2040-firmware
-          path: rp2040-${{ steps.extract_version.outputs.version }}.bin
+          path: rp2040-${{ steps.extract_version.outputs.version }}.uf2
 
       - name: Save sha for downstream job
         run: echo "${{ steps.sha.outputs.sha256 }}" > rp2040-sha256.txt
@@ -157,7 +158,7 @@ jobs:
             artifacts/esp32s3-*.bin
             artifacts/firmware-esp32s3.bin
             artifacts/firmware-esp32/manifest.json
-            artifacts/rp2040-*.bin
+            artifacts/rp2040-*.uf2
           generate_release_notes: true
 
       - name: Register release with Supabase
@@ -165,7 +166,7 @@ jobs:
           ESP32_SHA=$(cat artifacts/esp32s3-sha256.txt)
           RP2040_SHA=$(cat artifacts/rp2040-sha256.txt)
           ESP32_URL=$(ls artifacts/esp32s3-*.bin | xargs -I{} basename {})
-          RP2040_URL=$(ls artifacts/rp2040-*.bin | xargs -I{} basename {})
+          RP2040_URL=$(ls artifacts/rp2040-*.uf2 | xargs -I{} basename {})
 
           curl -s -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/firmware_releases" \
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
