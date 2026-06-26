@@ -1,0 +1,16 @@
+# TurboUSD Node — partition table for ESP32-S3 with 8 MB flash
+# Layout: NVS + OTA metadata + two equal app slots + SPIFFS for assets
+#
+# Offsets / sizes must stay within 0x800000 (8 MB total):
+#   nvs      0x9000  →  0xDFFF   (20 KB)
+#   otadata  0xE000  →  0xFFFF   (8 KB)
+#   app0     0x10000 → 0x33FFFF  (3.1875 MB)  — OTA slot 0 (active after first flash)
+#   app1     0x340000→ 0x66FFFF  (3.1875 MB)  — OTA slot 1 (target during OTA update)
+#   spiffs   0x670000→ 0x7FFFFF  (1.5625 MB)  — filesystem (logos, certs, etc.)
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x330000,
+app1,     app,  ota_1,   0x340000, 0x330000,
+spiffs,   data, spiffs,  0x670000, 0x190000,

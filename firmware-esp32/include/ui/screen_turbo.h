@@ -204,7 +204,7 @@ private:
             lv_coord_t halfW = (dsc->draw_area->x2 - dsc->draw_area->x1) / 2 + 2;
             lv_coord_t cx    = (dsc->draw_area->x1 + dsc->draw_area->x2) / 2;
 
-            lv_area_t bodyArea = { cx - halfW, bodyTop, cx + halfW, bodyBot };
+            lv_area_t bodyArea = { (lv_coord_t)(cx - halfW), bodyTop, (lv_coord_t)(cx + halfW), bodyBot };
             // Clamp to chart content area to avoid overflowing into padding.
             if (bodyArea.x1 < ca.x1) bodyArea.x1 = ca.x1;
             if (bodyArea.x2 > ca.x2) bodyArea.x2 = ca.x2;
