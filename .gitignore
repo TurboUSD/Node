@@ -1,0 +1,22 @@
+# PlatformIO build artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Next.js / Node
+web/node_modules/
+web/.next/
+web/.env.local
+web/.env*.local
+web/*.tsbuildinfo
+web/.vercel
+
+# Supabase CLI local state (created by "supabase link", never commit)
+.supabase/
+supabase/.temp/
+backend/functions/supabase/
+
+# OS / editor noise
+.DS_Store
+**/.DS_Store
+*.swp

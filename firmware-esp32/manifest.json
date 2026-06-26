@@ -1,0 +1,16 @@
+{
+  "name": "TurboUSD Node",
+  "version": "0.1.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "https://github.com/turbousd/node/releases/latest/download/firmware-esp32s3.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

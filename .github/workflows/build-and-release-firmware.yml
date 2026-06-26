@@ -1,0 +1,180 @@
+# .github/workflows/build-and-release-firmware.yml
+#
+# Triggered on every push to main that touches either firmware directory.
+# Compiles both chips' firmware with PlatformIO, publishes the resulting
+# .bin files as a GitHub Release, and then registers that release with
+# Supabase so devices doing their daily OTA check can find it (see
+# backend/functions/latest-firmware and ota_updater.h on the device side).
+#
+# Required repo secrets:
+#   SUPABASE_URL              - https://YOUR-PROJECT-REF.supabase.co
+#   SUPABASE_ANON_KEY         - anon/public key (safe to bake into firmware; RLS limits what it can do)
+#   SUPABASE_SERVICE_ROLE_KEY - service role key (server-side only, never baked into firmware)
+
+name: Build and Release Firmware
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware-esp32/**'
+      - 'firmware-rp2040/**'
+      - '.github/workflows/build-and-release-firmware.yml'
+  workflow_dispatch:   # allows manual trigger from GitHub Actions UI
+
+jobs:
+  build-esp32:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Inject Supabase credentials into config.h
+        run: |
+          PROJECT_REF=$(echo "${{ secrets.SUPABASE_URL }}" | sed 's|https://||' | sed 's|\.supabase\.co||')
+          sed -i "s|YOUR-PROJECT-REF|${PROJECT_REF}|g" firmware-esp32/include/config.h
+          sed -i "s|YOUR-SUPABASE-ANON-KEY|${{ secrets.SUPABASE_ANON_KEY }}|g" firmware-esp32/include/config.h
+
+      - name: Build ESP32-S3 firmware
+        working-directory: firmware-esp32
+        run: pio run
+
+      - name: Extract version from platformio.ini
+        id: extract_version
+        working-directory: firmware-esp32
+        run: |
+          VERSION=$(grep -oP 'FIRMWARE_VERSION=\\"\K[^\\]+' platformio.ini)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(sha256sum firmware-esp32/.pio/build/sensecap_indicator_d1/firmware.bin | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Rename binary for release
+        run: |
+          cp firmware-esp32/.pio/build/sensecap_indicator_d1/firmware.bin esp32s3-${{ steps.extract_version.outputs.version }}.bin
+          # Also keep a fixed-name copy so manifest.json can use a stable URL
+          # (releases/latest/download/firmware-esp32s3.bin always points to newest)
+          cp firmware-esp32/.pio/build/sensecap_indicator_d1/firmware.bin firmware-esp32s3.bin
+
+      - name: Update manifest version
+        run: |
+          VERSION="${{ steps.extract_version.outputs.version }}"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" firmware-esp32/manifest.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-firmware
+          path: |
+            esp32s3-${{ steps.extract_version.outputs.version }}.bin
+            firmware-esp32s3.bin
+            firmware-esp32/manifest.json
+
+      - name: Save sha for downstream job
+        run: echo "${{ steps.sha.outputs.sha256 }}" > esp32s3-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-sha256
+          path: esp32s3-sha256.txt
+
+  build-rp2040:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build RP2040 firmware
+        working-directory: firmware-rp2040
+        run: pio run
+
+      - name: Extract version from platformio.ini
+        id: extract_version
+        working-directory: firmware-rp2040
+        run: |
+          VERSION=$(grep -oP 'FIRMWARE_VERSION=\\"\K[^\\]+' platformio.ini)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(sha256sum firmware-rp2040/.pio/build/rp2040_buzzer/firmware.bin | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Rename binary for release
+        run: cp firmware-rp2040/.pio/build/rp2040_buzzer/firmware.bin rp2040-${{ steps.extract_version.outputs.version }}.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rp2040-firmware
+          path: rp2040-${{ steps.extract_version.outputs.version }}.bin
+
+      - name: Save sha for downstream job
+        run: echo "${{ steps.sha.outputs.sha256 }}" > rp2040-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rp2040-sha256
+          path: rp2040-sha256.txt
+
+  publish-release:
+    needs: [build-esp32, build-rp2040]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: esp32s3-firmware, path: ./artifacts }
+      - uses: actions/download-artifact@v4
+        with: { name: esp32s3-sha256, path: ./artifacts }
+      - uses: actions/download-artifact@v4
+        with: { name: rp2040-firmware, path: ./artifacts }
+      - uses: actions/download-artifact@v4
+        with: { name: rp2040-sha256, path: ./artifacts }
+
+      - name: Create GitHub Release with both binaries
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fw-${{ needs.build-esp32.outputs.version }}-${{ github.run_number }}
+          files: |
+            artifacts/esp32s3-*.bin
+            artifacts/firmware-esp32s3.bin
+            artifacts/firmware-esp32/manifest.json
+            artifacts/rp2040-*.bin
+          generate_release_notes: true
+
+      - name: Register release with Supabase
+        run: |
+          ESP32_SHA=$(cat artifacts/esp32s3-sha256.txt)
+          RP2040_SHA=$(cat artifacts/rp2040-sha256.txt)
+          ESP32_URL=$(ls artifacts/esp32s3-*.bin | xargs -I{} basename {})
+          RP2040_URL=$(ls artifacts/rp2040-*.bin | xargs -I{} basename {})
+
+          curl -s -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/firmware_releases" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"target\":\"esp32s3\",\"version\":\"${{ needs.build-esp32.outputs.version }}\",\"binary_url\":\"https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag_name }}/$ESP32_URL\",\"sha256\":\"$ESP32_SHA\"}"
+
+          curl -s -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/firmware_releases" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"target\":\"rp2040\",\"version\":\"${{ needs.build-rp2040.outputs.version }}\",\"binary_url\":\"https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag_name }}/$RP2040_URL\",\"sha256\":\"$RP2040_SHA\"}"
