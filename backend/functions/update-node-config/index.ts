@@ -24,6 +24,13 @@
 // Required DB column for alarm volume (1–5, default 2):
 //   ALTER TABLE nodes ADD COLUMN IF NOT EXISTS alarm_volume smallint DEFAULT 2;
 //
+// Required DB column for screen brightness (1–5, default 5 = full brightness):
+//   ALTER TABLE nodes ADD COLUMN IF NOT EXISTS screen_brightness smallint DEFAULT 5;
+//
+// Required DB columns for screen timeout:
+//   ALTER TABLE nodes ADD COLUMN IF NOT EXISTS screen_always_on boolean DEFAULT true;
+//   ALTER TABLE nodes ADD COLUMN IF NOT EXISTS screen_timeout_mins smallint DEFAULT 10;
+//
 // Deploy with: supabase functions deploy update-node-config
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -57,6 +64,9 @@ Deno.serve(async (req: Request) => {
     alarm_minute?:           number
     alarm_enabled?:          boolean
     alarm_volume?:           number  // 1–5
+    screen_brightness?:      number   // 1–5, default 5
+    screen_always_on?:       boolean  // default true
+    screen_timeout_mins?:    number   // 1 | 5 | 10 | 30, default 10
     // NFT Gallery settings
     nft_wallet_address?:     string
     nft_grid_size?:          1 | 4 | 9
@@ -120,6 +130,20 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: 'alarm_volume must be 1–5' }), { status: 400 })
     updates.alarm_volume = v
   }
+  if (body.screen_brightness !== undefined) {
+    const v = Math.round(body.screen_brightness)
+    if (v < 1 || v > 5)
+      return new Response(JSON.stringify({ error: 'screen_brightness must be 1–5' }), { status: 400 })
+    updates.screen_brightness = v
+  }
+  if (body.screen_always_on !== undefined) {
+    updates.screen_always_on = body.screen_always_on
+  }
+  if (body.screen_timeout_mins !== undefined) {
+    if (![1, 5, 10, 30].includes(body.screen_timeout_mins))
+      return new Response(JSON.stringify({ error: 'screen_timeout_mins must be 1, 5, 10, or 30' }), { status: 400 })
+    updates.screen_timeout_mins = body.screen_timeout_mins
+  }
 
   // NFT Gallery fields
   if (body.nft_wallet_address !== undefined) {
@@ -179,7 +203,7 @@ Deno.serve(async (req: Request) => {
     .from('nodes')
     .update(updates)
     .eq('node_code', body.node_code.toUpperCase())
-    .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume, nft_wallet_address, nft_grid_size, nft_carousel_enabled, nft_slideshow_secs, nft_pinlist, screen_order')
+    .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume, screen_brightness, screen_always_on, screen_timeout_mins, nft_wallet_address, nft_grid_size, nft_carousel_enabled, nft_slideshow_secs, nft_pinlist, screen_order')
     .single()
 
   if (error) {
