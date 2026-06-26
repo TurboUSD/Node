@@ -95,11 +95,14 @@ export default function SetupPage() {
           {/* ── RP2040 sub-chip flash ── */}
           <div style={{ marginTop: 20, padding: '16px', background: 'rgba(255,255,255,0.04)', borderRadius: 10, border: `1px solid ${C.border}` }}>
             <p style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>
-              🔔 Also flash the buzzer chip (RP2040) — one-time, takes 30 seconds
+              🔔 Also flash the sensor &amp; buzzer chip (RP2040) — one-time, takes 30 seconds
             </p>
             <p style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-              The SenseCAP D1 has a second chip that controls the alarm buzzer.
-              It can't be flashed via browser — you need to drag a file onto it like a USB drive.
+              The SenseCAP D1 has a second chip (the RP2040) that drives the alarm buzzer
+              <strong style={{ color: C.text }}> and reads the temperature &amp; humidity sensor</strong>.
+              Until you flash it, the alarm stays silent and the temp/humidity on the Home screen
+              show as <code style={s.code}>--</code>. It can&apos;t be flashed via browser — you
+              need to drag a file onto it like a USB drive.
             </p>
             <ol style={{ ...s.ol, marginBottom: 12 }}>
               <li>
