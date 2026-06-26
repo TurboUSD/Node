@@ -82,7 +82,7 @@
 #define LV_USE_DROPDOWN    1
 #define LV_USE_IMG         1
 #define LV_USE_IMGBTN      0
-#define LV_USE_KEYBOARD    0
+#define LV_USE_KEYBOARD    1   /* screen_tickers.h + screen_nft.h use lv_keyboard_create */
 #define LV_USE_LABEL       1
 #define LV_USE_LED         0
 #define LV_USE_LINE        1
@@ -97,7 +97,7 @@
 #define LV_USE_SPINBOX     0
 #define LV_USE_SPINNER     1
 #define LV_USE_SWITCH      1
-#define LV_USE_TEXTAREA    0
+#define LV_USE_TEXTAREA    1   /* screen_tickers.h + screen_nft.h use lv_textarea_create */
 #define LV_USE_TABLE       0
 #define LV_USE_TABVIEW     1
 #define LV_USE_TILEVIEW    1   /* ui_manager.h screen-swipe navigation */
