@@ -2,8 +2,16 @@
 
 // app/setup/page.tsx — network.turbousd.com/setup
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+
+const GITHUB_REPO = 'turbousd/node'
+
+type LatestRelease = {
+  version: string          // e.g. "0.1.0" (parsed from the fw-<ver>-<run> tag)
+  publishedAt: string      // ISO date
+  rp2040Url: string | null // direct .uf2 asset URL for this release
+}
 
 const C = {
   green:   '#43e397',
@@ -20,7 +28,41 @@ const C = {
 
 export default function SetupPage() {
   const [nodeCode, setNodeCode] = useState('')
+  const [latest, setLatest] = useState<LatestRelease | null>(null)
+  const [latestError, setLatestError] = useState(false)
   const router = useRouter()
+
+  // Pull the newest published release straight from GitHub so this page always
+  // reflects what's actually downloadable — no version numbers baked into the
+  // markup that silently go stale. Both the ESP32 (via esp-web-tools) and the
+  // RP2040 .uf2 are served from the release's /latest/ URLs regardless, so this
+  // is purely to *show* the version and link the correctly-named .uf2 asset.
+  useEffect(() => {
+    let cancelled = false
+    fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json' },
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data: { tag_name?: string; published_at?: string; assets?: { name: string; browser_download_url: string }[] }) => {
+        if (cancelled) return
+        // Release tags look like "fw-0.1.0-12" → show just the firmware version.
+        const version = (data.tag_name ?? '').replace(/^fw-/, '').replace(/-\d+$/, '') || '—'
+        const uf2 = data.assets?.find((a) => /^rp2040-.*\.uf2$/.test(a.name))
+        setLatest({
+          version,
+          publishedAt: data.published_at ?? '',
+          rp2040Url: uf2?.browser_download_url ?? null,
+        })
+      })
+      .catch(() => { if (!cancelled) setLatestError(true) })
+    return () => { cancelled = true }
+  }, [])
+
+  // Always-valid fallback URL (GitHub redirects /latest/download to the newest
+  // release); used if the API call is rate-limited or fails.
+  const rp2040DownloadUrl =
+    latest?.rp2040Url ??
+    `https://github.com/${GITHUB_REPO}/releases/latest/download/rp2040-${latest?.version ?? '0.1.0'}.uf2`
 
   function goToNode(e: React.FormEvent) {
     e.preventDefault()
@@ -62,9 +104,39 @@ export default function SetupPage() {
             Firefox and Safari don't support WebSerial yet.
           </div>
 
+          {/* Live "latest version" indicator so it's obvious what you're installing */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 4px', fontSize: 13, color: C.muted }}>
+            <span>Latest firmware:</span>
+            {latestError ? (
+              <span>
+                see{' '}
+                <a href={`https://github.com/${GITHUB_REPO}/releases/latest`} target="_blank" rel="noreferrer" style={s.link}>
+                  GitHub Releases
+                </a>
+              </span>
+            ) : latest ? (
+              <span style={{ color: C.green, fontWeight: 700 }}>
+                v{latest.version}
+                {latest.publishedAt && (
+                  <span style={{ color: C.muted, fontWeight: 400 }}>
+                    {' '}· released {new Date(latest.publishedAt).toLocaleDateString()}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span style={{ opacity: 0.6 }}>checking…</span>
+            )}
+          </div>
+          <p style={{ fontSize: 12, color: C.muted, opacity: 0.7, margin: '0 0 14px' }}>
+            Both the Install button and the sensor-chip download below always fetch this latest version.
+          </p>
+
           <div style={s.flashBox}>
+            {/* Manifest comes from the latest Release (CI bumps its version
+                field), not the static copy on main, so the version shown in the
+                flasher dialog matches what's actually being installed. */}
             <esp-web-install-button
-              manifest="https://raw.githubusercontent.com/turbousd/node/main/firmware-esp32/manifest.json"
+              manifest="https://github.com/turbousd/node/releases/latest/download/manifest.json"
             >
               <button slot="activate" style={s.flashBtn}>
                 ⚡ Install TurboUSD Firmware
@@ -73,6 +145,29 @@ export default function SetupPage() {
                 Your browser doesn't support WebSerial. Please use Chrome or Edge on desktop.
               </span>
             </esp-web-install-button>
+          </div>
+
+          {/* Explains the flasher's built-in "Erase device?" prompt */}
+          <div style={{ marginTop: 14, padding: '14px 16px', background: 'rgba(91,141,238,0.08)', borderRadius: 10, border: `1px solid ${C.border}` }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>
+              The flasher will ask: “Erase device? All data will be lost.”
+            </p>
+            <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.55, marginBottom: 8 }}>
+              That prompt comes from the flashing tool, not from us. Here&apos;s when to say yes:
+            </p>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: C.muted, lineHeight: 1.55 }}>
+              <li>
+                <strong style={{ color: C.text }}>First time on a brand-new device</strong> (still on the
+                factory firmware): <strong style={{ color: C.text }}>erase</strong> — it clears the old
+                factory data for a clean start.
+              </li>
+              <li style={{ marginTop: 4 }}>
+                <strong style={{ color: C.text }}>Updating a device that already runs TurboUSD</strong>:{' '}
+                <strong style={{ color: C.text }}>don&apos;t erase</strong>. Erasing wipes your saved WiFi,
+                node identity and settings, so you&apos;d have to set the device up from scratch. A normal
+                update keeps everything.
+              </li>
+            </ul>
           </div>
 
           <details style={s.details}>
@@ -117,7 +212,7 @@ export default function SetupPage() {
               </li>
             </ol>
             <a
-              href="https://github.com/turbousd/node/releases/latest/download/rp2040-0.1.0.uf2"
+              href={rp2040DownloadUrl}
               download
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -126,7 +221,7 @@ export default function SetupPage() {
                 cursor: 'pointer',
               }}
             >
-              ⬇ Download rp2040-0.1.0.uf2
+              ⬇ Download {latest ? `rp2040-${latest.version}.uf2` : 'latest RP2040 firmware'}
             </a>
             <p style={{ marginTop: 10, fontSize: 12, color: C.muted, opacity: 0.7 }}>
               Can&apos;t see the BOOT button? It&apos;s the small button on the short top edge, next to the USB-C port.
