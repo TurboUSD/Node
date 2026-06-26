@@ -315,6 +315,20 @@ private:
             storage.setAlarmVolume(cfg["alarm_volume"].as<uint8_t>());
         }
 
+        // Screen brightness (stored in NVS; main.cpp calls uiManager.applyStoredBrightness()
+        // after sendHeartbeat() so the new value takes effect immediately, not just on next boot)
+        if (!cfg["screen_brightness"].isNull()) {
+            storage.setScreenBrightness(cfg["screen_brightness"].as<uint8_t>());
+        }
+
+        // Screen timeout settings (always-on toggle + inactivity timeout in minutes)
+        if (!cfg["screen_always_on"].isNull()) {
+            storage.setScreenAlwaysOn(cfg["screen_always_on"].as<bool>());
+        }
+        if (!cfg["screen_timeout_mins"].isNull()) {
+            storage.setScreenTimeoutMins(cfg["screen_timeout_mins"].as<uint8_t>());
+        }
+
         // NFT Gallery settings
         if (!cfg["nft_wallet_address"].isNull()) storage.setNftWallet(cfg["nft_wallet_address"].as<String>());
         if (!cfg["nft_grid_size"].isNull())      storage.setNftGridSize(cfg["nft_grid_size"].as<uint8_t>());

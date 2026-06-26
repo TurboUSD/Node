@@ -50,6 +50,22 @@ public:
     uint8_t getAlarmVolume()           { return prefs.getUChar("alarm_vol", 2); }
     void    setAlarmVolume(uint8_t v)  { prefs.putUChar("alarm_vol", constrain(v, 1, 5)); }
 
+    // Screen brightness: 1 (dim) – 5 (full). Default 5 = maximum, matches
+    // the factory firmware which drives GPIO 45 HIGH permanently.
+    uint8_t getScreenBrightness()          { return prefs.getUChar("screen_brt", 5); }
+    void    setScreenBrightness(uint8_t v) { prefs.putUChar("screen_brt", constrain(v, 1, 5)); }
+
+    // Screen always-on: when true the backlight never turns off automatically.
+    // Default true (matches factory behaviour).
+    bool getScreenAlwaysOn()          { return prefs.getBool("scr_always", true); }
+    void setScreenAlwaysOn(bool v)    { prefs.putBool("scr_always", v); }
+
+    // Screen timeout in minutes: how long after the last touch before the
+    // backlight is turned off. Only used when getScreenAlwaysOn() == false.
+    // Options: 1, 5, 10, 30. Default 10.
+    uint8_t getScreenTimeoutMins()          { return prefs.getUChar("scr_timeout", 10); }
+    void    setScreenTimeoutMins(uint8_t v) { prefs.putUChar("scr_timeout", v); }
+
     // Bitmask of active alarm days: bit0=Mon, bit1=Tue, …, bit6=Sun (ISO order).
     // Default 0x7F = all seven days active.
     uint8_t getAlarmDays() { return prefs.getUChar(NVS_KEY_ALARM_DAYS, 0x7F); }

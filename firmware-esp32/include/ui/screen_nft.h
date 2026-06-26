@@ -169,13 +169,13 @@ public:
 
         // ── Slideshow timer (fires every second, counts down) ─────────────────
         lv_timer_create([](lv_timer_t* t) {
-            NftScreen* self = (NftScreen*)lv_timer_get_user_data(t);
+            NftScreen* self = (NftScreen*)t->user_data;
             if (self) self->_onSlideshowTick();
         }, 1000, this);
 
         // ── Pending-result poll timer ─────────────────────────────────────────
         lv_timer_create([](lv_timer_t* t) {
-            NftScreen* self = (NftScreen*)lv_timer_get_user_data(t);
+            NftScreen* self = (NftScreen*)t->user_data;
             if (self) self->_pollPending();
         }, 100, this);
 

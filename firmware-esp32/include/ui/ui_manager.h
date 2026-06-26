@@ -63,6 +63,7 @@ public:
     void loop() {
         lv_timer_handler();
         updateClockIfNeeded();
+        _checkScreenTimeout();
     }
 
     void showProvisioningScreen() {
@@ -163,10 +164,35 @@ public:
 
     std::function<void()> onAlarmDismissed;
 
+    // Called from the touch input driver whenever the screen is physically touched.
+    // Resets the inactivity timer and wakes the backlight if it was off.
+    void _onTouchActivity() {
+        _lastTouchMs  = millis();
+        if (!_screenIsOn) {
+            _screenIsOn = true;
+            applyStoredBrightness();
+        }
+    }
+
+    // Checked every loop() tick. Turns off the backlight after the configured
+    // idle period when always-on mode is disabled.
+    void _checkScreenTimeout() {
+        if (storage.getScreenAlwaysOn()) return;
+        uint32_t timeoutMs = (uint32_t)storage.getScreenTimeoutMins() * 60UL * 1000UL;
+        if (_screenIsOn && (millis() - _lastTouchMs > timeoutMs)) {
+            _screenIsOn = false;
+            ledcWrite(LCD_PIN_BL, 0);
+        }
+    }
+
 private:
     ScreenId currentScreen = ScreenId::CLOCK;
     lv_obj_t* screens[(int)ScreenId::COUNT] = { nullptr };
     lv_obj_t* alarmOverlay = nullptr;
+
+    // Screen timeout state
+    uint32_t _lastTouchMs = 0;     // millis() of the last touch event
+    bool     _screenIsOn  = true;  // false while backlight is off due to timeout
 
     // Swipe order: _swipeOrder[swipe_pos] = ScreenId value.
     // Default (matches the intended UX order):
@@ -555,8 +581,9 @@ private:
         //     physical orientation (portrait, connector at bottom).
         static lv_indev_drv_t indevDrv;
         lv_indev_drv_init(&indevDrv);
-        indevDrv.type = LV_INDEV_TYPE_POINTER;
-        indevDrv.read_cb = [](lv_indev_drv_t*, lv_indev_data_t* data) {
+        indevDrv.type      = LV_INDEV_TYPE_POINTER;
+        indevDrv.user_data = this;   // so the lambda can reach _onTouchActivity()
+        indevDrv.read_cb   = [](lv_indev_drv_t* drv, lv_indev_data_t* data) {
             Wire.beginTransmission(TOUCH_I2C_ADDR);
             Wire.write(0x02);  // TD_STATUS register: number of touch points
             Wire.endTransmission(false);
@@ -571,6 +598,8 @@ private:
                     data->point.x = (lv_coord_t)((xh << 8) | xl);
                     data->point.y = (lv_coord_t)((yh << 8) | yl);
                     data->state   = LV_INDEV_STATE_PRESSED;
+                    // Any touch resets the inactivity timer (and wakes screen if off)
+                    static_cast<UiManager*>(drv->user_data)->_onTouchActivity();
                 } else {
                     data->state = LV_INDEV_STATE_RELEASED;
                 }
@@ -580,9 +609,27 @@ private:
         };
         lv_indev_drv_register(&indevDrv);
 
-        // 11. Enable backlight (active HIGH, GPIO 45).
-        pinMode(LCD_PIN_BL, OUTPUT);
-        digitalWrite(LCD_PIN_BL, HIGH);
+        // 11. Enable backlight via LEDC PWM (GPIO 45, active HIGH).
+        //     5 kHz / 8-bit resolution gives smooth dimming with no audible whine.
+        //     Arduino-ESP32 3.x API: ledcAttach(pin, freq, bits) + ledcWrite(pin, duty).
+        ledcAttach(LCD_PIN_BL, 5000, 8);
+        applyStoredBrightness();
+    }
+
+    // Set backlight brightness level 1–5 and apply immediately via LEDC PWM.
+    // Duty cycle table (8-bit, 0-255): 10 / 27 / 51 / 73 / 100 percent.
+    // Level 5 (255) reproduces the factory firmware's full-on behaviour.
+    void setScreenBrightness(uint8_t level) {
+        static const uint8_t DUTY[5] = { 25, 70, 130, 185, 255 };
+        level = constrain(level, 1, 5);
+        ledcWrite(LCD_PIN_BL, DUTY[level - 1]);
+    }
+
+    // Reads brightness from NVS and applies it immediately.
+    // Call once at boot (already done inside begin()) and after a heartbeat
+    // config sync that may have updated the stored value.
+    void applyStoredBrightness() {
+        setScreenBrightness(storage.getScreenBrightness());
     }
 
     void dismissAlarmOverlay() {

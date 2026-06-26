@@ -78,9 +78,11 @@ public:
     lv_chart_series_t* getSeries() { return projectionSeries; }
     lv_obj_t* getChart() { return chart; }
 
-private:
-    SharedHeaderRefs header;
+public:
+    SharedHeaderRefs header;   // accessed by UIManager::refreshSharedAlarmIcon
     SharedFooterRefs footer;
+
+private:
     lv_obj_t* captionLabel = nullptr;
     lv_obj_t* projectedValueLabel = nullptr;
     lv_obj_t* detailLabel = nullptr;

@@ -1005,7 +1005,7 @@ private:
             deserializeJson(doc, http.getStream());
             JsonObject pair = doc["pairs"][0];
             if (!pair.isNull()) {
-                te.price_usd  = atof(pair["priceUsd"].as<const char*>() ? pair["priceUsd"] : "0");
+                te.price_usd  = atof(pair["priceUsd"] | "0");
                 te.change_24h = pair["priceChange"]["h24"] | 0.0f;
                 te.fdv        = pair["fdv"] | 0.0f;
                 te.live_loaded = true;
@@ -1087,7 +1087,7 @@ private:
     // acquiring the LVGL mutex. Pattern: lv_timer_create(_pollPending, 100, this)
 public:
     static void pollPending(lv_timer_t* timer) {
-        auto* self = static_cast<TickerScreen*>(lv_timer_get_user_data(timer));
+        auto* self = static_cast<TickerScreen*>(timer->user_data);
         if (!self || self->_pending.type == PR_NONE) return;
 
         PendingResultType type = self->_pending.type;

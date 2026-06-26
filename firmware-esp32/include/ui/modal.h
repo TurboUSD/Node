@@ -40,7 +40,8 @@ inline void closeModal(lv_obj_t* card) {
 inline lv_obj_t* addModalButton(lv_obj_t* card, const char* label, bool primary) {
     lv_obj_t* btn = lv_btn_create(card);
     lv_obj_set_width(btn, LV_PCT(100));
-    lv_obj_set_style_bg_color(btn, primary ? lv_color_hex(0x2eaa50) : lv_color_transparent(), 0);
+    lv_obj_set_style_bg_color(btn, primary ? lv_color_hex(0x2eaa50) : lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(btn, primary ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_color(btn, lv_color_hex(0x6a6a6e), 0);
     lv_obj_set_style_border_width(btn, primary ? 0 : 1, 0);
     lv_obj_set_style_radius(btn, 8, 0);
@@ -144,9 +145,11 @@ struct PrefTogglePair {
 };
 
 inline void applyPrefToggleColors(PrefTogglePair* pair, bool leftActive) {
-    lv_obj_set_style_bg_color(pair->leftBtn, leftActive ? lv_color_hex(0x2eaa50) : lv_color_transparent(), 0);
+    lv_obj_set_style_bg_color(pair->leftBtn, leftActive ? lv_color_hex(0x2eaa50) : lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(pair->leftBtn, leftActive ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(pair->leftLbl, leftActive ? lv_color_hex(0x06150a) : lv_color_hex(0x9a9a9e), 0);
-    lv_obj_set_style_bg_color(pair->rightBtn, !leftActive ? lv_color_hex(0x2eaa50) : lv_color_transparent(), 0);
+    lv_obj_set_style_bg_color(pair->rightBtn, !leftActive ? lv_color_hex(0x2eaa50) : lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(pair->rightBtn, !leftActive ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(pair->rightLbl, !leftActive ? lv_color_hex(0x06150a) : lv_color_hex(0x9a9a9e), 0);
 }
 

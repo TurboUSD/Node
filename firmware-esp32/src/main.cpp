@@ -174,6 +174,9 @@ void loop() {
     if (nodeRegistered && (now - lastHeartbeatAt > HEARTBEAT_INTERVAL_MS)) {
         uint32_t uptimeSeconds = (now - bootMillis) / 1000;
         apiClient.sendHeartbeat(uptimeSeconds);
+        // Heartbeat response may have updated screen_brightness in NVS via
+        // applyServerConfig(); apply it now so the change is immediate.
+        uiManager.applyStoredBrightness();
         lastHeartbeatAt = now;
     }
 

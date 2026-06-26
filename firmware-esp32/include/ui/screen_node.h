@@ -178,9 +178,11 @@ public:
         lv_label_set_text(pendingBlock.centerLabel, buf);
     }
 
-private:
-    SharedHeaderRefs header;
+public:
+    SharedHeaderRefs header;   // accessed by UIManager::refreshSharedAlarmIcon
     SharedFooterRefs footer;
+
+private:
     lv_obj_t* nodeNameLabel = nullptr;
     lv_obj_t* verifyBadge = nullptr;
     lv_obj_t* uptimeValueLabel = nullptr;
