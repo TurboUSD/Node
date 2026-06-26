@@ -91,6 +91,45 @@ export default function SetupPage() {
               </p>
             </div>
           </details>
+
+          {/* ── RP2040 sub-chip flash ── */}
+          <div style={{ marginTop: 20, padding: '16px', background: 'rgba(255,255,255,0.04)', borderRadius: 10, border: `1px solid ${C.border}` }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>
+              🔔 Also flash the buzzer chip (RP2040) — one-time, takes 30 seconds
+            </p>
+            <p style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
+              The SenseCAP D1 has a second chip that controls the alarm buzzer.
+              It can't be flashed via browser — you need to drag a file onto it like a USB drive.
+            </p>
+            <ol style={{ ...s.ol, marginBottom: 12 }}>
+              <li>
+                <strong style={{ color: C.text }}>Enter bootloader mode:</strong>{' '}
+                Hold the <strong style={{ color: C.yellow }}>BOOT button</strong> (small button on the top edge of the device),
+                then connect the USB-C cable to your computer while keeping it held. Release after 2 seconds.
+                A drive called <code style={s.code}>RPI-RP2</code> will appear on your computer.
+              </li>
+              <li>
+                Download the file below and <strong style={{ color: C.text }}>drag it onto the RPI-RP2 drive</strong>.
+                The drive will disappear and the device restarts automatically — that means it worked.
+              </li>
+            </ol>
+            <a
+              href="https://github.com/turbousd/node/releases/latest/download/rp2040-0.1.0.uf2"
+              download
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '9px 18px', borderRadius: 8, fontSize: 14, fontWeight: 600,
+                background: C.yellow, color: '#000', textDecoration: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              ⬇ Download rp2040-0.1.0.uf2
+            </a>
+            <p style={{ marginTop: 10, fontSize: 12, color: C.muted, opacity: 0.7 }}>
+              Can&apos;t see the BOOT button? It&apos;s the small button on the short top edge, next to the USB-C port.
+              If the RPI-RP2 drive doesn&apos;t appear, try a different USB cable (some are charge-only).
+            </p>
+          </div>
         </StepCard>
 
         {/* ── Step 2: WiFi ── */}
