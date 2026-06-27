@@ -70,12 +70,29 @@ jobs:
           SHA=$(sha256sum firmware-esp32/.pio/build/sensecap_indicator_d1/firmware.bin | awk '{print $1}')
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Rename binary for release
+      - name: Package release binaries (OTA app image + web-flasher factory image)
         run: |
-          cp firmware-esp32/.pio/build/sensecap_indicator_d1/firmware.bin esp32s3-${{ steps.extract_version.outputs.version }}.bin
-          # Also keep a fixed-name copy so manifest.json can use a stable URL
-          # (releases/latest/download/firmware-esp32s3.bin always points to newest)
-          cp firmware-esp32/.pio/build/sensecap_indicator_d1/firmware.bin firmware-esp32s3.bin
+          pip install "esptool>=4,<5" --quiet   # 4.x keeps the merge_bin / --flash_* syntax used below
+          BUILD=firmware-esp32/.pio/build/sensecap_indicator_d1
+          BOOT_APP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -1)
+
+          # 1) OTA image = the bare app binary. The device's OTA updater (Update.h)
+          #    writes this to the inactive app slot, so it must stay app-only.
+          cp $BUILD/firmware.bin esp32s3-${{ steps.extract_version.outputs.version }}.bin
+
+          # 2) Web-flasher image = a FULL factory image (bootloader + partition
+          #    table + otadata + app) starting at flash address 0x0. esp-web-tools
+          #    writes the manifest's part verbatim at offset 0, so it must be the
+          #    whole image — shipping the bare app here (the previous bug) put the
+          #    app where the bootloader belongs, causing "SHA-256 comparison failed"
+          #    and a TG0WDT/RTCWDT boot loop (black screen). Offsets match
+          #    firmware-esp32/partitions.csv.
+          python -m esptool --chip esp32s3 merge_bin -o firmware-esp32s3.bin \
+            --flash_mode dio --flash_size 8MB \
+            0x0     "$BUILD/bootloader.bin" \
+            0x8000  "$BUILD/partitions.bin" \
+            0xe000  "$BOOT_APP0" \
+            0x10000 "$BUILD/firmware.bin"
 
       - name: Update manifest version
         run: |
