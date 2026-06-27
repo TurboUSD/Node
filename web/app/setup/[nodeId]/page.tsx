@@ -533,6 +533,25 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
             </>
           )}
         </Section>
+
+        {/* ── Device buttons (info) ── */}
+        <Section title="Device buttons" accent={C.muted}>
+          <p style={s.bodyText}>
+            Your SenseCAP D1 has two buttons:
+          </p>
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 14, color: C.muted, lineHeight: 1.6 }}>
+            <li>
+              <strong style={{ color: C.text }}>Top button</strong> — short press turns the screen
+              off/on (the node keeps mining in the background); hold 3 seconds to put it to sleep,
+              press again to wake. It <strong style={{ color: C.text }}>won&apos;t</strong> erase your
+              firmware — there&apos;s no reset shortcut, on purpose.
+            </li>
+            <li style={{ marginTop: 4 }}>
+              <strong style={{ color: C.text }}>Bottom pinhole</strong> (next to USB-C) — only used when
+              re-flashing the sensor chip; you press it with a paperclip during setup.
+            </li>
+          </ul>
+        </Section>
       </div>
     </div>
   )

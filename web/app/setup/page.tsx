@@ -30,6 +30,7 @@ export default function SetupPage() {
   const [nodeCode, setNodeCode] = useState('')
   const [latest, setLatest] = useState<LatestRelease | null>(null)
   const [latestError, setLatestError] = useState(false)
+  const [refImageOpen, setRefImageOpen] = useState(false)
   const router = useRouter()
 
   // Pull the newest published release straight from GitHub so this page always
@@ -95,8 +96,10 @@ export default function SetupPage() {
         <StepCard number="1" title="Flash the firmware" accent={C.green}>
           <p style={s.stepBody}>
             Connect your SenseCAP D1 (the physical device) to your computer via USB-C, then click the
-            button below. Your browser will ask you to select a device — pick the one that
-            says "USB Serial" or "CP210x". The flash takes about 30 seconds.
+            button below. Your browser will ask you to select a device — pick the one named{' '}
+            <strong style={{ color: C.text }}>“USB Serial” / “CP210x”</strong>,{' '}
+            <strong style={{ color: C.text }}>not</strong> the one named “RP2040 / INDICATOR” (that&apos;s the
+            other chip and the flash will time out). The flash takes about 30 seconds.
           </p>
           <div style={s.browserNote}>
             <span style={{ color: C.yellow }}>⚠</span>{' '}
@@ -205,9 +208,18 @@ export default function SetupPage() {
             <ol style={{ ...s.ol, marginBottom: 12 }}>
               <li>
                 <strong style={{ color: C.text }}>Enter bootloader mode:</strong>{' '}
-                Hold the <strong style={{ color: C.yellow }}>BOOT button</strong> (small button on the top edge of the device),
-                then connect the USB-C cable to your computer while keeping it held. Release after 2 seconds.
-                A drive called <code style={s.code}>RPI-RP2</code> will appear on your computer.
+                With the device <strong style={{ color: C.text }}>unplugged</strong>, find the tiny{' '}
+                <strong style={{ color: C.yellow }}>pinhole button on the bottom edge</strong>, next to the
+                USB-C port, and press it in with a paperclip or needle.{' '}
+                <strong style={{ color: C.text }}>Keep it held</strong> while you plug in the USB-C cable,
+                then release. A drive called <code style={s.code}>RPI-RP2</code> will appear on your computer.{' '}
+                <button
+                  type="button"
+                  onClick={() => setRefImageOpen(true)}
+                  style={{ background: 'none', border: 'none', padding: 0, color: C.yellow, cursor: 'pointer', textDecoration: 'underline', font: 'inherit' }}
+                >
+                  See reference image →
+                </button>
               </li>
               <li>
                 Download the file below and <strong style={{ color: C.text }}>drag it onto the RPI-RP2 drive</strong>.
@@ -227,8 +239,9 @@ export default function SetupPage() {
               ⬇ Download {latest ? `rp2040-${latest.version}.uf2` : 'latest RP2040 firmware'}
             </a>
             <p style={{ marginTop: 10, fontSize: 12, color: C.muted, opacity: 0.7 }}>
-              Can&apos;t see the BOOT button? It&apos;s the small button on the short top edge, next to the USB-C port.
-              If the RPI-RP2 drive doesn&apos;t appear, try a different USB cable (some are charge-only).
+              No <code style={s.code}>RPI-RP2</code> drive? It only appears while the pinhole button is held
+              <em> as</em> you plug in — press first, then connect. If it still doesn&apos;t show, try a
+              different USB cable (some are charge-only).
             </p>
           </div>
         </StepCard>
@@ -295,6 +308,31 @@ export default function SetupPage() {
           <a href="https://github.com/turbousd/node" target="_blank" rel="noreferrer" style={s.link}>open source</a>.
         </p>
       </div>
+
+      {/* Reference-image lightbox for the RP2040 bootloader step */}
+      {refImageOpen && (
+        <div
+          onClick={() => setRefImageOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.85)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', padding: 20,
+            cursor: 'zoom-out',
+          }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640, width: '100%' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/rp2040-boot-reference.png"
+              alt="RP2040 bootloader: hold the pinhole button on the bottom edge while connecting USB, then drag the .uf2 onto the RPI-RP2 drive"
+              style={{ width: '100%', height: 'auto', borderRadius: 10, border: `1px solid ${C.border}`, background: '#000' }}
+            />
+            <p style={{ textAlign: 'center', marginTop: 10, fontSize: 12, color: C.muted }}>
+              Tap anywhere to close · diagram from Seeed Studio
+            </p>
+          </div>
+        </div>
+      )}
 
       <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module" />
 
