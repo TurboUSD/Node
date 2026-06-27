@@ -90,6 +90,24 @@ public:
     String getTimeFormat() { return prefs.getString(NVS_KEY_TIME_FMT, "24H"); }
     void setTimeFormat(const String& fmt) { prefs.putString(NVS_KEY_TIME_FMT, fmt); }
 
+    // Week start: 0 = Sunday, 1 = Monday. Used by the calendar popup and the
+    // alarm day-of-week strip. Default Monday (ISO). Auto-set from geo-IP unless
+    // the user has locked locale (see getLocaleLocked).
+    uint8_t getWeekStart() { return prefs.getUChar(NVS_KEY_WEEK_START, 1); }
+    void setWeekStart(uint8_t v) { prefs.putUChar(NVS_KEY_WEEK_START, v ? 1 : 0); }
+
+    // Timezone offset in seconds east of UTC, including current DST. Applied via
+    // configTime() so the clock + alarm run on local time. 0 = UTC (the value
+    // until the first successful geo-IP sync).
+    int32_t getTzOffsetSec() { return (int32_t)prefs.getInt(NVS_KEY_TZ_OFFSET, 0); }
+    void setTzOffsetSec(int32_t s) { prefs.putInt(NVS_KEY_TZ_OFFSET, s); }
+
+    // Set true the moment the user changes any locale setting (temp unit, date/
+    // time format, week start) on the device. Once locked, geo-IP auto-config
+    // stops touching those so it can never stomp the user's explicit choice.
+    bool getLocaleLocked() { return prefs.getBool(NVS_KEY_LOCALE_LOCKED, false); }
+    void setLocaleLocked(bool v) { prefs.putBool(NVS_KEY_LOCALE_LOCKED, v); }
+
     // --- Per-section screen layout variant (vertical-swipe alternates) ---
     int getScreenVariant(const String& sectionKey) {
         String key = String(NVS_KEY_SCREEN_VARIANT_PREFIX) + sectionKey;

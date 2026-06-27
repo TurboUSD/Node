@@ -43,6 +43,12 @@
 #define ENDPOINT_TREASURY_DATA      "https://treasury.turbousd.com/api/treasury-data"
 #define ENDPOINT_US_DEBT            "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny?sort=-record_date&page[size]=1"
 
+// Geo-IP locale autodetect. Free, no API key, HTTP (no TLS needed). Returns the
+// device's country + current UTC offset (incl. DST) based on its public IP, used
+// to auto-pick timezone, temp unit, date/time format and week-start on first
+// connect. `offset` is seconds east of UTC for the device's IP *right now*.
+#define ENDPOINT_GEO_IP            "http://ip-api.com/json/?fields=status,countryCode,offset"
+
 // ---------------------------------------------------------------------
 // Timing
 // ---------------------------------------------------------------------
@@ -52,6 +58,7 @@
 #define US_DEBT_REFRESH_MS           (60UL * 60UL * 1000UL)     // every hour (slow-moving figure)
 #define MINING_FEED_REFRESH_MS       (15UL * 1000UL)            // every 15s while on the Node screen
 #define SENSOR_POLL_INTERVAL_MS      (10UL * 1000UL)            // poll RP2040 for temp/humidity every 10s
+#define GEO_LOCALE_SYNC_INTERVAL_MS  (12UL * 60UL * 60UL * 1000UL) // re-check geo-IP twice a day (catches travel + DST)
 #define OTA_CHECK_INTERVAL_MS        (24UL * 60UL * 60UL * 1000UL) // once a day
 #define NTP_RESYNC_INTERVAL_MS       (6UL * 60UL * 60UL * 1000UL)  // every 6 hours
 
@@ -85,6 +92,9 @@
 #define NVS_KEY_TEMP_UNIT     "temp_unit"      // 'C' or 'F'
 #define NVS_KEY_DATE_FMT      "date_fmt"       // "DD/MM" or "MM/DD"
 #define NVS_KEY_TIME_FMT      "time_fmt"       // "24H" or "AMPM"
+#define NVS_KEY_WEEK_START    "week_start"     // uint8_t: 0 = Sunday, 1 = Monday
+#define NVS_KEY_TZ_OFFSET     "tz_offset"      // int32_t: seconds east of UTC (incl. current DST)
+#define NVS_KEY_LOCALE_LOCKED "loc_locked"     // bool: user changed a locale setting → stop geo auto-config
 #define NVS_KEY_SCREEN_VARIANT_PREFIX "scr_var_" // + section key, for per-section layout variants
 
 // NFT gallery settings

@@ -749,7 +749,7 @@ private:
     void updateClockIfNeeded() {
         time_t now = time(nullptr);
         struct tm t;
-        gmtime_r(&now, &t);
+        localtime_r(&now, &t);  // local wall-clock (tz offset set via configTime/geo)
         if ((uint32_t)t.tm_sec == lastClockRedrawSecond) return;
         lastClockRedrawSecond = t.tm_sec;
 
@@ -895,10 +895,11 @@ private:
 
         // ── Day-of-week selector strip ────────────────────────────────────────
         // Layout: 7 squares (32×32) with 4px gap, centred.
-        // Display order depends on date format: DD/MM → Mon first; MM/DD → Sun first.
+        // Display order follows the week-start setting (auto-set from geo-IP,
+        // user-overridable): 0 = Sunday first, 1 = Monday first.
         // Storage bitmask: bit0=Mon, bit1=Tue, …, bit6=Sun (ISO).
         // dayOrder[display_pos] = bitmask_bit_index
-        bool sunFirst = (storage.getDateFormat() != "DD/MM");
+        bool sunFirst = (storage.getWeekStart() == 0);
 
         // Display order of bitmask-bit indices
         static const uint8_t dayOrderMon[7] = { 0, 1, 2, 3, 4, 5, 6 }; // Mon…Sun
@@ -1039,17 +1040,23 @@ private:
         lv_label_set_text(prefsTitle, "DISPLAY PREFERENCES");
         lv_obj_set_style_text_color(prefsTitle, lv_color_hex(0x9a9a9e), 0);
 
+        // Any manual change here locks locale, so the geo-IP autodetect can
+        // never later overwrite the user's explicit choice (setLocaleLocked).
         addPrefToggleRow(card, "TEMPERATURE", "\xC2\xB0" "C", "\xC2\xB0" "F",
                           storage.getTempUnit() == 'C',
-                          [](bool leftActive){ storage.setTempUnit(leftActive ? 'C' : 'F'); });
+                          [](bool leftActive){ storage.setTempUnit(leftActive ? 'C' : 'F'); storage.setLocaleLocked(true); });
 
         addPrefToggleRow(card, "DATE FORMAT", "DD/MM", "MM/DD",
                           storage.getDateFormat() == "DD/MM",
-                          [](bool leftActive){ storage.setDateFormat(leftActive ? "DD/MM" : "MM/DD"); });
+                          [](bool leftActive){ storage.setDateFormat(leftActive ? "DD/MM" : "MM/DD"); storage.setLocaleLocked(true); });
 
         addPrefToggleRow(card, "TIME FORMAT", "24H", "AM/PM",
                           storage.getTimeFormat() == "24H",
-                          [](bool leftActive){ storage.setTimeFormat(leftActive ? "24H" : "AMPM"); });
+                          [](bool leftActive){ storage.setTimeFormat(leftActive ? "24H" : "AMPM"); storage.setLocaleLocked(true); });
+
+        addPrefToggleRow(card, "WEEK STARTS", "MON", "SUN",
+                          storage.getWeekStart() == 1,
+                          [](bool leftActive){ storage.setWeekStart(leftActive ? 1 : 0); storage.setLocaleLocked(true); });
 
         lv_obj_t* closeBtn = addModalButton(card, "CLOSE", false);
         static lv_obj_t* sCard; sCard = card;

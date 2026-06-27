@@ -32,6 +32,7 @@ uint32_t lastOhlcvRefreshAt     = 0;
 uint32_t lastOtaCheckAt         = 0;
 uint32_t lastNtpSyncAt          = 0;
 uint32_t lastSensorPollAt       = 0;
+uint32_t lastGeoSyncAt          = 0;
 uint32_t bootMillis             = 0;
 
 bool nodeRegistered         = false;
@@ -47,10 +48,38 @@ String pendingOtaSha256;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 void syncTimeFromNtp() {
-    // UTC; the on-device clock screen formats per the user's saved
-    // date/time preferences, it doesn't need a timezone-aware NTP server.
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-    Serial.println("NTP sync requested.");
+    // Apply the saved timezone offset (set by geo-IP autodetect, or 0/UTC until
+    // the first geo sync) so localtime_r() returns the user's local wall-clock
+    // time. daylightOffset is 0 because the geo offset already includes DST.
+    configTime(storage.getTzOffsetSec(), 0, "pool.ntp.org", "time.nist.gov");
+    Serial.printf("NTP sync requested (tz offset %ld s).\n", (long)storage.getTzOffsetSec());
+}
+
+// Geo-IP → timezone + regional formatting defaults. Timezone always tracks the
+// device's location; the formatting choices (units, date/time order, week start)
+// are applied only until the user changes one (then locale is locked).
+void autoConfigureLocaleFromGeo() {
+    GeoLocale geo;
+    if (!apiClient.fetchGeoLocale(geo)) {
+        Serial.println("Geo locale: lookup failed, keeping current settings.");
+        return;
+    }
+
+    // Timezone (no manual TZ control exists on-device, so it always follows geo).
+    storage.setTzOffsetSec(geo.utcOffsetSec);
+    configTime(geo.utcOffsetSec, 0, "pool.ntp.org", "time.nist.gov");
+
+    if (storage.getLocaleLocked()) return; // user owns the formatting choices now
+
+    char tempUnit; String dateFmt, timeFmt; uint8_t weekStart;
+    ApiClient::localeDefaultsForCountry(geo.countryCode, tempUnit, dateFmt, timeFmt, weekStart);
+    storage.setTempUnit(tempUnit);
+    storage.setDateFormat(dateFmt);
+    storage.setTimeFormat(timeFmt);
+    storage.setWeekStart(weekStart);
+    Serial.printf("Geo locale: %s offset=%ld → %c %s %s wk%u\n",
+                  geo.countryCode, (long)geo.utcOffsetSec, tempUnit,
+                  dateFmt.c_str(), timeFmt.c_str(), (unsigned)weekStart);
 }
 
 void ensureNodeIsRegistered() {
@@ -83,7 +112,8 @@ void markBootValidIfNeeded() {
 void checkAlarmTrigger() {
     time_t now = time(nullptr);
     struct tm t;
-    gmtime_r(&now, &t); // UTC throughout; see syncTimeFromNtp()
+    localtime_r(&now, &t); // LOCAL time — the alarm must fire at the user's wall-clock
+                           // time, not UTC. Offset is set by syncTimeFromNtp()/geo.
 
     bool shouldFire = storage.getAlarmEnabled()
         && storage.isAlarmActiveToday(t.tm_wday)   // respects per-day bitmask
@@ -100,13 +130,13 @@ void checkAlarmTrigger() {
     }
 }
 
-// Returns true if the current UTC time is in the overnight OTA check window
+// Returns true if the current LOCAL time is in the overnight OTA check window
 // (02:00–04:00). We avoid daytime checks so a download doesn't compete with
 // the heartbeat / data-refresh traffic during normal use.
 bool isOtaCheckWindow() {
     time_t now = time(nullptr);
     struct tm t;
-    gmtime_r(&now, &t);
+    localtime_r(&now, &t);
     return (t.tm_hour >= 2 && t.tm_hour < 4);
 }
 
@@ -170,6 +200,14 @@ void loop() {
     if (lastNtpSyncAt == 0 || now - lastNtpSyncAt > NTP_RESYNC_INTERVAL_MS) {
         syncTimeFromNtp();
         lastNtpSyncAt = now;
+    }
+
+    // Geo-IP locale autodetect: once on first connect, then twice a day (to
+    // follow travel and DST changes). Sets the timezone always, and the regional
+    // formatting defaults only until the user overrides them.
+    if (lastGeoSyncAt == 0 || now - lastGeoSyncAt > GEO_LOCALE_SYNC_INTERVAL_MS) {
+        autoConfigureLocaleFromGeo();
+        lastGeoSyncAt = now;
     }
 
     if (nodeRegistered && (now - lastHeartbeatAt > HEARTBEAT_INTERVAL_MS)) {

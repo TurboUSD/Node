@@ -43,6 +43,12 @@ struct MiningFeedEntry {
     bool mined = false; // false = this is the currently-pending block
 };
 
+struct GeoLocale {
+    bool    valid = false;
+    char    countryCode[3] = {0, 0, 0};  // ISO 3166-1 alpha-2, uppercase
+    int32_t utcOffsetSec   = 0;          // seconds east of UTC, incl. current DST
+};
+
 class ApiClient {
 public:
     String getMacAddress() {
@@ -52,6 +58,59 @@ public:
         snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         return String(buf);
+    }
+
+    // Geo-IP lookup for locale autodetect. Returns the device's country code and
+    // current UTC offset (incl. DST) from its public IP. Best-effort: returns
+    // false on any network/parse error and the caller keeps current settings.
+    bool fetchGeoLocale(GeoLocale& out) {
+        HTTPClient http;
+        http.begin(ENDPOINT_GEO_IP);
+        http.setTimeout(8000);
+        int code = http.GET();
+        if (code != 200) { http.end(); return false; }
+
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, http.getStream());
+        http.end();
+        if (err) return false;
+
+        const char* status = doc["status"] | "";
+        if (strcmp(status, "success") != 0) return false;
+        const char* cc = doc["countryCode"] | "";
+        if (!cc[0] || !cc[1]) return false;
+
+        out.countryCode[0] = (char)toupper((unsigned char)cc[0]);
+        out.countryCode[1] = (char)toupper((unsigned char)cc[1]);
+        out.countryCode[2] = 0;
+        out.utcOffsetSec   = doc["offset"] | 0;
+        out.valid = true;
+        return true;
+    }
+
+    // Derive sensible display-locale defaults from an ISO 3166-1 country code.
+    // These are common regional conventions (CLDR-style), not hard rules — the
+    // user can override any of them, which then locks out further auto-config.
+    static void localeDefaultsForCountry(const char* cc,
+                                         char& tempUnit,       // 'C' or 'F'
+                                         String& dateFormat,   // "DD/MM" or "MM/DD"
+                                         String& timeFormat,   // "24H" or "AMPM"
+                                         uint8_t& weekStart)   // 0 = Sun, 1 = Mon
+    {
+        // Fahrenheit: US + a handful of territories/countries.
+        static const char* F[]   = {"US","BS","BZ","KY","PW","FM","MH","LR"};
+        // MM/DD date order: essentially the US (+ a couple of Pacific territories).
+        static const char* MDY[] = {"US","FM","MH","PW"};
+        // 12-hour clock is the everyday norm here; most of the world writes 24h.
+        static const char* H12[] = {"US","CA","AU","NZ","PH","IN","PK","BD","EG","SA","CO","MX"};
+        // Week starts Sunday across the Americas, Japan, Korea, Israel, India, ZA…
+        static const char* SUN[] = {"US","CA","MX","BR","AR","CO","PE","VE","CL",
+                                    "JP","KR","IL","IN","ZA","PH","HK","TW"};
+
+        tempUnit   = ccInList(cc, F,   sizeof(F)/sizeof(F[0]))   ? 'F' : 'C';
+        dateFormat = ccInList(cc, MDY, sizeof(MDY)/sizeof(MDY[0])) ? "MM/DD" : "DD/MM";
+        timeFormat = ccInList(cc, H12, sizeof(H12)/sizeof(H12[0])) ? "AMPM" : "24H";
+        weekStart  = ccInList(cc, SUN, sizeof(SUN)/sizeof(SUN[0])) ? 0 : 1;
     }
 
     // Called once, the very first time the device comes online with no
@@ -284,6 +343,13 @@ public:
     }
 
 private:
+    // True if the 2-char country code `cc` is in `list` (n entries).
+    static bool ccInList(const char* cc, const char* const* list, int n) {
+        for (int i = 0; i < n; i++)
+            if (cc[0] == list[i][0] && cc[1] == list[i][1]) return true;
+        return false;
+    }
+
     // Applies non-null fields from the heartbeat config payload to NVS.
     // Null JSON fields are skipped — they mean "not set yet, keep current value".
     void applyServerConfig(JsonObjectConst cfg) {
@@ -299,6 +365,21 @@ private:
         if (!cfg["time_format"].isNull()) {
             const char* tf = cfg["time_format"];
             if (tf) storage.setTimeFormat(String(tf));
+        }
+        if (!cfg["week_start"].isNull()) {
+            // Accept "mon"/"sun" or 1/0.
+            const char* ws = cfg["week_start"];
+            if (ws) storage.setWeekStart((ws[0] == 's' || ws[0] == 'S' || ws[0] == '0') ? 0 : 1);
+            else    storage.setWeekStart(cfg["week_start"].as<int>() == 0 ? 0 : 1);
+        }
+        if (!cfg["tz_offset_sec"].isNull()) {
+            storage.setTzOffsetSec(cfg["tz_offset_sec"].as<int32_t>());
+        }
+        // A server-pushed locale (from the node settings page) is the user's
+        // explicit choice → lock out geo-IP so it can't later override it.
+        if (!cfg["temp_unit"].isNull() || !cfg["date_format"].isNull() ||
+            !cfg["time_format"].isNull() || !cfg["week_start"].isNull()) {
+            storage.setLocaleLocked(true);
         }
 
         // Alarm settings
