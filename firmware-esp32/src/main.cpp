@@ -207,6 +207,12 @@ void loop() {
     // (including before WiFi is connected or while the provisioning portal is up).
     handleUserButton();
 
+    // Service LVGL on EVERY iteration, before any network early-return. Otherwise,
+    // while provisioning or before WiFi connects, lv_timer_handler() never runs and
+    // the RGB panel just shows uninitialized framebuffer garbage — which looks like
+    // a display/pin problem but is really "the UI was never drawn".
+    uiManager.loop();
+
     // While the provisioning portal is up, prioritize serving it.
     if (wifiManager.isPortalActive()) {
         wifiManager.loopPortal();
