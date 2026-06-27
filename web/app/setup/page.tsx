@@ -132,11 +132,14 @@ export default function SetupPage() {
           </p>
 
           <div style={s.flashBox}>
-            {/* Manifest comes from the latest Release (CI bumps its version
-                field), not the static copy on main, so the version shown in the
-                flasher dialog matches what's actually being installed. */}
+            {/* Manifest lives on main (always present). Its binary `path` uses
+                the releases/latest/download/ URL, so it still installs the
+                newest firmware. We do NOT point this at a release asset, because
+                if no release has published yet the manifest 404s and the flasher
+                shows "Failed to download manifest". The live version number above
+                is fetched separately from the GitHub API. */}
             <esp-web-install-button
-              manifest="https://github.com/turbousd/node/releases/latest/download/manifest.json"
+              manifest="https://raw.githubusercontent.com/turbousd/node/main/firmware-esp32/manifest.json"
             >
               <button slot="activate" style={s.flashBtn}>
                 ⚡ Install TurboUSD Firmware
