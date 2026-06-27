@@ -20,8 +20,9 @@ The project is fully open source and welcomes contributions at every layer: firm
 The device is a **[SenseCAP Indicator D1](https://wiki.seeedstudio.com/SenseCAP_Indicator_D1_Overview/)** by Seeed Studio. It was chosen because it ships with everything needed in one compact enclosure:
 
 <p align="center">
-  <img src="https://files.seeedstudio.com/wiki/SenseCAP/SenseCAP_Indicator/SenseCAP_Indicator_2.png" width="48%" alt="SenseCAP Indicator D1 — front" />
-  <img src="https://files.seeedstudio.com/wiki/SenseCAP/SenseCAP_Indicator/SenseCAP_Indicator_3.png" width="48%" alt="SenseCAP Indicator D1 — ports and buttons" />
+  <img src="https://files.seeedstudio.com/wiki/SenseCAP/SenseCAP_Indicator/SenseCAP_Indicator_2.png" width="70%" alt="SenseCAP Indicator D1 — back view: top Button, Grove ADC and Grove IIC ports, USB-C" />
+  <br /><br />
+  <img src="https://files.seeedstudio.com/wiki/SenseCAP/SenseCAP_Indicator/SenseCAP_Indicator_3.png" width="70%" alt="SenseCAP Indicator D1 — edge view: internal (RP2040 boot) button, USB-C, microSD card slot, antenna connector" />
 </p>
 
 | Component | Details |

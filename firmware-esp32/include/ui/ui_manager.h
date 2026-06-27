@@ -604,7 +604,10 @@ private:
         panelCfg.timings.vsync_pulse_width = LCD_VSYNC_PULSE_WIDTH;
         panelCfg.timings.vsync_back_porch  = LCD_VSYNC_BACK_PORCH;
         panelCfg.timings.vsync_front_porch = LCD_VSYNC_FRONT_PORCH;
-        panelCfg.timings.flags.pclk_active_neg = 0;
+        panelCfg.timings.flags.pclk_active_neg = 1;  // ST7701 on the D1 latches RGB
+                                                     // data on the falling PCLK edge.
+                                                     // Wrong polarity = on-screen garbage
+                                                     // even though the framebuffer is fine.
         panelCfg.flags.fb_in_psram = 1;
 
         ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
