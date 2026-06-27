@@ -53,6 +53,7 @@ private:
     bool portalActive = false;
     uint32_t _lastConnectedAt = 0;
     uint32_t _lastReconnectAt = 0;
+    String _scanOptions;   // cached <option> list, scanned once before the AP is up
 
     // Escape characters that would break the HTML value attribute or display.
     static String escapeHtml(const String& s) {
@@ -93,6 +94,22 @@ private:
 
     void startProvisioningPortal() {
         portalActive = true;
+
+        // Scan for nearby networks FIRST, in STA mode, and cache the result.
+        // Scanning is a blocking, channel-hopping operation; running it later
+        // from inside an HTTP handler (while the AP is up and a phone is mid-
+        // request) drops the AP and leaves the setup page blank. Doing it once
+        // up front, before softAP(), avoids that entirely.
+        WiFi.mode(WIFI_STA);
+        WiFi.disconnect();
+        int n = WiFi.scanNetworks();
+        _scanOptions = "";
+        for (int i = 0; i < n; i++) {
+            String safe = escapeHtml(WiFi.SSID(i));
+            if (safe.length()) _scanOptions += "<option value=\"" + safe + "\"></option>";
+        }
+        WiFi.scanDelete();
+
         WiFi.mode(WIFI_AP);
 
         // Short suffix from the chip's own MAC so each unit's AP name is
@@ -118,23 +135,22 @@ private:
     }
 
     void handlePortalRoot() {
-        int n = WiFi.scanNetworks();
-        String options = "";
-        for (int i = 0; i < n; i++) {
-            String safe = escapeHtml(WiFi.SSID(i));
-            options += "<option value=\"" + safe + "\">" + safe + "</option>";
-        }
-
+        // Uses the network list cached at portal start (see startProvisioningPortal).
+        // The SSID is an editable text input with the scan results offered as an
+        // autocomplete datalist — so the user can pick a nearby network OR type a
+        // hidden/5 GHz one we couldn't see. No blocking scan happens here.
         String html =
             "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<title>TurboUSD Node Setup</title>"
             "<style>body{font-family:sans-serif;background:#000;color:#3aff7a;padding:24px;}"
-            "input,select{width:100%;padding:10px;margin:8px 0;background:#111;color:#fff;border:1px solid #2eaa50;border-radius:6px;}"
+            "input{width:100%;padding:10px;margin:8px 0;background:#111;color:#fff;border:1px solid #2eaa50;border-radius:6px;box-sizing:border-box;}"
             "button{width:100%;padding:12px;background:#3aff7a;color:#000;border:none;border-radius:6px;font-weight:bold;}</style>"
             "</head><body>"
             "<h2>Connect your TurboUSD Node</h2>"
             "<form action='/connect' method='POST'>"
-            "<label>WiFi network</label><select name='ssid'>" + options + "</select>"
+            "<label>WiFi network</label>"
+            "<input name='ssid' list='nets' placeholder='Your WiFi name' autocomplete='off' autocapitalize='off'>"
+            "<datalist id='nets'>" + _scanOptions + "</datalist>"
             "<label>Password</label><input type='password' name='password'>"
             "<button type='submit'>Connect</button>"
             "</form></body></html>";

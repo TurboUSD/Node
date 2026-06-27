@@ -58,7 +58,7 @@ public:
         initDisplayAndTouch();
         buildAllScreens();
         _loadScreenOrder();
-        showScreen(ScreenId::CLOCK);
+        showScreen(ScreenId::CLOCK, false);  // instant first load — no animation
     }
 
     void loop() {
@@ -107,11 +107,17 @@ public:
         static bool shown = false;
         if (shown) return;
         shown = true;
-        lv_obj_clean(lv_scr_act());
-        lv_obj_t* label = lv_label_create(lv_scr_act());
+        // Build a dedicated screen and load it instantly. We do NOT clean the
+        // currently-active screen (cleaning a screen that may still be mid-load
+        // animation corrupts LVGL and crashes → reset loop).
+        lv_obj_t* scr = lv_obj_create(nullptr);
+        lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+        lv_obj_t* label = lv_label_create(scr);
         lv_label_set_text(label, "Connect your phone to:\nTurboUSD-Setup-XXXX\nthen open the page that appears.");
         lv_obj_set_style_text_color(label, lv_color_hex(0x3aff7a), 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(label);
+        lv_scr_load(scr);
     }
 
     bool isOnNodeScreen() { return currentScreen == ScreenId::NODE_NETWORK; }
@@ -1180,13 +1186,17 @@ private:
         lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
     }
 
-    void showScreen(ScreenId id) {
+    void showScreen(ScreenId id, bool animate = true) {
         currentScreen = id;
         // Update swipe position to stay in sync with direct navigation (e.g. logo tap → home)
         for (int i = 0; i < (int)ScreenId::COUNT; i++) {
             if (_swipeOrder[i] == (uint8_t)id) { _currentSwipePos = i; break; }
         }
-        lv_scr_load_anim(screens[(int)id], LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+        // Instant (non-animated) load for the very first screen at boot: a screen
+        // animation that's still running when the provisioning screen loads can
+        // corrupt LVGL and crash. Navigation taps/swipes still animate.
+        if (animate) lv_scr_load_anim(screens[(int)id], LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+        else         lv_scr_load(screens[(int)id]);
         // Trigger data load when ticker screen becomes visible
         if (id == ScreenId::TICKERS) {
             tickerScreen.onShow(storage.getNodeCode().c_str());
