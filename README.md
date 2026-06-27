@@ -182,7 +182,6 @@ A Next.js app deployed to Vercel at `network.turbousd.com`:
 An async Python bot (`ami9000/telegram/bot.py`) that users interact with for mining alerts:
 
 - `/mynode YOUR_CODE` — links a Telegram account to a node; sends alerts whenever that node wins a block
-- `/node reward` — (admin only, private chat) shows the pending block reward; reply with a number to update it for the next block
 - Mining alerts fire automatically when `mine-block` runs and a linked user's node wins
 
 ---
