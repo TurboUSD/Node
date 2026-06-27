@@ -74,7 +74,9 @@
 // RGB panel timing parameters (from Kconfig.projbuild, GX/D1 variant):
 #define LCD_H_RES               480
 #define LCD_V_RES               480
-#define LCD_PCLK_HZ             (18 * 1000 * 1000)
+#define LCD_PCLK_HZ             (12 * 1000 * 1000)   // 12 MHz — matches Seeed's verified
+                                                     // Arduino reference (gfx->begin(12000000L)).
+                                                     // 18 MHz was too fast → on-screen garbage.
 #define LCD_HSYNC_BACK_PORCH    50
 #define LCD_HSYNC_FRONT_PORCH   10
 #define LCD_HSYNC_PULSE_WIDTH    8
