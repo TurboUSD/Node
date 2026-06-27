@@ -109,6 +109,31 @@ void markBootValidIfNeeded() {
     bootValidMarked = true;
 }
 
+// Top user button (GPIO 38, active LOW). Short press toggles the screen; a 3 s
+// long press puts the device to sleep. By design there is NO factory-reset
+// action, so the firmware can't be wiped by holding the button.
+void handleUserButton() {
+    static bool     prevDown   = false;
+    static uint32_t pressStart = 0;
+    static bool     longFired  = false;
+
+    bool     down = (digitalRead(BTN_USER_GPIO) == LOW);
+    uint32_t now  = millis();
+
+    if (down && !prevDown) { pressStart = now; longFired = false; }   // press begins
+    if (down && !longFired && (now - pressStart >= 3000)) {           // long press
+        longFired = true;
+        uiManager.enterSleep();   // returns here once the button wakes it
+    }
+    if (!down && prevDown) {                                          // released
+        uint32_t held = now - pressStart;
+        if (!longFired && held >= 40 && held < 3000) {                // short press
+            uiManager.toggleScreen();
+        }
+    }
+    prevDown = down;
+}
+
 void checkAlarmTrigger() {
     time_t now = time(nullptr);
     struct tm t;
@@ -161,6 +186,8 @@ void setup() {
     Serial.begin(115200);
     Serial.println("\nTurboUSD Node booting, firmware " FIRMWARE_VERSION);
 
+    pinMode(BTN_USER_GPIO, INPUT_PULLUP);  // top user button, active LOW
+
     storage.begin();
     rp2040Link.begin();
     uiManager.begin(); // lv_init + hardware bring-up + build all screens
@@ -176,6 +203,10 @@ void setup() {
 }
 
 void loop() {
+    // Poll the user button first so screen-toggle / sleep work in every state
+    // (including before WiFi is connected or while the provisioning portal is up).
+    handleUserButton();
+
     // While the provisioning portal is up, prioritize serving it.
     if (wifiManager.isPortalActive()) {
         wifiManager.loopPortal();

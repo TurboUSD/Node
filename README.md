@@ -19,6 +19,11 @@ The project is fully open source and welcomes contributions at every layer: firm
 
 The device is a **[SenseCAP Indicator D1](https://wiki.seeedstudio.com/SenseCAP_Indicator_D1_Overview/)** by Seeed Studio. It was chosen because it ships with everything needed in one compact enclosure:
 
+<p align="center">
+  <img src="https://files.seeedstudio.com/wiki/SenseCAP/SenseCAP_Indicator/SenseCAP_Indicator_2.png" width="48%" alt="SenseCAP Indicator D1 — front" />
+  <img src="https://files.seeedstudio.com/wiki/SenseCAP/SenseCAP_Indicator/SenseCAP_Indicator_3.png" width="48%" alt="SenseCAP Indicator D1 — ports and buttons" />
+</p>
+
 | Component | Details |
 |---|---|
 | ESP32-S3 | Dual-core 240 MHz, 8 MB PSRAM — runs the main firmware |
@@ -28,6 +33,20 @@ The device is a **[SenseCAP Indicator D1](https://wiki.seeedstudio.com/SenseCAP_
 | Connectivity | WiFi 802.11 b/g/n, Bluetooth 5.0, USB-C |
 
 No additional hardware modifications are required. The firmware communicates with the RP2040 over UART (115200 8N1) using a fixed 3-byte frame — `[0x7E][command][checksum]`, where the checksum is `0x7E XOR command`. See `firmware-rp2040/PROTOCOL.md` for the full command set.
+
+### Buttons
+
+The device has two buttons, on opposite edges:
+
+- **Top button** (the regular push button) — handled by this firmware:
+  - **Short press** — turn the screen off / wake it up. The node keeps running and mining in the background while the screen is off.
+  - **Long press (3 s)** — sleep ("power off"): the screen turns off and the device enters light sleep; press the button again to wake.
+  - There is intentionally **no factory-reset shortcut** on the button, so the firmware can't be wiped by accident. (Stock Seeed firmware reset the device on a 10 s hold — we deliberately dropped that.)
+- **Bottom pinhole button** (next to the USB-C port, press with a paperclip/needle) — this is the **RP2040 BOOTSEL** button, used only when flashing the RP2040: hold it while plugging in USB to expose the `RPI-RP2` drive.
+
+<p align="center">
+  <img src="docs/flash-uf2-reference.png" width="70%" alt="Flashing the RP2040: hold the bottom pinhole button while connecting USB, then drag the .uf2 onto the RPI-RP2 drive" />
+</p>
 
 ---
 

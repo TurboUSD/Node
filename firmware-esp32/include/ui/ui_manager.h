@@ -25,6 +25,7 @@
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_panel_ops.h"
 #include "driver/gpio.h"
+#include "esp_sleep.h"          // light sleep for the user-button "power off"
 #include "board_pins.h"
 #include "api_client.h"
 #include "storage.h"
@@ -76,6 +77,30 @@ public:
     // Read brightness from NVS and apply it immediately.
     void applyStoredBrightness() {
         setScreenBrightness(storage.getScreenBrightness());
+    }
+
+    // ── User button actions (top button, GPIO 38) ──────────────────────────
+    // Short press: toggle the screen (backlight off/on) while the node keeps
+    // running and mining in the background.
+    void toggleScreen() {
+        _screenOn = !_screenOn;
+        if (_screenOn) applyStoredBrightness();
+        else           ledcWrite(0, 0);   // backlight off (channel 0)
+    }
+
+    // Long press (3 s): "power off" — backlight off and enter light sleep. RAM
+    // and the LVGL framebuffer are retained, so a press resumes instantly where
+    // it left off. We deliberately do NOT wire a factory-reset action to the
+    // button, so the firmware can't be wiped by accident. GPIO 38 isn't an RTC
+    // pin, so this uses light sleep (any-GPIO wake), not deep sleep.
+    void enterSleep() {
+        ledcWrite(0, 0);                         // backlight off
+        gpio_wakeup_enable((gpio_num_t)BTN_USER_GPIO, GPIO_INTR_LOW_LEVEL);
+        esp_sleep_enable_gpio_wakeup();
+        esp_light_sleep_start();                 // blocks until the button is pressed
+        // Woken up: restore the screen.
+        _screenOn = true;
+        applyStoredBrightness();
     }
 
     void showProvisioningScreen() {
@@ -272,6 +297,8 @@ private:
     float _tempC        = 0.0f;
     int   _humidityPct  = 0;
     bool  _sensorValid  = false;
+
+    bool  _screenOn     = true;   // user-button screen toggle state
 
     // ── Screen swipe order ───────────────────────────────────────────────────
 
@@ -1057,6 +1084,13 @@ private:
         addPrefToggleRow(card, "WEEK STARTS", "MON", "SUN",
                           storage.getWeekStart() == 1,
                           [](bool leftActive){ storage.setWeekStart(leftActive ? 1 : 0); storage.setLocaleLocked(true); });
+
+        // Button reference (informational) — bottom of the preferences card.
+        lv_obj_t* btnInfo = lv_label_create(card);
+        lv_label_set_text(btnInfo,
+            "Top button: short press = screen on/off,  hold 3s = sleep.");
+        lv_obj_set_style_text_color(btnInfo, lv_color_hex(0x6e7280), 0);
+        lv_obj_set_style_text_font(btnInfo, &lv_font_montserrat_10, 0);
 
         lv_obj_t* closeBtn = addModalButton(card, "CLOSE", false);
         static lv_obj_t* sCard; sCard = card;
