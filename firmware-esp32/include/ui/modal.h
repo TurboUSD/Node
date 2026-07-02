@@ -20,12 +20,21 @@ inline lv_obj_t* openModal(lv_obj_t* parent) {
 
     lv_obj_t* card = lv_obj_create(backdrop);
     lv_obj_set_size(card, LV_PCT(84), LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(card, LV_PCT(92), 0);   // cap + scroll if content is tall
     lv_obj_center(card);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x111111), 0);
     lv_obj_set_style_border_color(card, lv_color_hex(0x2eaa50), 0); // always green, per design decision
     lv_obj_set_style_border_width(card, 2, 0);
     lv_obj_set_style_radius(card, 16, 0);
     lv_obj_set_style_pad_all(card, 18, 0);
+
+    // CRITICAL: without a layout, every child the caller adds lands at (0,0) and
+    // overlaps — that was the "deformed, everything-on-top-of-each-other" popup.
+    // A vertical flex stacks them top-to-bottom with spacing; the CLOSE button
+    // (added last) naturally ends up at the bottom.
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(card, 10, 0);
 
     return card;
 }

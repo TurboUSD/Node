@@ -29,6 +29,8 @@ public:
         lv_obj_set_style_bg_opa(topRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(topRow, 0, 0);
         lv_obj_set_style_pad_all(topRow, 0, 0);
+        lv_obj_align(topRow, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_clear_flag(topRow, LV_OBJ_FLAG_SCROLLABLE);
 
         totalDebtLabel = lv_label_create(topRow);
         lv_label_set_text(totalDebtLabel, "--");
@@ -60,6 +62,7 @@ public:
 
         chart = lv_chart_create(body);
         lv_obj_set_size(chart, LV_PCT(100), 130);
+        lv_obj_align_to(chart, topRow, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);  // below the total row (was overlapping it)
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
         lv_chart_set_type(chart, LV_CHART_TYPE_LINE);

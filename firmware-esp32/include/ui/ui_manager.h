@@ -29,6 +29,9 @@
 #include "board_pins.h"
 #include "api_client.h"
 #include "storage.h"
+
+// Large clock font (Montserrat 72px, digits + ":" + AM/PM) — assets/montserrat_clock.c
+LV_FONT_DECLARE(montserrat_clock);
 #include "ui/shared_components.h"
 #include "ui/modal.h"
 #include "ui/screen_turbo.h"
@@ -678,12 +681,14 @@ private:
                 uint8_t yh  = Wire.read() & 0x0F;
                 uint8_t yl  = Wire.read();
                 if (pts > 0) {
-                    // The FT6336U reports X mirrored relative to the panel: that
-                    // inverted horizontal swipes AND made right-side taps (footer
-                    // gear, "+ Add", etc.) miss their targets. Flip X to match.
+                    // The FT6336U is mounted rotated 180° vs the panel: touches
+                    // landed at the diagonally-opposite point (tapping the top-left
+                    // date opened the bottom-right gear's popup, etc.). Mirror BOTH
+                    // X and Y so taps hit their targets and swipes go the right way.
                     lv_coord_t rawX = (lv_coord_t)((xh << 8) | xl);
+                    lv_coord_t rawY = (lv_coord_t)((yh << 8) | yl);
                     data->point.x = (LCD_H_RES - 1) - rawX;
-                    data->point.y = (lv_coord_t)((yh << 8) | yl);
+                    data->point.y = (LCD_V_RES - 1) - rawY;
                     data->state   = LV_INDEV_STATE_PRESSED;
                     // Any touch resets the inactivity timer (and wakes screen if off)
                     static_cast<UiManager*>(drv->user_data)->_onTouchActivity();
@@ -770,21 +775,38 @@ private:
         LV_IMG_DECLARE(turbousd_logo);
         lv_obj_t* logo = lv_img_create(scr);
         lv_img_set_src(logo, &turbousd_logo);
-        lv_obj_align(logo, LV_ALIGN_TOP_MID, 0, 12);
+        lv_img_set_zoom(logo, 170);   // ~32px
+        lv_obj_align(logo, LV_ALIGN_TOP_MID, 0, 10);
 
+        // Date — larger, letter-spaced; tap opens the calendar.
         clockDateLabel = lv_label_create(scr);
-        lv_obj_set_style_text_color(clockDateLabel, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_align(clockDateLabel, LV_ALIGN_CENTER, 0, -70);
+        lv_obj_set_style_text_color(clockDateLabel, lv_color_hex(0xcfcfd4), 0);
+        lv_obj_set_style_text_font(clockDateLabel, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_letter_space(clockDateLabel, 3, 0);
+        lv_obj_align(clockDateLabel, LV_ALIGN_CENTER, 0, -84);
+        lv_obj_add_flag(clockDateLabel, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(clockDateLabel, 12);
+        lv_obj_add_event_cb(clockDateLabel, onDateTapped, LV_EVENT_CLICKED, this);
 
+        // Time — big custom Montserrat font.
         clockTimeLabel = lv_label_create(scr);
         lv_obj_set_style_text_color(clockTimeLabel, lv_color_hex(0x3aff7a), 0);
-        lv_obj_set_style_text_font(clockTimeLabel, &lv_font_montserrat_48, 0);
-        lv_obj_align(clockTimeLabel, LV_ALIGN_CENTER, 0, -20);
+        lv_obj_set_style_text_font(clockTimeLabel, &montserrat_clock, 0);
+        lv_obj_align(clockTimeLabel, LV_ALIGN_CENTER, 0, -6);
 
+        // Alarm — rounded pill; colour (border + text) follows the alarm state,
+        // set each second in updateClockIfNeeded (yellow = on, grey = off).
         clockAlarmLabel = lv_label_create(scr);
-        lv_obj_set_style_text_color(clockAlarmLabel, lv_color_hex(0xe8b339), 0);
-        lv_obj_align(clockAlarmLabel, LV_ALIGN_CENTER, 0, 30);
+        lv_obj_set_style_text_font(clockAlarmLabel, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_color(clockAlarmLabel, lv_color_hex(0x6e7280), 0);
+        lv_obj_set_style_radius(clockAlarmLabel, 16, 0);
+        lv_obj_set_style_border_width(clockAlarmLabel, 2, 0);
+        lv_obj_set_style_border_color(clockAlarmLabel, lv_color_hex(0x6e7280), 0);
+        lv_obj_set_style_pad_hor(clockAlarmLabel, 16, 0);
+        lv_obj_set_style_pad_ver(clockAlarmLabel, 7, 0);
+        lv_obj_align(clockAlarmLabel, LV_ALIGN_CENTER, 0, 78);
         lv_obj_add_flag(clockAlarmLabel, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(clockAlarmLabel, 10);
         lv_obj_add_event_cb(clockAlarmLabel, onAlarmLabelTapped, LV_EVENT_CLICKED, this);
 
         // Ambient temp/humidity line, e.g. "23° · 48%" (from the RP2040 AHT20).
@@ -875,21 +897,21 @@ private:
             snprintf(dateBuf, sizeof(dateBuf), "%s %02d.%02d.%04d", days[t.tm_wday], t.tm_mon+1, t.tm_mday, t.tm_year+1900);
         lv_label_set_text(clockDateLabel, dateBuf);
 
-        // Alarm label on clock screen: colour and text reflect today's status
+        // Alarm pill: yellow (border + icon + text) when the alarm is enabled,
+        // grey when it's off — per the design.
         char alarmBuf[28];
+        lv_color_t alarmCol;
         if (!alarmOn) {
             snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 off");
-            lv_obj_set_style_text_color(clockAlarmLabel, lv_color_hex(0x6e7280), 0);
-        } else if (!todayOn) {
-            snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 %02d:%02d (not today)",
-                     storage.getAlarmHour(), storage.getAlarmMinute());
-            lv_obj_set_style_text_color(clockAlarmLabel, lv_color_hex(0x9a9a9e), 0);
+            alarmCol = lv_color_hex(0x6e7280);   // grey
         } else {
             snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 %02d:%02d",
                      storage.getAlarmHour(), storage.getAlarmMinute());
-            lv_obj_set_style_text_color(clockAlarmLabel, lv_color_hex(0xe8b339), 0);
+            alarmCol = lv_color_hex(0xe8b339);   // yellow
         }
         lv_label_set_text(clockAlarmLabel, alarmBuf);
+        lv_obj_set_style_text_color(clockAlarmLabel, alarmCol, 0);
+        lv_obj_set_style_border_color(clockAlarmLabel, alarmCol, 0);
     }
 
     static void onOtaBadgeTapped(lv_event_t* e) {
