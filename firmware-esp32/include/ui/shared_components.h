@@ -62,6 +62,7 @@ inline SharedHeaderRefs buildSharedHeader(lv_obj_t* parent,
     // Center: logo, tap -> go to Clock screen.
     refs.logo = lv_img_create(bar);
     lv_img_set_src(refs.logo, &turbousd_logo);
+    lv_img_set_zoom(refs.logo, 140);   // 48px asset → ~26px, leaves a margin in the 38px bar
     lv_obj_align(refs.logo, LV_ALIGN_CENTER, 0, 0);
     if (onLogoTapped) {
         lv_obj_add_flag(refs.logo, LV_OBJ_FLAG_CLICKABLE);
@@ -86,15 +87,19 @@ inline SharedHeaderRefs buildSharedHeader(lv_obj_t* parent,
         lv_obj_add_event_cb(refs.alarmIcon, onAlarmTapped, LV_EVENT_CLICKED, userData);
     }
 
+    // Temp/humidity labels: created (so the refresh code stays valid) but HIDDEN
+    // for now per design. Remove the LV_OBJ_FLAG_HIDDEN lines to show them again.
     refs.humidityLabel = lv_label_create(bar);
     lv_obj_set_style_text_color(refs.humidityLabel, lv_color_hex(0x9a9a9e), 0);
     lv_obj_set_style_text_font(refs.humidityLabel, &lv_font_montserrat_12, 0);
     lv_obj_align_to(refs.humidityLabel, refs.alarmIcon, LV_ALIGN_OUT_LEFT_MID, -8, 0);
+    lv_obj_add_flag(refs.humidityLabel, LV_OBJ_FLAG_HIDDEN);
 
     refs.tempLabel = lv_label_create(bar);
     lv_obj_set_style_text_color(refs.tempLabel, lv_color_hex(0x9a9a9e), 0);
     lv_obj_set_style_text_font(refs.tempLabel, &lv_font_montserrat_12, 0);
     lv_obj_align_to(refs.tempLabel, refs.humidityLabel, LV_ALIGN_OUT_LEFT_MID, -8, 0);
+    lv_obj_add_flag(refs.tempLabel, LV_OBJ_FLAG_HIDDEN);
 
     return refs;
 }
@@ -202,5 +207,11 @@ inline void refreshSharedFooter(SharedFooterRefs& refs, const String& nodeName, 
         char countBuf[24];
         snprintf(countBuf, sizeof(countBuf), "| %d NODES", onlineNodeCount);
         lv_label_set_text(refs.nodeCountLabel, countBuf);
+        // Re-align to the name's CURRENT width — the build-time align happened
+        // while the name was empty, which made the two labels overlap.
+        if (refs.nodeNameLabel) {
+            lv_obj_update_layout(refs.nodeNameLabel);
+            lv_obj_align_to(refs.nodeCountLabel, refs.nodeNameLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+        }
     }
 }

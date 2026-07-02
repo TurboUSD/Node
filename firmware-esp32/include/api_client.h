@@ -196,20 +196,44 @@ public:
             return result;
         }
 
+        // The response is ~30 KB (huge chartData/operations arrays). Parse ONLY
+        // the four scalar fields we need with a filter, so ArduinoJson doesn't
+        // run out of heap trying to build the whole document (which left the
+        // whole screen blank).
+        JsonDocument filter;
+        filter["tusdSupplyNum"]  = true;
+        filter["tusdBurnedNum"]  = true;
+        filter["tusdPriceUsd"]   = true;
+        filter["totalManagedUsd"] = true;
+
         JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, http.getStream());
+        DeserializationError err = deserializeJson(doc, http.getStream(),
+                                                   DeserializationOption::Filter(filter));
         http.end();
         if (err) {
             Serial.printf("fetchTreasuryData JSON parse error: %s\n", err.c_str());
             return result;
         }
 
-        result.tusdSupplyNum = doc["tusdSupplyNum"] | 0.0;
-        result.tusdBurnedNum = doc["tusdBurnedNum"] | 0.0;
-        result.tusdPriceUsd = doc["tusdPriceUsd"] | 0.0;
-        result.treasuryValueUsd = doc["treasuryValueUsd"] | 0.0; // confirm exact field name against the live API before relying on this
+        result.tusdSupplyNum    = doc["tusdSupplyNum"]  | 0.0;
+        result.tusdBurnedNum    = doc["tusdBurnedNum"]  | 0.0;
+        result.tusdPriceUsd     = doc["tusdPriceUsd"]   | 0.0;
+        result.treasuryValueUsd = doc["totalManagedUsd"] | 0.0;  // field is totalManagedUsd
         result.valid = true;
         return result;
+    }
+
+    // Live TUSD price in USD from a DEX aggregator: DexScreener first, then
+    // GeckoTerminal as a fallback. Cached for TUSD_PRICE_CACHE_MS to avoid rate
+    // limits; on total failure returns the last good value (0 if never fetched).
+    double fetchTusdPrice() {
+        static double   cached = 0;
+        static uint32_t lastAt = 0;
+        if (cached > 0 && (millis() - lastAt) < TUSD_PRICE_CACHE_MS) return cached;
+        double price = _fetchPriceDexScreener();
+        if (price <= 0) price = _fetchPriceGecko();
+        if (price > 0) { cached = price; lastAt = millis(); return price; }
+        return cached;  // both sources failed → keep showing the last good price
     }
 
     // Real US national debt figure, from the Treasury's own Fiscal Data API.
@@ -239,19 +263,16 @@ public:
         return result;
     }
 
-    // Historical debt points for the chart's adjustable year-range
-    // selector. Reads from our own Supabase cache (synced daily from
-    // Treasury by sync-debt-history), NOT a direct Treasury call -- avoids
-    // every device hammering a public government API every time someone
-    // taps the range picker. See backend/functions/debt-history.
+    // Historical debt points for the chart's adjustable year-range selector.
+    // Reads the Treasury "Historical Debt Outstanding" dataset DIRECTLY from
+    // the public Fiscal Data API (annual, small, no auth) — so the chart works
+    // out of the box without the Supabase debt-history function being deployed.
+    // Returns points oldest-first, capped to `yearsBack` and `maxPoints`.
     int fetchDebtHistory(int yearsBack, DebtHistoryPoint* outPoints, int maxPoints) {
         HTTPClient http;
-        String url = String(ENDPOINT_DEBT_HISTORY) + "?years=" + String(yearsBack);
-        http.begin(url);
-        http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
-        http.addHeader("apikey", SUPABASE_ANON_KEY);
-        http.setTimeout(8000);
-
+        http.begin("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/"
+                   "debt_outstanding?fields=record_date,debt_outstanding_amt&sort=-record_date&page[size]=120");
+        http.setTimeout(9000);
         int statusCode = http.GET();
         if (statusCode != 200) {
             Serial.printf("fetchDebtHistory failed, HTTP %d\n", statusCode);
@@ -264,16 +285,23 @@ public:
         http.end();
         if (err) return 0;
 
-        int count = 0;
-        for (JsonObject row : doc["points"].as<JsonArray>()) {
-            if (count >= maxPoints) break;
-            const char* dateStr = row["record_date"]; // "YYYY-MM-DD"
-            if (dateStr && strlen(dateStr) >= 4) {
-                outPoints[count].year = atoi(String(dateStr).substring(0, 4).c_str());
-            }
-            outPoints[count].totalDebtUsd = row["total_debt_usd"] | 0.0;
-            count++;
+        // API returns newest-first. Keep those within yearsBack, then reverse.
+        static DebtHistoryPoint tmp[120];
+        int n = 0, newestYear = 0;
+        for (JsonObject row : doc["data"].as<JsonArray>()) {
+            if (n >= 120) break;
+            const char* dateStr = row["record_date"];       // "YYYY-MM-DD"
+            const char* amtStr  = row["debt_outstanding_amt"];
+            if (!dateStr || !amtStr || strlen(dateStr) < 4) continue;
+            int yr = atoi(String(dateStr).substring(0, 4).c_str());
+            if (newestYear == 0) newestYear = yr;
+            if (yr < newestYear - yearsBack) break;          // older than the range
+            tmp[n].year = yr;
+            tmp[n].totalDebtUsd = atof(amtStr);
+            n++;
         }
+        int count = 0;
+        for (int i = n - 1; i >= 0 && count < maxPoints; i--) outPoints[count++] = tmp[i];
         return count;
     }
 
@@ -343,6 +371,42 @@ public:
     }
 
 private:
+    // DexScreener: GET /tokens/{contract} → pairs[]; prefer our exact pool.
+    double _fetchPriceDexScreener() {
+        HTTPClient http;
+        http.begin(String(ENDPOINT_DEXSCREENER_TOKENS) + TUSD_CONTRACT_ADDR);
+        http.setTimeout(8000);
+        if (http.GET() != 200) { http.end(); return 0; }
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, http.getStream());
+        http.end();
+        if (err) return 0;
+        double best = 0;
+        for (JsonObject pair : doc["pairs"].as<JsonArray>()) {
+            double p = atof(pair["priceUsd"] | "0");
+            const char* addr = pair["pairAddress"] | "";
+            if (p > 0 && strcasecmp(addr, TUSD_POOL_ADDR) == 0) return p;  // exact pool
+            if (p > best) best = p;
+        }
+        return best;  // no exact pool match → highest-priced pair for the token
+    }
+
+    // GeckoTerminal fallback: GET /networks/{net}/pools/{pool}.
+    double _fetchPriceGecko() {
+        HTTPClient http;
+        http.begin(String(ENDPOINT_GECKOTERMINAL_OHLCV) + TUSD_CHAIN_SLUG + "/pools/" + TUSD_POOL_ADDR);
+        http.setTimeout(8000);
+        if (http.GET() != 200) { http.end(); return 0; }
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, http.getStream());
+        http.end();
+        if (err) return 0;
+        const char* p = doc["data"]["attributes"]["base_token_price_usd"] | "0";
+        double val = atof(p);
+        if (val <= 0) { p = doc["data"]["attributes"]["quote_token_price_usd"] | "0"; val = atof(p); }
+        return val;
+    }
+
     // True if the 2-char country code `cc` is in `list` (n entries).
     static bool ccInList(const char* cc, const char* const* list, int n) {
         for (int i = 0; i < n; i++)

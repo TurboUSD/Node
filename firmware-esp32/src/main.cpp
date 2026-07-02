@@ -259,6 +259,10 @@ void loop() {
     if (lastTreasuryRefreshAt == 0 || now - lastTreasuryRefreshAt > TREASURY_DATA_REFRESH_MS) {
         TreasuryData data = apiClient.fetchTreasuryData();
         if (data.valid) uiManager.updateTreasuryData(data);
+        // Live price from DexScreener/GeckoTerminal — works even if the treasury
+        // service is down, and overrides its (possibly stale) price.
+        double price = apiClient.fetchTusdPrice();
+        if (price > 0) uiManager.updateTusdPrice(price);
         lastTreasuryRefreshAt = now;
     }
 

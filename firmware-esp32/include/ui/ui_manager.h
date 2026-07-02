@@ -176,9 +176,20 @@ public:
         turboScreen.loadRealCandles(candles, count);
     }
 
+    // Live TUSD price from DexScreener/GeckoTerminal (independent of the
+    // treasury service, which may be down / not deployed).
+    void updateTusdPrice(double priceUsd) {
+        turboScreen.updatePrice(priceUsd);
+    }
+
     void updateDebtData(const DebtData& data) {
         latestDebt = data;
         debtScreen.updateLiveTotal(data.totalDebtUsd);
+        // Load the historical chart + SINCE/RATE once, on the first live total.
+        if (!_debtHistLoaded) {
+            static const int yearValues[] = {5, 10, 20, 30, 50, 75};
+            reloadDebtHistory(yearValues[debtYearsRangeIndex % 6]);
+        }
     }
 
     void updateMiningFeed(MiningFeedEntry* entries, int count) {
@@ -289,6 +300,8 @@ private:
     int sincePeriodIndex = 4;
     int rateUnitIndex = 0;
     int gameYearsIndex = 1;
+    double _debtPerSecond = 0.0;   // US-debt-clock rate, derived from history
+    bool   _debtHistLoaded = false;
 
     lv_obj_t* clockTimeLabel = nullptr;
     lv_obj_t* clockDateLabel = nullptr;
@@ -665,7 +678,11 @@ private:
                 uint8_t yh  = Wire.read() & 0x0F;
                 uint8_t yl  = Wire.read();
                 if (pts > 0) {
-                    data->point.x = (lv_coord_t)((xh << 8) | xl);
+                    // The FT6336U reports X mirrored relative to the panel: that
+                    // inverted horizontal swipes AND made right-side taps (footer
+                    // gear, "+ Add", etc.) miss their targets. Flip X to match.
+                    lv_coord_t rawX = (lv_coord_t)((xh << 8) | xl);
+                    data->point.x = (LCD_H_RES - 1) - rawX;
                     data->point.y = (lv_coord_t)((yh << 8) | yl);
                     data->state   = LV_INDEV_STATE_PRESSED;
                     // Any touch resets the inactivity timer (and wakes screen if off)
@@ -776,6 +793,7 @@ private:
         lv_obj_set_style_text_font(clockWeatherLabel, &lv_font_montserrat_16, 0);
         lv_obj_align(clockWeatherLabel, LV_ALIGN_CENTER, 0, 64);
         lv_label_set_text(clockWeatherLabel, "--\xC2\xB0 \xE2\x80\xA2 --%");
+        lv_obj_add_flag(clockWeatherLabel, LV_OBJ_FLAG_HIDDEN);  // hidden per design; code kept
 
         clockFooterRefs = buildSharedFooter(scr, onQrTapped, this);
 
@@ -1158,8 +1176,8 @@ private:
     }
 
     void reloadDebtHistory(int years) {
-        DebtHistoryPoint points[40];
-        int count = apiClient.fetchDebtHistory(years, points, 40);
+        DebtHistoryPoint points[80];
+        int count = apiClient.fetchDebtHistory(years, points, 80);
         if (count == 0) {
             Serial.println("reloadDebtHistory: no data returned, leaving chart as-is.");
             return;
@@ -1172,24 +1190,64 @@ private:
             lv_coord_t scaled = (lv_coord_t)(points[i].totalDebtUsd / 1e11);
             lv_chart_set_next_value(debtScreen.getChart(), debtScreen.getSeries(), scaled);
         }
+        // Derive the debt-clock rate ($/sec) from the most recent year-over-year
+        // change, then refresh the SINCE / RATE widgets.
+        if (count >= 2) {
+            double dDebt  = points[count - 1].totalDebtUsd - points[count - 2].totalDebtUsd;
+            int    dYears = points[count - 1].year - points[count - 2].year;
+            if (dYears < 1) dYears = 1;
+            _debtPerSecond = dDebt / (dYears * 365.25 * 86400.0);
+            _computeDebtDerived();
+        }
+        _debtHistLoaded = true;
+    }
+
+    // Fill the SINCE / RATE value labels + button labels from the computed rate.
+    void _computeDebtDerived() {
+        static const long unitSec[]   = {1, 60, 3600, 86400};                 // SEC MIN HOUR DAY
+        static const long periodSec[] = {3600, 86400, 604800, 2592000};       // 1H 24H 7D 30D
+        debtScreen.updateRateValue(_debtPerSecond * unitSec[rateUnitIndex % 4]);
+        long secs = (sincePeriodIndex < 4) ? periodSec[sincePeriodIndex]
+                                            : (long)(millis() / 1000);          // "NODE ON" ≈ uptime
+        debtScreen.updateSinceValue(_debtPerSecond * secs);
+
+        static const char* sinceOpts[] = {"1H", "24H", "7D", "30D", "NODE ON"};
+        static const char* rateOpts[]  = {"SEC", "MIN", "HOUR", "DAY"};
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%s \xEF\x81\xB8", sinceOpts[sincePeriodIndex % 5]);
+        debtScreen.setSinceButtonLabel(buf);
+        snprintf(buf, sizeof(buf), "%s \xEF\x81\xB8", rateOpts[rateUnitIndex % 4]);
+        debtScreen.setRateButtonLabel(buf);
     }
 
     void openSincePeriodPicker() {
         static const char* options = "1H\n24H\n7D\n30D\nNODE ON";
         lv_obj_t* card = openModal(lv_scr_act());
-        addOptionPicker(card, options, sincePeriodIndex);
+        lv_obj_t* roller = addOptionPicker(card, options, sincePeriodIndex);
         lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
-        static lv_obj_t* sCard; sCard = card;
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
+        static lv_obj_t* sCard;    sCard = card;
+        static lv_obj_t* sRoller;  sRoller = roller;
+        static UiManager* sSelf;   sSelf = this;
+        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
+            sSelf->sincePeriodIndex = lv_roller_get_selected(sRoller);
+            sSelf->_computeDebtDerived();
+            closeModal(sCard);
+        }, LV_EVENT_CLICKED, nullptr);
     }
 
     void openRateUnitPicker() {
         static const char* options = "SEC\nMIN\nHOUR\nDAY";
         lv_obj_t* card = openModal(lv_scr_act());
-        addOptionPicker(card, options, rateUnitIndex);
+        lv_obj_t* roller = addOptionPicker(card, options, rateUnitIndex);
         lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
-        static lv_obj_t* sCard; sCard = card;
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
+        static lv_obj_t* sCard;    sCard = card;
+        static lv_obj_t* sRoller;  sRoller = roller;
+        static UiManager* sSelf;   sSelf = this;
+        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
+            sSelf->rateUnitIndex = lv_roller_get_selected(sRoller);
+            sSelf->_computeDebtDerived();
+            closeModal(sCard);
+        }, LV_EVENT_CLICKED, nullptr);
     }
 
     void openGameYearsPicker() {
@@ -1236,6 +1294,10 @@ private:
             if (!self) return;
             lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
             int count = (int)ScreenId::COUNT;
+            // Swipe LEFT → next screen (slides in from the right);
+            // Swipe RIGHT → previous screen (slides in from the left).
+            // (Touch X is mirror-corrected in the read_cb, so the gesture
+            // direction is now the natural one.)
             if (dir == LV_DIR_LEFT) {
                 int newPos = (self->_currentSwipePos + 1) % count;
                 self->showScreen((ScreenId)self->_swipeOrder[newPos], true, LV_SCR_LOAD_ANIM_MOVE_LEFT);

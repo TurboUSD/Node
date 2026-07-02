@@ -22,19 +22,19 @@ public:
         lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
 
         captionLabel = lv_label_create(body);
-        lv_label_set_text(captionLabel, "");
+        lv_label_set_text(captionLabel, "$10,000 SINCE THIS NODE WENT ONLINE");
         lv_obj_set_style_text_color(captionLabel, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(captionLabel, &lv_font_montserrat_10, 0);
         lv_obj_align(captionLabel, LV_ALIGN_TOP_MID, 0, 0);
 
         projectedValueLabel = lv_label_create(body);
-        lv_label_set_text(projectedValueLabel, "--");
+        lv_label_set_text(projectedValueLabel, "$--");
         lv_obj_set_style_text_color(projectedValueLabel, lv_color_hex(0xff4d4d), 0);
         lv_obj_set_style_text_font(projectedValueLabel, &lv_font_montserrat_32, 0);
         lv_obj_align_to(projectedValueLabel, captionLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
 
         detailLabel = lv_label_create(body);
-        lv_label_set_text(detailLabel, "");
+        lv_label_set_text(detailLabel, "projected value lost to inflation");
         lv_obj_set_style_text_color(detailLabel, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(detailLabel, &lv_font_montserrat_12, 0);
         lv_obj_align_to(detailLabel, projectedValueLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);

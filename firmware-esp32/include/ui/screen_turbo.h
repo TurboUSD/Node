@@ -79,12 +79,22 @@ public:
         snprintf(buf, sizeof(buf), "%s", formatPriceSubscript(data.tusdPriceUsd).c_str());
         lv_label_set_text(priceValueLabel, buf);
 
-        double burnedPct = (data.tusdBurnedNum / 100000000000.0) * 100.0;
+        double supply = data.tusdSupplyNum > 0 ? data.tusdSupplyNum : 100000000000.0;
+        double burnedPct = (data.tusdBurnedNum / supply) * 100.0;
         snprintf(buf, sizeof(buf), "%.2f%%", burnedPct);
         lv_label_set_text(burnedValueLabel, buf);
 
         snprintf(buf, sizeof(buf), "$%d", (int)round(data.treasuryValueUsd));
         lv_label_set_text(treasuryValueLabel, buf);
+    }
+
+    // Set just the PRICE cell — used when the price comes live from a DEX
+    // aggregator (DexScreener/GeckoTerminal) rather than the treasury service.
+    void updatePrice(double priceUsd) {
+        if (priceUsd <= 0) return;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%s", formatPriceSubscript(priceUsd).c_str());
+        lv_label_set_text(priceValueLabel, buf);
     }
 
     // Loads real OHLCV candles fetched via api_client.h's

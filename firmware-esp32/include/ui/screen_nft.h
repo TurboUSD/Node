@@ -150,6 +150,14 @@ public:
         lv_obj_set_style_pad_gap(_gridArea, 4, 0);
         lv_obj_clear_flag(_gridArea, LV_OBJ_FLAG_SCROLLABLE);
 
+        // Tap the (empty) grid to enter the NFT wallet on-device. Replaces the
+        // old auto-popup dialog that appeared as a stray keyboard on swipe-in.
+        lv_obj_add_flag(_gridArea, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(_gridArea, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (!storage.hasNftWallet() && !storage.hasNftPinlist()) self->_openWalletDialog();
+        }, LV_EVENT_CLICKED, this);
+
         // Loading label (shown while fetching)
         _loadingLabel = lv_label_create(_gridArea);
         lv_label_set_text(_loadingLabel, "");
@@ -194,7 +202,7 @@ public:
             // node's web setup page, or by tapping the grid to open the dialog.
             _rebuildGrid();
             lv_label_set_text(_loadingLabel,
-                "No NFT wallet set.\nAdd one on your node's setup page.");
+                "No NFT wallet set.\nTap here to enter one,\nor add it on your node's setup page.");
         } else if (_cacheExpired()) {
             _startFetch();
         } else {

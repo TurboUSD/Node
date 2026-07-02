@@ -41,6 +41,13 @@
 
 // External data sources (real, public, no key required)
 #define ENDPOINT_TREASURY_DATA      "https://treasury.turbousd.com/api/treasury-data"
+
+// TUSD token on Base — used to pull the live price from DexScreener (primary)
+// with a GeckoTerminal fallback, independent of the treasury service.
+#define TUSD_CONTRACT_ADDR  "0x3d5e487B21E0569048c4D1A60E98C36e1B09DB07"
+#define TUSD_POOL_ADDR      "0xd013725b904e76394A3aB0334Da306C505D778F8"
+#define TUSD_CHAIN_SLUG     "base"
+#define TUSD_PRICE_CACHE_MS 60000   // reuse a fresh price for 60s (rate-limit guard)
 #define ENDPOINT_US_DEBT            "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny?sort=-record_date&page[size]=1"
 
 // Geo-IP locale autodetect. Free, no API key, HTTP (no TLS needed). Returns the
