@@ -119,9 +119,9 @@ public:
         lv_obj_set_style_pad_column(_sizeBar, 6, 0);
         lv_obj_clear_flag(_sizeBar, LV_OBJ_FLAG_SCROLLABLE);
 
-        _btn1x1 = _makeSizeBtn(_sizeBar, "1×1");
-        _btn2x2 = _makeSizeBtn(_sizeBar, "2×2");
-        _btn3x3 = _makeSizeBtn(_sizeBar, "3×3");
+        _btn1x1 = _makeSizeBtn(_sizeBar, "1x1");
+        _btn2x2 = _makeSizeBtn(_sizeBar, "2x2");
+        _btn3x3 = _makeSizeBtn(_sizeBar, "3x3");
 
         // Carousel toggle
         lv_obj_t* carLbl = lv_label_create(_sizeBar);
@@ -264,7 +264,7 @@ private:
         _pendingResult.error = false;
         _pendingResult.count = 0;
 
-        lv_label_set_text(_loadingLabel, "Loading pinlisted NFTs…");
+        lv_label_set_text(_loadingLabel, "Loading pinlisted NFTs...");
         lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
         for (int i = 0; i < _cellCount; i++) {
             if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
@@ -401,7 +401,7 @@ private:
         _pendingResult.count = 0;
 
         // Show spinner
-        lv_label_set_text(_loadingLabel, "Fetching your NFTs…");
+        lv_label_set_text(_loadingLabel, "Fetching your NFTs...");
         lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
         // Hide existing cells
         for (int i = 0; i < _cellCount; i++) {
@@ -587,9 +587,9 @@ private:
             cw.floorLbl = lv_label_create(cw.container);
             char floorBuf[24];
             if (item.floor_price_eth < 0.001f)
-                snprintf(floorBuf, sizeof(floorBuf), "Ξ%.4f", item.floor_price_eth);
+                snprintf(floorBuf, sizeof(floorBuf), "ETH %.4f", item.floor_price_eth);
             else
-                snprintf(floorBuf, sizeof(floorBuf), "Ξ%.3f", item.floor_price_eth);
+                snprintf(floorBuf, sizeof(floorBuf), "ETH %.3f", item.floor_price_eth);
             lv_label_set_text(cw.floorLbl, floorBuf);
             lv_obj_set_style_text_font(cw.floorLbl, &lv_font_montserrat_10, 0);
             uint32_t priceColor = item.floor_price_eth >= 1.0f ? NFT_CLR_GOLD :
@@ -719,7 +719,7 @@ private:
 
         lv_obj_t* ta = lv_textarea_create(card);
         lv_obj_set_size(ta, 280, 36);
-        lv_textarea_set_placeholder_text(ta, "0x…");
+        lv_textarea_set_placeholder_text(ta, "0x...");
         lv_textarea_set_one_line(ta, true);
         lv_obj_set_style_text_font(ta, &lv_font_montserrat_10, 0);
         lv_obj_set_style_bg_color(ta, lv_color_hex(0x141414), 0);

@@ -12,14 +12,11 @@
 #define UART_TO_S3_TX     1
 #define UART_BAUD         115200
 
-// ── Built-in environmental sensors (I2C0) ───────────────────────────────────
-// The SenseCAP Indicator D1S/D1Pro have on-board SHT41 (temp/humidity), SCD41
-// (CO2) and SGP40 (tVOC) on the RP2040's first I2C bus. Confirmed from Seeed's
-// official examples (https://wiki.seeedstudio.com/SenseCAP_Indicator_RP2040_CO2/):
-//   Wire.setSDA(20); Wire.setSCL(21);
-// IMPORTANT: the built-in sensors are unpowered until GPIO 18 is driven HIGH —
-// without that they never respond and temp/humidity read as "no data".
-// (The base D1 / D1L have NO built-in sensors; on those this simply reports none.)
-#define SENSOR_I2C_SDA    20
-#define SENSOR_I2C_SCL    21
-#define SENSOR_PWR_PIN    18   // drive HIGH to power the on-board sensors
+// ── Grove I2C port (optional external AHT20 temp/humidity sensor) ────────────
+// Pins from Seeed's official RP2040 Grove-IIC example (Wire.setSDA(20)/setSCL(21)).
+// NOTE: the base SenseCAP Indicator D1/D1L have NO built-in environmental sensor
+// (only the D1S/D1Pro do). So temp/humidity work only if a Grove AHT20 is plugged
+// into this port; otherwise the firmware reports "no reading" and the ESP32
+// shows "--". This is expected on a base D1.
+#define GROVE_I2C_SDA     20
+#define GROVE_I2C_SCL     21

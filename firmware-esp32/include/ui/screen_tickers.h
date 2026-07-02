@@ -629,7 +629,7 @@ private:
         // Text area for query
         _searchTA = lv_textarea_create(panel);
         lv_obj_set_size(_searchTA, LV_PCT(100), 36);
-        lv_textarea_set_placeholder_text(_searchTA, "Token name, symbol or 0x contract…");
+        lv_textarea_set_placeholder_text(_searchTA, "Token name, symbol or 0x contract...");
         lv_textarea_set_one_line(_searchTA, true);
         lv_obj_set_style_text_font(_searchTA, &lv_font_montserrat_12, 0);
         lv_obj_set_style_bg_color(_searchTA, lv_color_hex(CLR_SURFACE), 0);
