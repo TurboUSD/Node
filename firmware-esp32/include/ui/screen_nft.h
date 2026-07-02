@@ -189,7 +189,12 @@ public:
             if (_cacheExpired()) _startPinlistFetch();
             else                 _rebuildGrid();
         } else if (!storage.hasNftWallet()) {
-            _openWalletDialog();
+            // Don't pop a keyboard dialog automatically on swipe-in (that was the
+            // stray keyboard). Show a hint instead; the wallet is set from the
+            // node's web setup page, or by tapping the grid to open the dialog.
+            _rebuildGrid();
+            lv_label_set_text(_loadingLabel,
+                "No NFT wallet set.\nAdd one on your node's setup page.");
         } else if (_cacheExpired()) {
             _startFetch();
         } else {

@@ -244,6 +244,7 @@ private:
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
 
         lv_obj_t* valueLabel = lv_label_create(cell);
+        lv_label_set_text(valueLabel, "--");
         lv_obj_set_style_text_color(valueLabel, color, 0);
         lv_obj_set_style_text_font(valueLabel, &lv_font_montserrat_16, 0);
         return valueLabel;

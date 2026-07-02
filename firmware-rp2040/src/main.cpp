@@ -1,10 +1,10 @@
 // src/main.cpp — TurboUSD Node firmware, RP2040 side.
-// Drives the buzzer on command and reports the Grove AHT20 temp/humidity
+// Drives the buzzer on command and reports the on-board SHT41 temp/humidity
 // sensor back to the ESP32-S3. See PROTOCOL.md for the UART format.
 
 #include <Arduino.h>
 #include <Wire.h>
-#include "AHT20.h"
+#include <SensirionI2CSht4x.h>
 #include "board_pins.h"
 
 enum class Command : uint8_t {
@@ -91,27 +91,27 @@ void sendAck() {
     Serial1.write(0xAA);
 }
 
-// ── Ambient sensor (Grove AHT20 on the RP2040 I2C port) ─────────────────────
+// ── On-board SHT41 temp/humidity sensor (I2C0) ──────────────────────────────
 // Read on a slow cadence into a cache so answering READ_TH is instant and the
-// ~80 ms AHT20 conversion never stalls the alarm-tone loop. The S3 polls this.
-AHT20 aht;
+// sensor conversion never stalls the alarm-tone loop. The S3 polls this.
+SensirionI2CSht4x sht4x;
 const int16_t  TEMP_SENTINEL_NO_DATA = (int16_t)0x8000; // -32768 → "no valid reading"
 int16_t  cachedTempCenti = TEMP_SENTINEL_NO_DATA;        // centi-°C, signed
 uint16_t cachedHumCenti  = 0;                            // centi-% RH, unsigned
 uint32_t lastSensorReadAt = 0;
 const uint32_t SENSOR_READ_INTERVAL_MS = 2000;
 
-// Pull a fresh reading from the AHT20 into the cache. AHT20::getSensor returns
-// non-zero on success and reports humidity as a 0–1 fraction, temp in °C.
+// Pull a fresh reading from the SHT41 into the cache. measureHighPrecision
+// returns 0 on success and gives temperature in °C and humidity in %RH.
 void readSensorInto() {
-    float humiFrac, tempC;
-    int ok = aht.getSensor(&humiFrac, &tempC);
-    if (ok) {
+    float tempC = 0, humidityPct = 0;
+    uint16_t error = sht4x.measureHighPrecision(tempC, humidityPct);
+    if (error == 0) {
         cachedTempCenti = (int16_t)lroundf(tempC * 100.0f);
-        long h = lroundf(humiFrac * 100.0f * 100.0f); // fraction → % → centi-%
+        long h = lroundf(humidityPct * 100.0f);          // % → centi-%
         cachedHumCenti  = (uint16_t)constrain(h, 0, 10000);
     } else {
-        cachedTempCenti = TEMP_SENTINEL_NO_DATA;       // surfaces as "--" on the S3
+        cachedTempCenti = TEMP_SENTINEL_NO_DATA;         // surfaces as "--" on the S3
         cachedHumCenti  = 0;
     }
 }
@@ -170,11 +170,17 @@ void setup() {
     Serial1.setTX(UART_TO_S3_TX);
     Serial1.begin(UART_BAUD);
 
-    // Grove I2C bus for the AHT20 temp/humidity sensor.
-    Wire.setSDA(GROVE_I2C_SDA);
-    Wire.setSCL(GROVE_I2C_SCL);
+    // Power on the on-board sensors — REQUIRED before they respond (Seeed's
+    // sensor_power_on(): drive GPIO 18 HIGH). Without this the SHT41 is dead.
+    pinMode(SENSOR_PWR_PIN, OUTPUT);
+    digitalWrite(SENSOR_PWR_PIN, HIGH);
+    delay(20);  // let the sensor rail settle
+
+    // I2C0 bus shared by the on-board SHT41 / SCD41 / SGP40.
+    Wire.setSDA(SENSOR_I2C_SDA);
+    Wire.setSCL(SENSOR_I2C_SCL);
     Wire.begin();
-    aht.begin();
+    sht4x.begin(Wire, 0x44);   // SHT41 default I2C address
 }
 
 void loop() {

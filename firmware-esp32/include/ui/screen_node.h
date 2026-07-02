@@ -48,12 +48,14 @@ public:
         lv_obj_align(nameRow, LV_ALIGN_LEFT_MID, 0, 0);
 
         nodeNameLabel = lv_label_create(nameRow);
+        lv_label_set_text(nodeNameLabel, "");
         lv_obj_set_style_text_color(nodeNameLabel, lv_color_hex(0xe8b339), 0);
         lv_obj_set_style_text_font(nodeNameLabel, &lv_font_montserrat_16, 0);
         lv_label_set_long_mode(nodeNameLabel, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_obj_set_width(nodeNameLabel, 150);
 
         verifyBadge = lv_label_create(nameRow);
+        lv_label_set_text(verifyBadge, "");
         lv_obj_set_style_text_font(verifyBadge, &lv_font_montserrat_16, 0);
         lv_obj_add_flag(verifyBadge, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(verifyBadge, onVerifyBadgeTapped, LV_EVENT_CLICKED, userData);
@@ -72,10 +74,12 @@ public:
         lv_obj_set_style_text_font(uptimeTitle, &lv_font_montserrat_10, 0);
 
         uptimeValueLabel = lv_label_create(uptimeCol);
+        lv_label_set_text(uptimeValueLabel, "--");
         lv_obj_set_style_text_color(uptimeValueLabel, lv_color_hex(0x3aff7a), 0);
         lv_obj_set_style_text_font(uptimeValueLabel, &lv_font_montserrat_20, 0);
 
         rewardsLabel = lv_label_create(body);
+        lv_label_set_text(rewardsLabel, "--");
         lv_obj_set_style_text_font(rewardsLabel, &lv_font_montserrat_12, 0);
         lv_obj_align_to(rewardsLabel, topRow, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 2);
 
@@ -139,7 +143,7 @@ public:
     void setNodeName(const String& name) { lv_label_set_text(nodeNameLabel, name.c_str()); }
 
     void setVerified(bool verified) {
-        lv_label_set_text(verifyBadge, verified ? "\xE2\x9C\x93" : "\xE2\x8F\xB3");
+        lv_label_set_text(verifyBadge, verified ? "\xEF\x80\x8C" : "\xEF\x80\xA1");
         lv_obj_set_style_text_color(verifyBadge, verified ? lv_color_hex(0x1d9bf0) : lv_color_hex(0xe8b339), 0);
     }
 
@@ -148,7 +152,7 @@ public:
     void setRewards(bool verified, double tusdEarned) {
         if (verified) {
             char buf[40];
-            snprintf(buf, sizeof(buf), "Rewards: %.3f \xE2\x82\xB8USD", tusdEarned);
+            snprintf(buf, sizeof(buf), "Rewards: %.3f TUSD", tusdEarned);
             lv_label_set_text(rewardsLabel, buf);
             lv_obj_set_style_text_color(rewardsLabel, lv_color_hex(0x3aff7a), 0);
         } else {
@@ -274,7 +278,7 @@ private:
 
         char numBuf[8]; snprintf(numBuf, sizeof(numBuf), "#%ld", blockNumber);
         lv_label_set_text(w.numberLabel, numBuf);
-        char rewardBuf[16]; snprintf(rewardBuf, sizeof(rewardBuf), "\xE2\x82\xB8%d", (int)reward);
+        char rewardBuf[16]; snprintf(rewardBuf, sizeof(rewardBuf), "T%d", (int)reward);
         lv_label_set_text(w.rewardLabel, rewardBuf);
         lv_label_set_text(w.minerNameLabel, minerName.c_str());
 

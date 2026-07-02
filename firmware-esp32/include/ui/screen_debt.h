@@ -31,6 +31,7 @@ public:
         lv_obj_set_style_pad_all(topRow, 0, 0);
 
         totalDebtLabel = lv_label_create(topRow);
+        lv_label_set_text(totalDebtLabel, "--");
         lv_obj_set_style_text_color(totalDebtLabel, lv_color_hex(0xff4d4d), 0);
         lv_obj_set_style_text_font(totalDebtLabel, &lv_font_montserrat_32, 0);
         lv_obj_align(totalDebtLabel, LV_ALIGN_LEFT_MID, 0, 0);
@@ -55,7 +56,7 @@ public:
         lv_obj_add_event_cb(rangeButton, onRangeBtnTapped, LV_EVENT_CLICKED, userData);
         rangeButtonLabel = lv_label_create(rangeButton);
         lv_obj_set_style_text_font(rangeButtonLabel, &lv_font_montserrat_10, 0);
-        lv_label_set_text(rangeButtonLabel, "LAST 50Y \xE2\x96\xBE");
+        lv_label_set_text(rangeButtonLabel, "LAST 50Y \xEF\x81\xB8");
 
         chart = lv_chart_create(body);
         lv_obj_set_size(chart, LV_PCT(100), 130);

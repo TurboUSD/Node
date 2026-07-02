@@ -124,14 +124,16 @@ inline SharedFooterRefs buildSharedFooter(lv_obj_t* parent, lv_event_cb_t onQrTa
     // 2.4s) using lv_anim_t on the bg_opa style property.
 
     refs.nodeNameLabel = lv_label_create(bar);
+    lv_label_set_text(refs.nodeNameLabel, "");   // default so it never shows LVGL's "Text"
     lv_obj_set_style_text_color(refs.nodeNameLabel, lv_color_hex(0x9a9a9e), 0);
     lv_obj_set_style_text_font(refs.nodeNameLabel, &lv_font_montserrat_12, 0);
     lv_obj_align_to(refs.nodeNameLabel, refs.liveDot, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
 
     refs.nodeCountLabel = lv_label_create(bar);
+    lv_label_set_text(refs.nodeCountLabel, "| 0 NODES");   // default
     lv_obj_set_style_text_color(refs.nodeCountLabel, lv_color_hex(0x3aff7a), 0);
     lv_obj_set_style_text_font(refs.nodeCountLabel, &lv_font_montserrat_12, 0);
-    lv_obj_align_to(refs.nodeCountLabel, refs.nodeNameLabel, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_align_to(refs.nodeCountLabel, refs.nodeNameLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
 
     // Gear icon — tap opens the config popup (shows QR code + display preferences).
     refs.qrIcon = lv_label_create(bar);
@@ -192,9 +194,13 @@ inline void refreshSharedAlarmIcon(SharedHeaderRefs& refs, bool alarmEnabled, bo
     lv_obj_set_style_text_color(refs.alarmIcon, col, 0);
 }
 
+// nodeName should be the device's display name, or its node code while it has
+// no name yet. The count renders as "| N NODES", separated from the name by "|".
 inline void refreshSharedFooter(SharedFooterRefs& refs, const String& nodeName, int onlineNodeCount) {
-    lv_label_set_text(refs.nodeNameLabel, nodeName.c_str());
-    char countBuf[24];
-    snprintf(countBuf, sizeof(countBuf), "%d NODES", onlineNodeCount);
-    lv_label_set_text(refs.nodeCountLabel, countBuf);
+    if (refs.nodeNameLabel)  lv_label_set_text(refs.nodeNameLabel, nodeName.c_str());
+    if (refs.nodeCountLabel) {
+        char countBuf[24];
+        snprintf(countBuf, sizeof(countBuf), "| %d NODES", onlineNodeCount);
+        lv_label_set_text(refs.nodeCountLabel, countBuf);
+    }
 }

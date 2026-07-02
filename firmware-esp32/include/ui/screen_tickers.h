@@ -170,6 +170,7 @@ public:
 
         // Placeholder shown when no tickers are loaded yet
         _emptyLabel = lv_label_create(_body);
+        lv_label_set_text(_emptyLabel, "");
         lv_obj_set_style_text_color(_emptyLabel, lv_color_hex(CLR_MUTED), 0);
         lv_obj_set_style_text_font(_emptyLabel, &lv_font_montserrat_12, 0);
         lv_label_set_long_mode(_emptyLabel, LV_LABEL_LONG_WRAP);
@@ -370,7 +371,7 @@ private:
         lv_obj_set_style_text_color(symTxt, lv_color_hex(CLR_MUTED), 0);
 
         lv_obj_t* dot = lv_label_create(metaRow);
-        lv_label_set_text(dot, "\xC2\xB7");
+        lv_label_set_text(dot, "\xE2\x80\xA2");
         lv_obj_set_style_text_font(dot, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(dot, lv_color_hex(CLR_MUTED), 0);
 

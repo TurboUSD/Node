@@ -140,7 +140,7 @@ public:
 
         lv_obj_t* label = lv_label_create(_otaBadge);
         char text[48];
-        snprintf(text, sizeof(text), "\xE2\x86\x91 Firmware %s available — tap to install", version);
+        snprintf(text, sizeof(text), "\xEF\x81\xB7 Firmware %s available — tap to install", version);
         lv_label_set_text(label, text);
         lv_obj_set_style_text_color(label, lv_color_hex(0x3aff7a), 0);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
@@ -305,6 +305,7 @@ private:
     bool  _sensorValid  = false;
 
     bool  _screenOn     = true;   // user-button screen toggle state
+    int   _onlineNodeCount = 0;   // total online nodes in the network (footer "| N NODES")
 
     // ── Screen swipe order ───────────────────────────────────────────────────
 
@@ -774,7 +775,7 @@ private:
         lv_obj_set_style_text_color(clockWeatherLabel, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(clockWeatherLabel, &lv_font_montserrat_16, 0);
         lv_obj_align(clockWeatherLabel, LV_ALIGN_CENTER, 0, 64);
-        lv_label_set_text(clockWeatherLabel, "--\xC2\xB0 \xC2\xB7 --%");
+        lv_label_set_text(clockWeatherLabel, "--\xC2\xB0 \xE2\x80\xA2 --%");
 
         clockFooterRefs = buildSharedFooter(scr, onQrTapped, this);
 
@@ -811,6 +812,20 @@ private:
         refreshSharedHeader(tickerScreen.header, t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
         refreshSharedHeader(nftScreen.header,    t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
 
+        // Refresh every footer (node name/code + "| N NODES"). Nothing was
+        // calling this, so all footers showed LVGL's default "Text". Until the
+        // device has a display name, show its node code; before it's even
+        // registered, show a short placeholder.
+        String footerName = storage.getNodeCode();
+        if (footerName.length() == 0) footerName = "NEW NODE";
+        refreshSharedFooter(clockFooterRefs,     footerName, _onlineNodeCount);
+        refreshSharedFooter(turboScreen.footer,  footerName, _onlineNodeCount);
+        refreshSharedFooter(debtScreen.footer,   footerName, _onlineNodeCount);
+        refreshSharedFooter(gameScreen.footer,   footerName, _onlineNodeCount);
+        refreshSharedFooter(nodeScreen.footer,   footerName, _onlineNodeCount);
+        refreshSharedFooter(tickerScreen.footer, footerName, _onlineNodeCount);
+        refreshSharedFooter(nftScreen.footer,    footerName, _onlineNodeCount);
+
         // Clock/Home screen text only below
         if (currentScreen != ScreenId::CLOCK) return;
 
@@ -819,9 +834,9 @@ private:
             char wBuf[24];
             if (_sensorValid) {
                 float dT = (tempUnit == 'F') ? (_tempC * 9.0f / 5.0f + 32.0f) : _tempC;
-                snprintf(wBuf, sizeof(wBuf), "%d\xC2\xB0 \xC2\xB7 %d%%", (int)roundf(dT), _humidityPct);
+                snprintf(wBuf, sizeof(wBuf), "%d\xC2\xB0 \xE2\x80\xA2 %d%%", (int)roundf(dT), _humidityPct);
             } else {
-                snprintf(wBuf, sizeof(wBuf), "--\xC2\xB0 \xC2\xB7 --%%");
+                snprintf(wBuf, sizeof(wBuf), "--\xC2\xB0 \xE2\x80\xA2 --%%");
             }
             lv_label_set_text(clockWeatherLabel, wBuf);
         }
@@ -845,14 +860,14 @@ private:
         // Alarm label on clock screen: colour and text reflect today's status
         char alarmBuf[28];
         if (!alarmOn) {
-            snprintf(alarmBuf, sizeof(alarmBuf), "\xE2\x8F\xB0 off");
+            snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 off");
             lv_obj_set_style_text_color(clockAlarmLabel, lv_color_hex(0x6e7280), 0);
         } else if (!todayOn) {
-            snprintf(alarmBuf, sizeof(alarmBuf), "\xE2\x8F\xB0 %02d:%02d (not today)",
+            snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 %02d:%02d (not today)",
                      storage.getAlarmHour(), storage.getAlarmMinute());
             lv_obj_set_style_text_color(clockAlarmLabel, lv_color_hex(0x9a9a9e), 0);
         } else {
-            snprintf(alarmBuf, sizeof(alarmBuf), "\xE2\x8F\xB0 %02d:%02d",
+            snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 %02d:%02d",
                      storage.getAlarmHour(), storage.getAlarmMinute());
             lv_obj_set_style_text_color(clockAlarmLabel, lv_color_hex(0xe8b339), 0);
         }
@@ -1135,7 +1150,7 @@ private:
         lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
             sSelf->debtYearsRangeIndex = lv_roller_get_selected(sRoller);
             int years = yearValues[sSelf->debtYearsRangeIndex];
-            char btnLabel[12]; snprintf(btnLabel, sizeof(btnLabel), "LAST %dY \xE2\x96\xBE", years);
+            char btnLabel[12]; snprintf(btnLabel, sizeof(btnLabel), "LAST %dY \xEF\x81\xB8", years);
             sSelf->debtScreen.setRangeButtonLabel(btnLabel);
             sSelf->reloadDebtHistory(years);
             closeModal(sCard);
@@ -1186,7 +1201,8 @@ private:
         lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
     }
 
-    void showScreen(ScreenId id, bool animate = true) {
+    void showScreen(ScreenId id, bool animate = true,
+                    lv_scr_load_anim_t anim = LV_SCR_LOAD_ANIM_MOVE_LEFT) {
         currentScreen = id;
         // Update swipe position to stay in sync with direct navigation (e.g. logo tap → home)
         for (int i = 0; i < (int)ScreenId::COUNT; i++) {
@@ -1195,7 +1211,7 @@ private:
         // Instant (non-animated) load for the very first screen at boot: a screen
         // animation that's still running when the provisioning screen loads can
         // corrupt LVGL and crash. Navigation taps/swipes still animate.
-        if (animate) lv_scr_load_anim(screens[(int)id], LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+        if (animate) lv_scr_load_anim(screens[(int)id], anim, 300, 0, false);
         else         lv_scr_load(screens[(int)id]);
         // Trigger data load when ticker screen becomes visible
         if (id == ScreenId::TICKERS) {
@@ -1209,6 +1225,11 @@ private:
 
     void attachSwipeGesture(lv_obj_t* screen) {
         lv_obj_set_user_data(screen, this);
+        // A scrollable screen swallows horizontal drags as (dead-end) scrolling,
+        // which made only one swipe direction register. The content fits 480×480,
+        // so the screen itself never needs to scroll — clearing the flag lets both
+        // left and right swipes reliably fire the gesture.
+        lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_event_cb(screen, [](lv_event_t* e) {
             lv_obj_t* target = lv_event_get_current_target(e);
             UiManager* self = (UiManager*)lv_obj_get_user_data(target);
@@ -1217,10 +1238,10 @@ private:
             int count = (int)ScreenId::COUNT;
             if (dir == LV_DIR_LEFT) {
                 int newPos = (self->_currentSwipePos + 1) % count;
-                self->showScreen((ScreenId)self->_swipeOrder[newPos]);
+                self->showScreen((ScreenId)self->_swipeOrder[newPos], true, LV_SCR_LOAD_ANIM_MOVE_LEFT);
             } else if (dir == LV_DIR_RIGHT) {
                 int newPos = (self->_currentSwipePos - 1 + count) % count;
-                self->showScreen((ScreenId)self->_swipeOrder[newPos]);
+                self->showScreen((ScreenId)self->_swipeOrder[newPos], true, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
             }
         }, LV_EVENT_GESTURE, nullptr);
     }
