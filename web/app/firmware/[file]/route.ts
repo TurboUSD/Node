@@ -17,7 +17,16 @@ const REPO = 'turbousd/node'
 // Allow-list of filenames we publish, so this can't be abused as an open proxy
 // for arbitrary release assets.
 const ALLOWED: Record<string, string> = {
-  'firmware-esp32s3.bin': 'application/octet-stream',
+  // Multi-part factory image (flashed at discrete offsets by esp-web-tools). We
+  // deliberately DON'T ship one merged blob starting at 0x0 anymore: a merged
+  // image spans the NVS partition (0x9000) and fills it with 0xFF, wiping the
+  // saved WiFi credentials on every re-flash. Writing the parts separately skips
+  // the NVS region, so updating the firmware keeps the device's WiFi + settings.
+  'bootloader.bin': 'application/octet-stream',
+  'partitions.bin': 'application/octet-stream',
+  'boot_app0.bin':  'application/octet-stream',
+  'app.bin':        'application/octet-stream',
+  'firmware-esp32s3.bin': 'application/octet-stream', // legacy merged image, kept for manual full flashes
   'manifest.json': 'application/json',
 }
 

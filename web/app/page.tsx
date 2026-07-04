@@ -577,7 +577,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
                 <div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-top:2px">${memberStr}</div>
               </div>
             </div>
-            <a href="/setup/${node.node_code}" style="display:block;text-align:center;background:#1c1c1c;border:1px solid #2a2a2a;border-radius:8px;padding:8px;font-size:12px;font-weight:600;color:#e8e8e8;text-decoration:none">View profile →</a>
+            <a href="/node/${node.node_code}" style="display:block;text-align:center;background:#1c1c1c;border:1px solid #2a2a2a;border-radius:8px;padding:8px;font-size:12px;font-weight:600;color:#e8e8e8;text-decoration:none">View profile →</a>
           </div>
         `
         marker.bindPopup(popupHtml, {
@@ -730,7 +730,7 @@ function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void 
       <div style={{ flex: 1, minWidth: 0 }}>
         {/* Row 1: name + badges + code */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const }}>
-          <a href={`/setup/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ ...s.nodeName, textDecoration: 'none', color: C.text }}>
+          <a href={`/node/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ ...s.nodeName, textDecoration: 'none', color: C.text }}>
             {node.display_name || `Node #${node.node_code}`}
           </a>
           {node.is_verified && (
@@ -787,7 +787,7 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
           }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap' as const, overflow: 'hidden' }}>
-              <a href={`/setup/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, fontWeight: 600, color: C.text, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <a href={`/node/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, fontWeight: 600, color: C.text, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {node.display_name || `Node #${node.node_code}`}
               </a>
               {node.is_verified && <span style={{ fontSize: 10, color: '#1d9bf0', fontWeight: 700, flexShrink: 0 }}>✓</span>}
@@ -818,7 +818,7 @@ function NodeRowCard({ node, right, prefix, onClick }: {
       }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={s.nodeName}>
-          <a href={`/setup/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ color: C.text, textDecoration: 'none', fontWeight: 600 }}>
+          <a href={`/node/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ color: C.text, textDecoration: 'none', fontWeight: 600 }}>
             {node.display_name || `Node #${node.node_code}`}
           </a>
           {node.is_verified && <span style={s.verifiedBadge}>✓</span>}
@@ -853,7 +853,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
   function shareOnX() {
     const name = node.display_name || `Node #${node.node_code}`
     const text = `My node "${name}" is live on the @turbousd network ⛏\n${node.blocks_won} blocks won · ${node.total_tusd_earned.toFixed(2)} ₸USD earned · ⚡ ${node.uptime_pct}% uptime`
-    const url  = `https://network.turbousd.com/setup/${node.node_code}`
+    const url  = `https://network.turbousd.com/node/${node.node_code}`
     window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank')
   }
 
@@ -904,7 +904,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
           <DetailStat label="Total earned" value={`₸${node.total_tusd_earned.toFixed(4)}`} color={C.green}  />
           <DetailStat label="Blocks won"   value={String(node.blocks_won)}                 color={C.blue}   />
           <DetailStat label="Uptime"       value={`⚡ ${node.uptime_pct}%`}               color={uptimeColor} />
-          <DetailStat label="On network"   value={memberDuration(node.created_at)}          color={C.yellow} />
+          <DetailStat label="Since"        value={new Date(node.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} color={C.yellow} />
         </div>
 
         {/* Last block won */}
@@ -941,8 +941,10 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
 
 function DetailStat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div style={s.detailStat}>
-      <div style={{ fontSize: 16, fontWeight: 'bold', color }}>{value}</div>
+    <div style={{ ...s.detailStat, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
+      {/* Fixed lineHeight so a value containing an emoji (e.g. "⚡ 98%") lines up
+          vertically with the plain-text values instead of sitting slightly lower. */}
+      <div style={{ fontSize: 16, fontWeight: 'bold', color, lineHeight: '22px', height: 22 }}>{value}</div>
       <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )

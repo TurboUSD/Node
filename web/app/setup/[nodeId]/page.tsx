@@ -982,7 +982,7 @@ const s: Record<string, React.CSSProperties> = {
   badge:     { background: C.green, color: C.onGreen, fontSize: 10, fontWeight: 'bold', padding: '2px 6px', borderRadius: 4 },
   genBadge:  { fontSize: 14 },
   setupLink: { color: C.muted, fontSize: 13, textDecoration: 'none', border: `1px solid ${C.border}`, padding: '5px 10px', borderRadius: 6 },
-  statsBar:  { display: 'flex', justifyContent: 'center', gap: 36, padding: '14px 20px 10px', borderBottom: `1px solid ${C.border}`, background: C.card },
+  statsBar:  { display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 36, padding: '14px 20px 10px', borderBottom: `1px solid ${C.border}`, background: C.card },
 
   section: {
     borderLeft: `3px solid ${C.green}`, paddingLeft: 16,
