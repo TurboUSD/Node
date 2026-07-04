@@ -1199,14 +1199,18 @@ private:
         lv_label_set_text(title, "DEVICE SETUP");
         lv_obj_set_style_text_color(title, lv_color_hex(0x9a9a9e), 0);
 
-        // QR + link point to the node's PUBLIC page (bio, stats, owner info),
-        // not the private /setup/ owner-config route (which 404s for visitors
-        // and for any code the backend hasn't registered). See web/app/node/.
-        String publicUrl = "https://network.turbousd.com/node/" + storage.getNodeCode();
-        addQrCode(card, publicUrl.c_str(), 120);
+        // The DEVICE's config QR is the OWNER's entry point: whoever physically
+        // holds the device (and sees this screen) is treated as the owner, so it
+        // points at the private /setup/ page. The PUBLIC profile (/node/<code>)
+        // is what the network map / ranking links use instead — see web/app/node/.
+        // ("No node found" here means the backend simply has no record for this
+        // code yet, i.e. Supabase isn't deployed / the node never registered —
+        // it is not a wrong-URL problem.)
+        String setupUrl = "https://network.turbousd.com/setup/" + storage.getNodeCode();
+        addQrCode(card, setupUrl.c_str(), 120);
 
         lv_obj_t* urlHint = lv_label_create(card);
-        lv_label_set_text(urlHint, publicUrl.c_str());
+        lv_label_set_text(urlHint, setupUrl.c_str());
         lv_obj_set_style_text_color(urlHint, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(urlHint, &lv_font_montserrat_10, 0);
 
