@@ -69,24 +69,31 @@ public:
         lv_obj_align_to(chartTitle, topRow, LV_ALIGN_OUT_BOTTOM_LEFT, 30, 4);
 
         chart = lv_chart_create(body);
-        lv_obj_set_size(chart, 410, 116);   // ~30px left gutter reserved for the Y legend
-        lv_obj_align_to(chart, chartTitle, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
+        lv_obj_set_size(chart, LV_PCT(100), 128);
+        lv_obj_align_to(chart, chartTitle, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
-        lv_obj_set_style_pad_all(chart, 0, 0);   // series spans the FULL width — no dead margin on the right
+        // Left padding holds the Y-axis $T tick labels; a little bottom padding
+        // keeps the line off the very edge. The series still uses the full plot.
+        lv_obj_set_style_pad_left(chart, 40, 0);
+        lv_obj_set_style_pad_right(chart, 4, 0);
+        lv_obj_set_style_pad_top(chart, 4, 0);
+        lv_obj_set_style_pad_bottom(chart, 2, 0);
         lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
-        lv_chart_set_div_line_count(chart, 3, 0);
+        lv_chart_set_div_line_count(chart, 4, 1);
         lv_chart_set_point_count(chart, 40);
+        // Y axis: 4 major ticks WITH labels (intermediate $T values, not just the
+        // endpoints). The draw callback below rewrites each tick's text into "$Nt".
+        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 40);
         debtSeries = lv_chart_add_series(chart, lv_color_hex(0xff4d4d), LV_CHART_AXIS_PRIMARY_Y);
         lv_obj_add_flag(chart, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(chart, _axisDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
 
-        // Y-axis legend (max at top, min at bottom, in $T) in the left gutter,
-        // and X-axis legend (first → last year) under the chart. Values are filled
-        // in by updateAxisLegend() once the history loads.
-        yAxisTopLabel   = _axisLabel(body);  lv_obj_align_to(yAxisTopLabel,   chart, LV_ALIGN_OUT_LEFT_TOP,     -2, 0);
-        yAxisBotLabel   = _axisLabel(body);  lv_obj_align_to(yAxisBotLabel,   chart, LV_ALIGN_OUT_LEFT_BOTTOM,  -2, 0);
-        xAxisLeftLabel  = _axisLabel(body);  lv_obj_align_to(xAxisLeftLabel,  chart, LV_ALIGN_OUT_BOTTOM_LEFT,   0, 2);
-        xAxisRightLabel = _axisLabel(body);  lv_obj_align_to(xAxisRightLabel, chart, LV_ALIGN_OUT_BOTTOM_RIGHT,  0, 2);
+        // X-axis year labels (start / middle / end) under the chart — filled by
+        // updateAxisLegend() once the history loads.
+        xYearLeft  = _axisLabel(body); lv_obj_align_to(xYearLeft,  chart, LV_ALIGN_OUT_BOTTOM_LEFT,  40, 1);
+        xYearMid   = _axisLabel(body); lv_obj_align_to(xYearMid,   chart, LV_ALIGN_OUT_BOTTOM_MID,   18, 1);
+        xYearRight = _axisLabel(body); lv_obj_align_to(xYearRight, chart, LV_ALIGN_OUT_BOTTOM_RIGHT, -2, 1);
 
         // SINCE (left) and RATE (right) on one flex row, pushed to the edges and
         // vertically centred. Using flex space-between (instead of absolute
@@ -144,21 +151,31 @@ public:
     // Set the axis legends from the loaded history: X = first→last year,
     // Y = min→max total in $T. Called from UiManager::reloadDebtHistory.
     void updateAxisLegend(int startYear, int endYear, double minUsd, double maxUsd) {
+        (void)minUsd; (void)maxUsd;   // Y values now render as $T axis ticks (see _axisDrawCb)
         char buf[12];
-        if (yAxisTopLabel) { snprintf(buf, sizeof(buf), "$%.0fT", maxUsd / 1e12); lv_label_set_text(yAxisTopLabel, buf); }
-        if (yAxisBotLabel) { snprintf(buf, sizeof(buf), "$%.0fT", minUsd / 1e12); lv_label_set_text(yAxisBotLabel, buf); }
-        if (xAxisLeftLabel)  { snprintf(buf, sizeof(buf), "%d", startYear); lv_label_set_text(xAxisLeftLabel, buf); }
-        if (xAxisRightLabel) { snprintf(buf, sizeof(buf), "%d", endYear);   lv_label_set_text(xAxisRightLabel, buf); }
+        if (xYearLeft)  { snprintf(buf, sizeof(buf), "%d", startYear);              lv_label_set_text(xYearLeft, buf); }
+        if (xYearMid)   { snprintf(buf, sizeof(buf), "%d", (startYear + endYear) / 2); lv_label_set_text(xYearMid, buf); }
+        if (xYearRight) { snprintf(buf, sizeof(buf), "%d", endYear);               lv_label_set_text(xYearRight, buf); }
+    }
+
+    // Rewrites each Y-axis tick label into "$Nt". Chart values are scaled to
+    // USD/1e11, so trillions = value / 10.
+    static void _axisDrawCb(lv_event_t* e) {
+        lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
+        if (!lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) return;
+        if (dsc->text == NULL) return;
+        if (dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
+            snprintf(dsc->text, dsc->text_length, "$%.0ft", (double)dsc->value / 10.0);
+        }
     }
 
 private:
     lv_obj_t* totalDebtLabel = nullptr;
     lv_obj_t* chart = nullptr;
     lv_obj_t* chartTitle = nullptr;
-    lv_obj_t* yAxisTopLabel = nullptr;
-    lv_obj_t* yAxisBotLabel = nullptr;
-    lv_obj_t* xAxisLeftLabel = nullptr;
-    lv_obj_t* xAxisRightLabel = nullptr;
+    lv_obj_t* xYearLeft = nullptr;
+    lv_obj_t* xYearMid = nullptr;
+    lv_obj_t* xYearRight = nullptr;
     lv_chart_series_t* debtSeries = nullptr;
 
     // Small grey axis-legend label helper.

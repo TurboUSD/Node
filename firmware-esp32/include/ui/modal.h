@@ -35,6 +35,10 @@ inline lv_obj_t* openModal(lv_obj_t* parent) {
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(card, 10, 0);
+    // Popups only ever scroll vertically — never sideways. Without this, wide
+    // inner content (day pickers, calendar grid, rollers) let the card scroll
+    // horizontally, which felt broken.
+    lv_obj_set_scroll_dir(card, LV_DIR_VER);
 
     // Every modal gets a round "X" in the top-right corner so it can always be
     // dismissed, regardless of whatever buttons the caller adds. IGNORE_LAYOUT

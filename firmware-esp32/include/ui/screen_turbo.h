@@ -39,7 +39,7 @@ public:
 
         lv_obj_t* row1 = makeStatRow(body);
         supplyValueLabel = makeStatCell(row1, "SUPPLY", lv_color_hex(0x3a8ade));
-        priceValueLabel = makeStatCell(row1, "PRICE", lv_color_hex(0x3aff7a));
+        makePriceCell(row1);  // price needs a multi-label value for the subscript
 
         lv_obj_t* row2 = makeStatRow(body);
         burnedValueLabel = makeStatCell(row2, "TOTAL BURNED", lv_color_hex(0xff4d4d));
@@ -76,8 +76,7 @@ public:
         snprintf(buf, sizeof(buf), "%s", formatCompact(data.tusdSupplyNum - data.tusdBurnedNum).c_str());
         lv_label_set_text(supplyValueLabel, buf);
 
-        snprintf(buf, sizeof(buf), "%s", formatPriceSubscript(data.tusdPriceUsd).c_str());
-        lv_label_set_text(priceValueLabel, buf);
+        _renderPrice(data.tusdPriceUsd);
 
         double supply = data.tusdSupplyNum > 0 ? data.tusdSupplyNum : 100000000000.0;
         double burnedPct = (data.tusdBurnedNum / supply) * 100.0;
@@ -92,9 +91,7 @@ public:
     // aggregator (DexScreener/GeckoTerminal) rather than the treasury service.
     void updatePrice(double priceUsd) {
         if (priceUsd <= 0) return;
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%s", formatPriceSubscript(priceUsd).c_str());
-        lv_label_set_text(priceValueLabel, buf);
+        _renderPrice(priceUsd);
     }
 
     // Loads real OHLCV candles fetched via api_client.h's
@@ -155,9 +152,75 @@ private:
     double _priceRange = 1.0;
 
     lv_obj_t* supplyValueLabel = nullptr;
-    lv_obj_t* priceValueLabel = nullptr;
+    lv_obj_t* priceValueBox = nullptr;   // holds the multi-label price (with subscript)
     lv_obj_t* burnedValueLabel = nullptr;
     lv_obj_t* treasuryValueLabel = nullptr;
+
+    // Builds the PRICE stat cell whose value area is a horizontal box we can fill
+    // with several labels, so the zero-run count can render as a real subscript.
+    void makePriceCell(lv_obj_t* row) {
+        lv_obj_t* cell = lv_obj_create(row);
+        lv_obj_set_size(cell, LV_PCT(49), LV_PCT(100));
+        lv_obj_set_style_bg_opa(cell, LV_OPA_0, 0);
+        lv_obj_set_style_border_color(cell, lv_color_hex(0x262626), 0);
+        lv_obj_set_style_border_width(cell, 1, 0);
+        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t* lbl = lv_label_create(cell);
+        lv_label_set_text(lbl, "PRICE");
+        lv_obj_set_style_text_color(lbl, lv_color_hex(0x9a9a9e), 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
+
+        priceValueBox = lv_obj_create(cell);
+        lv_obj_set_size(priceValueBox, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(priceValueBox, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(priceValueBox, 0, 0);
+        lv_obj_set_style_pad_all(priceValueBox, 0, 0);
+        lv_obj_set_style_pad_column(priceValueBox, 0, 0);
+        lv_obj_clear_flag(priceValueBox, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(priceValueBox, LV_FLEX_FLOW_ROW);
+        // Cross-align END puts the small subscript label on the BOTTOM baseline,
+        // matching how DexScreener renders 0.0₄1234.
+        lv_obj_set_flex_align(priceValueBox, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    }
+
+    // Adds one label to the price box.
+    lv_obj_t* _priceLabel(const char* txt, const lv_font_t* font) {
+        lv_obj_t* l = lv_label_create(priceValueBox);
+        lv_label_set_text(l, txt);
+        lv_obj_set_style_text_color(l, lv_color_hex(0x3aff7a), 0);
+        lv_obj_set_style_text_font(l, font, 0);
+        return l;
+    }
+
+    // Renders the price into priceValueBox. For tiny prices (< $0.01) it shows
+    // DexScreener-style "$0.0<sub>N</sub>MANT", where N (the count of extra
+    // leading zeros) is a real subscript (smaller font on the bottom baseline).
+    void _renderPrice(double n) {
+        if (!priceValueBox) return;
+        lv_obj_clean(priceValueBox);
+        char buf[24];
+        if (n <= 0) {
+            _priceLabel("$0.00", &lv_font_montserrat_16);
+            return;
+        }
+        if (n >= 0.01) {
+            snprintf(buf, sizeof(buf), "$%.4f", n);
+            _priceLabel(buf, &lv_font_montserrat_16);
+            return;
+        }
+        int leadingZeros = (int)floor(-log10(n)) - 1;
+        if (leadingZeros < 0) leadingZeros = 0;
+        double mantissa = n * pow(10, leadingZeros + 2);   // in [1,10)
+        int digits4 = (int)llround(mantissa * 1000.0);      // 4 significant digits
+        _priceLabel("$0.0", &lv_font_montserrat_16);
+        snprintf(buf, sizeof(buf), "%d", leadingZeros);
+        _priceLabel(buf, &lv_font_montserrat_10);           // subscript (small, bottom)
+        snprintf(buf, sizeof(buf), "%d", digits4);
+        _priceLabel(buf, &lv_font_montserrat_16);
+    }
 
     // Two-phase candlestick draw using a single BAR series:
     //   DRAW_PART_BEGIN  — reshape each bar into a thin grey wick (low→high).

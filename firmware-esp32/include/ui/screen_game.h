@@ -40,13 +40,30 @@ public:
         lv_obj_align_to(detailLabel, projectedValueLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
 
         chart = lv_chart_create(body);
-        lv_obj_set_size(chart, LV_PCT(100), 180);
-        lv_obj_align_to(chart, detailLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+        lv_obj_set_size(chart, LV_PCT(100), 168);
+        lv_obj_align_to(chart, detailLabel, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
+        lv_obj_set_style_pad_left(chart, 44, 0);    // room for the Y-axis $ labels
+        lv_obj_set_style_pad_bottom(chart, 2, 0);
         lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
         lv_chart_set_point_count(chart, 24);
+        lv_chart_set_div_line_count(chart, 4, 1);
+        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 44);
         projectionSeries = lv_chart_add_series(chart, lv_color_hex(0xff4d4d), LV_CHART_AXIS_PRIMARY_Y);
+        lv_obj_add_event_cb(chart, _axisDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
+
+        // X-axis: "now" on the left, the horizon (e.g. "30Y") on the right.
+        xStartLabel = lv_label_create(body);
+        lv_label_set_text(xStartLabel, "now");
+        lv_obj_set_style_text_color(xStartLabel, lv_color_hex(0x6e7280), 0);
+        lv_obj_set_style_text_font(xStartLabel, &lv_font_montserrat_10, 0);
+        lv_obj_align_to(xStartLabel, chart, LV_ALIGN_OUT_BOTTOM_LEFT, 44, 0);
+        xEndLabel = lv_label_create(body);
+        lv_label_set_text(xEndLabel, "");
+        lv_obj_set_style_text_color(xEndLabel, lv_color_hex(0x6e7280), 0);
+        lv_obj_set_style_text_font(xEndLabel, &lv_font_montserrat_10, 0);
+        lv_obj_align_to(xEndLabel, chart, LV_ALIGN_OUT_BOTTOM_RIGHT, -2, 0);
 
         yearsButton = lv_btn_create(chart);
         lv_obj_set_style_bg_color(yearsButton, lv_color_hex(0x262626), 0);
@@ -78,6 +95,11 @@ public:
     }
 
     void setYearsButtonLabel(const String& text) { lv_label_set_text(yearsButtonLabel, text.c_str()); }
+    void setHorizonLabel(int years) {
+        if (!xEndLabel) return;
+        char b[8]; snprintf(b, sizeof(b), "%dY", years);
+        lv_label_set_text(xEndLabel, b);
+    }
     lv_chart_series_t* getSeries() { return projectionSeries; }
     lv_obj_t* getChart() { return chart; }
 
@@ -93,4 +115,18 @@ private:
     lv_chart_series_t* projectionSeries = nullptr;
     lv_obj_t* yearsButton = nullptr;
     lv_obj_t* yearsButtonLabel = nullptr;
+    lv_obj_t* xStartLabel = nullptr;
+    lv_obj_t* xEndLabel = nullptr;
+
+    // Formats the Y-axis $ ticks compactly ("$10k", "$7k"…).
+    static void _axisDrawCb(lv_event_t* e) {
+        lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
+        if (!lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) return;
+        if (dsc->text == NULL) return;
+        if (dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
+            int v = (int)dsc->value;
+            if (v >= 1000) snprintf(dsc->text, dsc->text_length, "$%.1fk", v / 1000.0);
+            else           snprintf(dsc->text, dsc->text_length, "$%d", v);
+        }
+    }
 };

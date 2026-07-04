@@ -305,6 +305,8 @@ private:
     int gameYearsIndex = 1;
     double _debtPerSecond = 0.0;   // US-debt-clock rate, derived from history
     bool   _debtHistLoaded = false;
+    double _annualDebasementRate = 0.08;  // yearly $ debasement for the inflation game,
+                                          // derived from real debt growth (fallback 8%)
 
     lv_obj_t* clockTimeLabel = nullptr;
     lv_obj_t* clockDateLabel = nullptr;
@@ -1144,6 +1146,9 @@ private:
         lv_obj_set_style_border_width(grid, 0, 0);
         lv_obj_set_style_pad_all(grid, 0, 0);
         lv_obj_set_style_pad_row(grid, 3, 0);
+        lv_obj_set_style_pad_column(grid, 0, 0);   // CRITICAL: the theme's default column
+                                                   // gap made 7×36px cells overflow 252px and
+                                                   // wrap to 6/row, dropping Sat/Sun. Zero it.
         lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
         lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -1318,6 +1323,16 @@ private:
             lv_chart_set_next_value(debtScreen.getChart(), debtScreen.getSeries(), scaled);
         }
         debtScreen.updateAxisLegend(points[0].year, points[count - 1].year, minUsd, maxUsd);
+
+        // Derive a real annual $ debasement rate from the debt's growth over the
+        // loaded span, for the inflation game. (Compound annual growth rate.)
+        if (count >= 2 && points[count - 1].year > points[0].year && points[0].totalDebtUsd > 0) {
+            double growth = points[count - 1].totalDebtUsd / points[0].totalDebtUsd;
+            int span = points[count - 1].year - points[0].year;
+            double r = pow(growth, 1.0 / span) - 1.0;
+            if (r > 0.005 && r < 0.6) _annualDebasementRate = r;
+        }
+        _updateGameProjection();
         // Derive the debt-clock rate ($/sec) from the most recent year-over-year
         // change, then refresh the SINCE / RATE widgets.
         if (count >= 2) {
@@ -1378,13 +1393,50 @@ private:
         }, LV_EVENT_CLICKED, nullptr);
     }
 
+    // Recompute the inflation-game projection ($10,000 eroded by the real annual
+    // debasement rate over the selected horizon) and redraw its chart + labels.
+    void _updateGameProjection() {
+        static const int yearOpts[9] = {1, 3, 5, 10, 20, 30, 50, 75, 100};
+        int years = yearOpts[gameYearsIndex % 9];
+        double rate = _annualDebasementRate;
+
+        lv_obj_t* c = gameScreen.getChart();
+        lv_chart_series_t* s = gameScreen.getSeries();
+        const int N = 24;
+        lv_chart_set_point_count(c, N);
+
+        double endV = 10000.0 * pow(1.0 / (1.0 + rate), (double)years);
+        // Fit the Y axis to the curve (default 0..100 would clip $10,000 flat —
+        // that's why the line/number never appeared).
+        lv_coord_t lo = (lv_coord_t)(endV * 0.9);
+        lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, lo, 10000);
+        for (int i = 0; i < N; i++) {
+            double t = years * (double)i / (N - 1);
+            double v = 10000.0 * pow(1.0 / (1.0 + rate), t);
+            lv_chart_set_next_value(c, s, (lv_coord_t)v);
+        }
+
+        int dayCount = (int)(millis() / 86400000UL);
+        gameScreen.updateProjection(dayCount, endV, years);
+        gameScreen.setHorizonLabel(years);
+    }
+
     void openGameYearsPicker() {
         static const char* options = "1Y\n3Y\n5Y\n10Y\n20Y\n30Y\n50Y\n75Y\n100Y";
+        static const int yearOpts[9] = {1, 3, 5, 10, 20, 30, 50, 75, 100};
         lv_obj_t* card = openModal(lv_scr_act());
-        addOptionPicker(card, options, gameYearsIndex);
+        lv_obj_t* roller = addOptionPicker(card, options, gameYearsIndex);
         lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
-        static lv_obj_t* sCard; sCard = card;
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
+        static lv_obj_t* sCard;   sCard = card;
+        static lv_obj_t* sRoller; sRoller = roller;
+        static UiManager* sSelf;  sSelf = this;
+        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
+            sSelf->gameYearsIndex = lv_roller_get_selected(sRoller);
+            char lbl[10]; snprintf(lbl, sizeof(lbl), "%dY \xEF\x81\xB8", yearOpts[sSelf->gameYearsIndex % 9]);
+            sSelf->gameScreen.setYearsButtonLabel(lbl);
+            sSelf->_updateGameProjection();
+            closeModal(sCard);
+        }, LV_EVENT_CLICKED, nullptr);
     }
 
     void showScreen(ScreenId id, bool animate = true,
@@ -1406,6 +1458,11 @@ private:
         // Trigger NFT load (wallet prompt or cache refresh) when NFT screen shown
         if (id == ScreenId::NFT) {
             nftScreen.onShow();
+        }
+        // Refresh the inflation-game projection each time it's shown (uses the
+        // latest debasement rate + selected horizon).
+        if (id == ScreenId::INFLATION_GAME) {
+            _updateGameProjection();
         }
     }
 

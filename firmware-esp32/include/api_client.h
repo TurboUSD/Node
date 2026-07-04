@@ -7,6 +7,7 @@
 
 #pragma once
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include "config.h"
 #include "storage.h"
@@ -186,9 +187,18 @@ public:
     // Real TurboUSD treasury/supply/price data -- see config.h for the URL.
     TreasuryData fetchTreasuryData() {
         TreasuryData result;
+        // The treasury response is large (~40 KB: chartData, operations[47],
+        // strategicRows, flywheelData…). The old 8 s timeout on a plain client
+        // often expired mid-download over TLS, so the parse never completed and
+        // SUPPLY / TOTAL BURNED stayed "--". Use an explicit insecure TLS client
+        // (belt-and-suspenders vs cert-bundle gaps) with a generous timeout.
+        WiFiClientSecure client;
+        client.setInsecure();
         HTTPClient http;
-        http.begin(ENDPOINT_TREASURY_DATA);
-        http.setTimeout(8000);
+        http.begin(client, ENDPOINT_TREASURY_DATA);
+        http.setConnectTimeout(8000);
+        http.setTimeout(20000);
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
         int statusCode = http.GET();
         if (statusCode != 200) {
             Serial.printf("fetchTreasuryData failed, HTTP %d\n", statusCode);

@@ -183,6 +183,19 @@ void setup() {
     Wire.setSCL(GROVE_I2C_SCL);
     Wire.begin();
     aht.begin();
+
+    // Boot self-test: two short beeps at max drive so it's immediately obvious
+    // the buzzer + BUZZER_PIN are correct, INDEPENDENT of the UART/alarm path.
+    //   • Beeps at power-on  → buzzer hardware/pin OK; any "alarm silent" issue
+    //     is upstream (UART link or the ESP32 not sending the command).
+    //   • No beep at power-on → BUZZER_PIN wrong or buzzer not driven.
+    for (int i = 0; i < 2; i++) {
+        analogWriteFreq(2000);
+        analogWrite(BUZZER_PIN, 128);   // ~50% duty = loudest a passive buzzer gets
+        delay(120);
+        analogWrite(BUZZER_PIN, 0);
+        delay(90);
+    }
 }
 
 void loop() {
