@@ -140,7 +140,7 @@ void processCommand(uint8_t cmd) {
         case Command::PLAY_ALARM_V5: startAlarm(5); sendAck(); break;
         case Command::STOP_ALARM:
             alarmActive = false;
-            stopTone();
+            buzzerOff();
             sendAck();
             break;
         case Command::PLAY_CHIME:
