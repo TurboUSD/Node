@@ -60,28 +60,51 @@ public:
         lv_obj_set_style_text_font(rangeButtonLabel, &lv_font_montserrat_10, 0);
         lv_label_set_text(rangeButtonLabel, "LAST 50Y \xEF\x81\xB8");
 
+        // Chart heading, so the graph itself is clearly labelled (in addition to
+        // the top-right "US TOTAL DEBT" selector title).
+        chartTitle = lv_label_create(body);
+        lv_label_set_text(chartTitle, "US TOTAL DEBT (USD)");
+        lv_obj_set_style_text_color(chartTitle, lv_color_hex(0x9a9a9e), 0);
+        lv_obj_set_style_text_font(chartTitle, &lv_font_montserrat_10, 0);
+        lv_obj_align_to(chartTitle, topRow, LV_ALIGN_OUT_BOTTOM_LEFT, 30, 4);
+
         chart = lv_chart_create(body);
-        lv_obj_set_size(chart, LV_PCT(100), 130);
-        lv_obj_align_to(chart, topRow, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);  // below the total row (was overlapping it)
+        lv_obj_set_size(chart, 410, 116);   // ~30px left gutter reserved for the Y legend
+        lv_obj_align_to(chart, chartTitle, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
+        lv_obj_set_style_pad_all(chart, 0, 0);   // series spans the FULL width — no dead margin on the right
         lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+        lv_chart_set_div_line_count(chart, 3, 0);
         lv_chart_set_point_count(chart, 40);
         debtSeries = lv_chart_add_series(chart, lv_color_hex(0xff4d4d), LV_CHART_AXIS_PRIMARY_Y);
         lv_obj_add_flag(chart, LV_OBJ_FLAG_CLICKABLE);
 
+        // Y-axis legend (max at top, min at bottom, in $T) in the left gutter,
+        // and X-axis legend (first → last year) under the chart. Values are filled
+        // in by updateAxisLegend() once the history loads.
+        yAxisTopLabel   = _axisLabel(body);  lv_obj_align_to(yAxisTopLabel,   chart, LV_ALIGN_OUT_LEFT_TOP,     -2, 0);
+        yAxisBotLabel   = _axisLabel(body);  lv_obj_align_to(yAxisBotLabel,   chart, LV_ALIGN_OUT_LEFT_BOTTOM,  -2, 0);
+        xAxisLeftLabel  = _axisLabel(body);  lv_obj_align_to(xAxisLeftLabel,  chart, LV_ALIGN_OUT_BOTTOM_LEFT,   0, 2);
+        xAxisRightLabel = _axisLabel(body);  lv_obj_align_to(xAxisRightLabel, chart, LV_ALIGN_OUT_BOTTOM_RIGHT,  0, 2);
+
+        // SINCE (left) and RATE (right) on one flex row, pushed to the edges and
+        // vertically centred. Using flex space-between (instead of absolute
+        // LEFT/RIGHT aligns on fixed-width 150px columns) keeps the RATE column
+        // from being clipped at the right edge, and centres both vertically.
         lv_obj_t* bottomRow = lv_obj_create(body);
-        lv_obj_set_size(bottomRow, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_size(bottomRow, LV_PCT(100), 58);
         lv_obj_set_style_bg_opa(bottomRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(bottomRow, 0, 0);
         lv_obj_set_style_pad_all(bottomRow, 0, 0);
-        lv_obj_align(bottomRow, LV_ALIGN_BOTTOM_MID, 0, -4);
+        lv_obj_set_style_pad_hor(bottomRow, 2, 0);
+        lv_obj_align(bottomRow, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_set_flex_flow(bottomRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(bottomRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(bottomRow, LV_OBJ_FLAG_SCROLLABLE);
 
-        lv_obj_t* sinceCol = makeMetricColumn(bottomRow, "SINCE", &sinceButton, &sinceButtonLabel, &sinceValueLabel, onSinceBtnTapped, userData, false);
-        lv_obj_align(sinceCol, LV_ALIGN_LEFT_MID, 0, 0);
-
-        lv_obj_t* rateCol = makeMetricColumn(bottomRow, "RATE", &rateButton, &rateButtonLabel, &rateValueLabel, onRateBtnTapped, userData, true);
-        lv_obj_align(rateCol, LV_ALIGN_RIGHT_MID, 0, 0);
+        makeMetricColumn(bottomRow, "SINCE", &sinceButton, &sinceButtonLabel, &sinceValueLabel, onSinceBtnTapped, userData, false);
+        makeMetricColumn(bottomRow, "RATE",  &rateButton,  &rateButtonLabel,  &rateValueLabel,  onRateBtnTapped,  userData, true);
 
         return body;
     }
@@ -118,10 +141,34 @@ public:
     SharedHeaderRefs header;   // accessed by UIManager::refreshSharedAlarmIcon
     SharedFooterRefs footer;
 
+    // Set the axis legends from the loaded history: X = first→last year,
+    // Y = min→max total in $T. Called from UiManager::reloadDebtHistory.
+    void updateAxisLegend(int startYear, int endYear, double minUsd, double maxUsd) {
+        char buf[12];
+        if (yAxisTopLabel) { snprintf(buf, sizeof(buf), "$%.0fT", maxUsd / 1e12); lv_label_set_text(yAxisTopLabel, buf); }
+        if (yAxisBotLabel) { snprintf(buf, sizeof(buf), "$%.0fT", minUsd / 1e12); lv_label_set_text(yAxisBotLabel, buf); }
+        if (xAxisLeftLabel)  { snprintf(buf, sizeof(buf), "%d", startYear); lv_label_set_text(xAxisLeftLabel, buf); }
+        if (xAxisRightLabel) { snprintf(buf, sizeof(buf), "%d", endYear);   lv_label_set_text(xAxisRightLabel, buf); }
+    }
+
 private:
     lv_obj_t* totalDebtLabel = nullptr;
     lv_obj_t* chart = nullptr;
+    lv_obj_t* chartTitle = nullptr;
+    lv_obj_t* yAxisTopLabel = nullptr;
+    lv_obj_t* yAxisBotLabel = nullptr;
+    lv_obj_t* xAxisLeftLabel = nullptr;
+    lv_obj_t* xAxisRightLabel = nullptr;
     lv_chart_series_t* debtSeries = nullptr;
+
+    // Small grey axis-legend label helper.
+    lv_obj_t* _axisLabel(lv_obj_t* parent) {
+        lv_obj_t* l = lv_label_create(parent);
+        lv_label_set_text(l, "");
+        lv_obj_set_style_text_color(l, lv_color_hex(0x6e7280), 0);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
+        return l;
+    }
 
     lv_obj_t* rangeButton = nullptr;
     lv_obj_t* rangeButtonLabel = nullptr;
@@ -135,7 +182,9 @@ private:
     lv_obj_t* makeMetricColumn(lv_obj_t* parent, const char* title, lv_obj_t** btnOut, lv_obj_t** btnLabelOut,
                                 lv_obj_t** valueOut, lv_event_cb_t onTap, void* userData, bool alignRight) {
         lv_obj_t* col = lv_obj_create(parent);
-        lv_obj_set_size(col, 150, LV_SIZE_CONTENT);
+        lv_obj_set_size(col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_all(col, 0, 0);
+        lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_bg_opa(col, LV_OPA_0, 0);
         lv_obj_set_style_border_width(col, 0, 0);
         lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);

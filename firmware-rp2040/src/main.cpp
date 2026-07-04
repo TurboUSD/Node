@@ -173,6 +173,11 @@ void setup() {
     Serial1.setTX(UART_TO_S3_TX);
     Serial1.begin(UART_BAUD);
 
+    // Grove-1 port power switch is active HIGH — must be driven on or an
+    // external AHT20 on the Grove I2C bus gets no power and never responds.
+    pinMode(GROVE_PWR_PIN, OUTPUT);
+    digitalWrite(GROVE_PWR_PIN, HIGH);
+
     // Grove I2C bus for an optional AHT20 temp/humidity sensor.
     Wire.setSDA(GROVE_I2C_SDA);
     Wire.setSCL(GROVE_I2C_SCL);

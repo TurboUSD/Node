@@ -906,42 +906,52 @@ private:
                             n++;
                         }
                         self->_searchResultCount = n;
-                        self->_pending.type = PR_SEARCH_DONE;
                     }
+                    // Always mark done so the spinner hides even on error/no-result.
+                    self->_pending.type = PR_SEARCH_DONE;
                     http.end();
                 } else {
-                    // Normal text search via Supabase Edge Function
+                    // Name/symbol search via DexScreener's public search API — no
+                    // backend needed (the Supabase search-tokens function isn't a
+                    // hard dependency). Returns pairs across all chains ordered by
+                    // relevance/liquidity; we keep the top 12 with real liquidity so
+                    // dust/scam clones sink. This is why "LFI", "BNKR", etc. now
+                    // resolve where the (undeployed) Edge Function returned nothing.
+                    String query = q;
+                    query.replace(" ", "%20");
+                    String url = String(ENDPOINT_DEXSCREENER_SEARCH) + query;
                     HTTPClient http;
-                    http.begin(ENDPOINT_SEARCH_TOKENS);
-                    http.addHeader("Content-Type", "application/json");
-                    http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+                    http.begin(url);
                     http.setTimeout(8000);
-                    JsonDocument req;
-                    req["query"] = q;
-                    String body;
-                    serializeJson(req, body);
-                    int code = http.POST(body);
+                    int code = http.GET();
                     if (code == 200) {
                         JsonDocument doc;
-                        deserializeJson(doc, http.getStream());
-                        JsonArray arr = doc["results"].as<JsonArray>();
-                        int n = 0;
-                        for (JsonObject obj : arr) {
-                            if (n >= 12) break;
-                            SearchResultEntry& sr = self->_searchResults[n];
-                            strncpy(sr.pair_address,  obj["pairAddress"]   | "", sizeof(sr.pair_address)-1);
-                            strncpy(sr.chain_id,      obj["chainId"]       | "", sizeof(sr.chain_id)-1);
-                            strncpy(sr.base_symbol,   obj["baseSymbol"]    | "", sizeof(sr.base_symbol)-1);
-                            strncpy(sr.base_name,     obj["baseName"]      | "", sizeof(sr.base_name)-1);
-                            strncpy(sr.quote_symbol,  obj["quoteSymbol"]   | "", sizeof(sr.quote_symbol)-1);
-                            sr.price_usd     = obj["priceUsd"]      | 0.0f;
-                            sr.liquidity_usd = obj["liquidityUsd"]  | 0.0f;
-                            sr.change_24h    = obj["priceChange24h"]| 0.0f;
-                            n++;
+                        DeserializationError err = deserializeJson(doc, http.getStream());
+                        if (!err) {
+                            JsonArray pairs = doc["pairs"].as<JsonArray>();
+                            int n = 0;
+                            for (JsonObject pair : pairs) {
+                                if (n >= 12) break;
+                                float liq = pair["liquidity"]["usd"] | 0.0f;
+                                if (liq < 1000.0f) continue;   // skip dust/scam clones
+                                SearchResultEntry& sr = self->_searchResults[n];
+                                memset(&sr, 0, sizeof(sr));
+                                strncpy(sr.pair_address,  pair["pairAddress"]          | "", sizeof(sr.pair_address)-1);
+                                strncpy(sr.chain_id,      pair["chainId"]              | "", sizeof(sr.chain_id)-1);
+                                strncpy(sr.base_symbol,   pair["baseToken"]["symbol"]  | "", sizeof(sr.base_symbol)-1);
+                                strncpy(sr.base_name,     pair["baseToken"]["name"]    | "", sizeof(sr.base_name)-1);
+                                strncpy(sr.quote_symbol,  pair["quoteToken"]["symbol"] | "", sizeof(sr.quote_symbol)-1);
+                                const char* priceStr = pair["priceUsd"] | "0";
+                                sr.price_usd     = atof(priceStr);
+                                sr.liquidity_usd = liq;
+                                sr.change_24h    = pair["priceChange"]["h24"] | 0.0f;
+                                n++;
+                            }
+                            self->_searchResultCount = n;
                         }
-                        self->_searchResultCount = n;
-                        self->_pending.type = PR_SEARCH_DONE;
                     }
+                    // Always mark done so the spinner hides even on error/no-result.
+                    self->_pending.type = PR_SEARCH_DONE;
                     http.end();
                 }
                 break;

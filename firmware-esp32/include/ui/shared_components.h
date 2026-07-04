@@ -125,8 +125,22 @@ inline SharedFooterRefs buildSharedFooter(lv_obj_t* parent, lv_event_cb_t onQrTa
     lv_obj_set_style_bg_color(refs.liveDot, lv_color_hex(0x3aff7a), 0);
     lv_obj_set_style_border_width(refs.liveDot, 0, 0);
     lv_obj_align(refs.liveDot, LV_ALIGN_LEFT_MID, 2, 0);
-    // TODO: port the livePulse keyframe animation (opacity 1 -> 0.35 -> 1,
-    // 2.4s) using lv_anim_t on the bg_opa style property.
+    // Slow, soft "alive" pulse: fade the dot's opacity 1.0 → 0.3 → 1.0 over
+    // ~2.4 s, looping forever, so the footer always signals the node is active.
+    {
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, refs.liveDot);
+        lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_30);
+        lv_anim_set_time(&a, 1200);
+        lv_anim_set_playback_time(&a, 1200);
+        lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+        lv_anim_set_exec_cb(&a, [](void* obj, int32_t v) {
+            lv_obj_set_style_bg_opa((lv_obj_t*)obj, (lv_opa_t)v, 0);
+        });
+        lv_anim_start(&a);
+    }
 
     refs.nodeNameLabel = lv_label_create(bar);
     lv_label_set_text(refs.nodeNameLabel, "");   // default so it never shows LVGL's "Text"

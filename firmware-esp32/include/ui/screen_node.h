@@ -136,6 +136,38 @@ public:
         // Pending block sits just right of the divider line (dividerX + 8 px gap)
         lv_obj_set_pos(pendingBlock.container,
                        (lv_coord_t)(NODE_MINED_BLOCKS_SHOWN * NODE_BLOCK_SLOT_WIDTH + 12), 10);
+        lv_label_set_text(pendingBlock.numberLabel, "NEXT");
+
+        // Local "always mining" animation: continuously fill the pending block's
+        // ring over one block interval and loop. Previously the ring only moved
+        // when the backend mining feed pushed progress — with the backend not yet
+        // deployed the screen looked frozen. This on-device loop makes it read as
+        // actively mining regardless of network state; if real feed data arrives,
+        // updatePendingProgress() simply takes over the same ring.
+        lv_anim_t ringAnim;
+        lv_anim_init(&ringAnim);
+        lv_anim_set_var(&ringAnim, pendingBlock.ring);
+        lv_anim_set_values(&ringAnim, 0, 100);
+        lv_anim_set_time(&ringAnim, 60000);   // ~one block per minute, visual only
+        lv_anim_set_repeat_count(&ringAnim, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_set_exec_cb(&ringAnim, [](void* obj, int32_t v) {
+            lv_arc_set_value((lv_obj_t*)obj, v);
+        });
+        lv_anim_start(&ringAnim);
+
+        // Soft pulse on the "LIVE MINING" label so there's a heartbeat even before
+        // any blocks have been mined into the track.
+        lv_anim_t pulse;
+        lv_anim_init(&pulse);
+        lv_anim_set_var(&pulse, liveMiningLabel);
+        lv_anim_set_values(&pulse, LV_OPA_40, LV_OPA_COVER);
+        lv_anim_set_time(&pulse, 1100);
+        lv_anim_set_playback_time(&pulse, 1100);
+        lv_anim_set_repeat_count(&pulse, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_set_exec_cb(&pulse, [](void* obj, int32_t v) {
+            lv_obj_set_style_text_opa((lv_obj_t*)obj, (lv_opa_t)v, 0);
+        });
+        lv_anim_start(&pulse);
 
         return body;
     }

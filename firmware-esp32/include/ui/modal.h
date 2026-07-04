@@ -36,6 +36,28 @@ inline lv_obj_t* openModal(lv_obj_t* parent) {
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(card, 10, 0);
 
+    // Every modal gets a round "X" in the top-right corner so it can always be
+    // dismissed, regardless of whatever buttons the caller adds. IGNORE_LAYOUT
+    // keeps it out of the vertical flex flow, floating in the corner.
+    lv_obj_t* xBtn = lv_btn_create(card);
+    lv_obj_add_flag(xBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_size(xBtn, 30, 30);
+    lv_obj_align(xBtn, LV_ALIGN_TOP_RIGHT, 10, -10);   // nudge into the padding corner
+    lv_obj_set_style_radius(xBtn, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(xBtn, lv_color_hex(0x262626), 0);
+    lv_obj_set_style_border_width(xBtn, 0, 0);
+    lv_obj_set_style_pad_all(xBtn, 0, 0);
+    lv_obj_set_ext_click_area(xBtn, 8);
+    lv_obj_t* xLbl = lv_label_create(xBtn);
+    lv_label_set_text(xLbl, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_font(xLbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(xLbl, lv_color_hex(0xcfcfd4), 0);
+    lv_obj_center(xLbl);
+    lv_obj_add_event_cb(xBtn, [](lv_event_t* e) {
+        lv_obj_t* c = (lv_obj_t*)lv_event_get_user_data(e);
+        lv_obj_del(lv_obj_get_parent(c));   // delete the backdrop → closes the modal
+    }, LV_EVENT_CLICKED, card);
+
     return card;
 }
 
@@ -48,7 +70,14 @@ inline void closeModal(lv_obj_t* card) {
 // the button so the caller can attach its own click handler.
 inline lv_obj_t* addModalButton(lv_obj_t* card, const char* label, bool primary) {
     lv_obj_t* btn = lv_btn_create(card);
-    lv_obj_set_width(btn, LV_PCT(100));
+    // flex_grow so that when TWO buttons share a horizontal row (Cancel / Save)
+    // they split the width evenly instead of each being 100% wide — which used
+    // to overflow the card and push SAVE off-screen behind a horizontal scroll.
+    // In a vertical card there's no free main-axis space, so a lone button just
+    // sizes to its content and stays centred.
+    lv_obj_set_flex_grow(btn, 1);
+    lv_obj_set_height(btn, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_width(btn, 96, 0);
     lv_obj_set_style_bg_color(btn, primary ? lv_color_hex(0x2eaa50) : lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(btn, primary ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_color(btn, lv_color_hex(0x6a6a6e), 0);
@@ -186,15 +215,25 @@ inline void addPrefToggleRow(lv_obj_t* card, const char* label, const char* left
     lv_obj_set_flex_flow(group, LV_FLEX_FLOW_ROW);
     lv_obj_clear_flag(group, LV_OBJ_FLAG_SCROLLABLE);
 
+    // Fixed button size so every preference row's toggle is the SAME width
+    // (matching the widest, DATE FORMAT's "DD/MM"/"MM/DD"), giving the settings
+    // list tidy, aligned right edges instead of ragged per-label widths.
+    const lv_coord_t TOGGLE_BTN_W = 62;
+    const lv_coord_t TOGGLE_BTN_H = 28;
+
     lv_obj_t* leftBtn = lv_btn_create(group);
+    lv_obj_set_size(leftBtn, TOGGLE_BTN_W, TOGGLE_BTN_H);
     lv_obj_set_style_radius(leftBtn, 0, 0);
+    lv_obj_set_style_pad_all(leftBtn, 0, 0);
     lv_obj_t* leftLbl = lv_label_create(leftBtn);
     lv_label_set_text(leftLbl, leftLabel);
     lv_obj_set_style_text_font(leftLbl, &lv_font_montserrat_12, 0);
     lv_obj_center(leftLbl);
 
     lv_obj_t* rightBtn = lv_btn_create(group);
+    lv_obj_set_size(rightBtn, TOGGLE_BTN_W, TOGGLE_BTN_H);
     lv_obj_set_style_radius(rightBtn, 0, 0);
+    lv_obj_set_style_pad_all(rightBtn, 0, 0);
     lv_obj_t* rightLbl = lv_label_create(rightBtn);
     lv_label_set_text(rightLbl, rightLabel);
     lv_obj_set_style_text_font(rightLbl, &lv_font_montserrat_12, 0);

@@ -7,10 +7,14 @@
 
 #pragma once
 
-#define BUZZER_PIN        2   // MLT-8530, driven via PWM for tone generation
-#define UART_FROM_S3_RX   0
-#define UART_TO_S3_TX     1
+// Verified against Seeed SenseCAP Indicator pinout (ESPHome device reference):
+//   Buzzer PWM = GP19; UART from ESP32-S3 = GP17 (RX, from ESP GP19/TX),
+//   GP16 (TX, to ESP GP20/RX). These are the real board pins, not placeholders.
+#define BUZZER_PIN        19  // MLT-8530 passive buzzer, driven via PWM for tone generation
+#define UART_FROM_S3_RX   17
+#define UART_TO_S3_TX     16
 #define UART_BAUD         115200
+#define GROVE_PWR_PIN     18  // Grove-1 power switch, active HIGH (must be on to power an external AHT20)
 
 // ── Grove I2C port (optional external AHT20 temp/humidity sensor) ────────────
 // Pins from Seeed's official RP2040 Grove-IIC example (Wire.setSDA(20)/setSCL(21)).

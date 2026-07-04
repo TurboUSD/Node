@@ -140,6 +140,28 @@ public:
             self->_applyCarouselSetting(on);
         }, LV_EVENT_VALUE_CHANGED, this);
 
+        // ── "+ Wallet" button (floats at the right of the strip) ──────────────
+        // Dedicated target for entering/changing the NFT wallet, so the grid
+        // never has to be tappable (which used to fire on swipe-in). IGNORE_LAYOUT
+        // keeps it out of the flex row so it can sit hard against the right edge.
+        _addWalletBtn = lv_btn_create(_sizeBar);
+        lv_obj_add_flag(_addWalletBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_set_size(_addWalletBtn, LV_SIZE_CONTENT, 24);
+        lv_obj_align(_addWalletBtn, LV_ALIGN_RIGHT_MID, -6, 0);
+        lv_obj_set_style_bg_color(_addWalletBtn, lv_color_hex(NFT_CLR_GREEN), 0);
+        lv_obj_set_style_radius(_addWalletBtn, 6, 0);
+        lv_obj_set_style_pad_hor(_addWalletBtn, 10, 0);
+        lv_obj_set_ext_click_area(_addWalletBtn, 6);
+        lv_obj_t* awLbl = lv_label_create(_addWalletBtn);
+        lv_label_set_text(awLbl, "+  Wallet");
+        lv_obj_set_style_text_font(awLbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(awLbl, lv_color_hex(0x06150a), 0);
+        lv_obj_center(awLbl);
+        lv_obj_add_event_cb(_addWalletBtn, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (self) self->_openWalletDialog();
+        }, LV_EVENT_CLICKED, this);
+
         // ── Grid area ─────────────────────────────────────────────────────────
         _gridArea = lv_obj_create(_body);
         lv_obj_set_size(_gridArea, 480, NFT_GRID_H);
@@ -150,13 +172,11 @@ public:
         lv_obj_set_style_pad_gap(_gridArea, 4, 0);
         lv_obj_clear_flag(_gridArea, LV_OBJ_FLAG_SCROLLABLE);
 
-        // Tap the (empty) grid to enter the NFT wallet on-device. Replaces the
-        // old auto-popup dialog that appeared as a stray keyboard on swipe-in.
-        lv_obj_add_flag(_gridArea, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(_gridArea, [](lv_event_t* e) {
-            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
-            if (!storage.hasNftWallet() && !storage.hasNftPinlist()) self->_openWalletDialog();
-        }, LV_EVENT_CLICKED, this);
+        // NOTE: the grid itself is intentionally NOT clickable. Making the whole
+        // grid a tap target meant a horizontal swipe-in (to change screens) also
+        // registered as a tap and popped the wallet keyboard dialog. Adding the
+        // NFT wallet now has a dedicated "+ Wallet" button (built below), mirroring
+        // the tickers screen's "+ Add" button, so swiping never opens the dialog.
 
         // Loading label (shown while fetching)
         _loadingLabel = lv_label_create(_gridArea);
@@ -222,6 +242,7 @@ private:
     lv_obj_t*  _btn3x3         = nullptr;
     lv_obj_t*  _carouselSwitch = nullptr;
     lv_obj_t*  _gridArea       = nullptr;
+    lv_obj_t*  _addWalletBtn   = nullptr;
     lv_obj_t*  _loadingLabel   = nullptr;
     lv_obj_t*  _spinner        = nullptr;
     void*      _userData       = nullptr;

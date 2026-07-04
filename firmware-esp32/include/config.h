@@ -26,6 +26,7 @@
 // External price sources (public, CORS-free, no key required)
 #define ENDPOINT_DEXSCREENER_PAIRS  "https://api.dexscreener.com/latest/dex/pairs/"
 #define ENDPOINT_DEXSCREENER_TOKENS "https://api.dexscreener.com/latest/dex/tokens/"  // lookup by contract addr
+#define ENDPOINT_DEXSCREENER_SEARCH "https://api.dexscreener.com/latest/dex/search?q=" // name/symbol search, no backend needed
 #define ENDPOINT_GECKOTERMINAL_OHLCV "https://api.geckoterminal.com/api/v2/networks/"
 
 // NFT Gallery (screen_nft.h)
@@ -81,8 +82,10 @@
 // See firmware-rp2040/PROTOCOL.md for the wire format.
 // ---------------------------------------------------------------------
 #define RP2040_UART_BAUD   115200
-#define RP2040_UART_TX_PIN 17   // verify against actual board silkscreen/schematic before flashing
-#define RP2040_UART_RX_PIN 18
+// Verified against Seeed SenseCAP Indicator pinout (ESPHome device reference):
+// ESP32-S3 "UART to RP2040": GPIO19 = TX (to RP GP17/RX), GPIO20 = RX (from RP GP16/TX).
+#define RP2040_UART_TX_PIN 19
+#define RP2040_UART_RX_PIN 20
 
 // ---------------------------------------------------------------------
 // NVS (flash) storage keys — what survives reboots/power loss

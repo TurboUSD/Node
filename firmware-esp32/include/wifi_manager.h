@@ -54,6 +54,7 @@ private:
     uint32_t _lastConnectedAt = 0;
     uint32_t _lastReconnectAt = 0;
     String _scanOptions;   // cached <option> list, scanned once before the AP is up
+    String _scanButtons;   // cached tappable network rows (mobile-friendly picker)
 
     // Escape characters that would break the HTML value attribute or display.
     static String escapeHtml(const String& s) {
@@ -104,9 +105,14 @@ private:
         WiFi.disconnect();
         int n = WiFi.scanNetworks();
         _scanOptions = "";
+        _scanButtons = "";
         for (int i = 0; i < n; i++) {
             String safe = escapeHtml(WiFi.SSID(i));
-            if (safe.length()) _scanOptions += "<option value=\"" + safe + "\"></option>";
+            if (!safe.length()) continue;
+            // Skip duplicate SSIDs (mesh / multi-band APs show up several times).
+            if (_scanOptions.indexOf("\"" + safe + "\"") >= 0) continue;
+            _scanOptions += "<option value=\"" + safe + "\"></option>";
+            _scanButtons += "<div class='net' onclick=\"pick('" + safe + "')\">" + safe + "</div>";
         }
         WiFi.scanDelete();
 
@@ -139,21 +145,49 @@ private:
         // The SSID is an editable text input with the scan results offered as an
         // autocomplete datalist — so the user can pick a nearby network OR type a
         // hidden/5 GHz one we couldn't see. No blocking scan happens here.
+        // maximum-scale=1 + 16px inputs stop iOS Safari from auto-zooming when a
+        // field is focused (it only zooms when the input font is < 16px). The
+        // tappable network list means the user picks their SSID instead of having
+        // to type (and remember) it; the text field stays for hidden networks.
+        String netList = _scanButtons.length()
+            ? _scanButtons
+            : String("<div class='net muted'>No networks found &mdash; type yours below</div>");
+
         String html =
-            "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<!DOCTYPE html><html><head>"
+            "<meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no'>"
             "<title>TurboUSD Node Setup</title>"
-            "<style>body{font-family:sans-serif;background:#000;color:#3aff7a;padding:24px;}"
-            "input{width:100%;padding:10px;margin:8px 0;background:#111;color:#fff;border:1px solid #2eaa50;border-radius:6px;box-sizing:border-box;}"
-            "button{width:100%;padding:12px;background:#3aff7a;color:#000;border:none;border-radius:6px;font-weight:bold;}</style>"
-            "</head><body>"
+            "<style>"
+            "*{box-sizing:border-box;}"
+            "body{font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;background:#000;color:#e8e8ea;margin:0 auto;padding:22px;max-width:520px;}"
+            "h2{color:#3aff7a;font-size:21px;margin:6px 0 4px;}"
+            "p.sub{color:#9a9a9e;font-size:14px;margin:0 0 14px;}"
+            "label{display:block;color:#9a9a9e;font-size:12px;letter-spacing:1px;text-transform:uppercase;margin:16px 0 6px;}"
+            "input{width:100%;padding:14px;font-size:16px;background:#111;color:#fff;border:1px solid #2eaa50;border-radius:10px;}"
+            "input:focus{outline:none;border-color:#3aff7a;}"
+            ".nets{max-height:210px;overflow-y:auto;border:1px solid #262626;border-radius:10px;}"
+            ".net{padding:14px;font-size:16px;color:#fff;border-bottom:1px solid #191919;cursor:pointer;}"
+            ".net:last-child{border-bottom:none;}"
+            ".net:active{background:#10331e;}"
+            ".net.muted{color:#6e7280;cursor:default;}"
+            "button{width:100%;padding:16px;font-size:17px;font-weight:700;margin-top:22px;background:#3aff7a;color:#000;border:none;border-radius:10px;}"
+            "</style></head><body>"
             "<h2>Connect your TurboUSD Node</h2>"
+            "<p class='sub'>Tap your WiFi network below, or type it in.</p>"
             "<form action='/connect' method='POST'>"
-            "<label>WiFi network</label>"
-            "<input name='ssid' list='nets' placeholder='Your WiFi name' autocomplete='off' autocapitalize='off'>"
+            "<label>Nearby networks</label>"
+            "<div class='nets'>" + netList + "</div>"
+            "<label>WiFi name</label>"
+            "<input id='ssid' name='ssid' list='nets' placeholder='Your WiFi name' autocomplete='off' autocapitalize='none' autocorrect='off' spellcheck='false'>"
             "<datalist id='nets'>" + _scanOptions + "</datalist>"
-            "<label>Password</label><input type='password' name='password'>"
+            "<label>Password</label>"
+            "<input id='pw' type='password' name='password' autocomplete='off'>"
             "<button type='submit'>Connect</button>"
-            "</form></body></html>";
+            "</form>"
+            "<script>function pick(n){var s=document.getElementById('ssid');s.value=n;"
+            "document.getElementById('pw').focus();}</script>"
+            "</body></html>";
 
         server.send(200, "text/html", html);
     }

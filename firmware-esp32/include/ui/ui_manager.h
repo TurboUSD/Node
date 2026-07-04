@@ -897,18 +897,14 @@ private:
             snprintf(dateBuf, sizeof(dateBuf), "%s %02d.%02d.%04d", days[t.tm_wday], t.tm_mon+1, t.tm_mday, t.tm_year+1900);
         lv_label_set_text(clockDateLabel, dateBuf);
 
-        // Alarm pill: yellow (border + icon + text) when the alarm is enabled,
-        // grey when it's off — per the design.
+        // Alarm pill: ALWAYS show the configured (or default) alarm time so the
+        // user can see it at a glance. Yellow (border + icon + text) when the
+        // alarm is enabled, grey when it's off — the time stays visible either way.
         char alarmBuf[28];
-        lv_color_t alarmCol;
-        if (!alarmOn) {
-            snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 off");
-            alarmCol = lv_color_hex(0x6e7280);   // grey
-        } else {
-            snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 %02d:%02d",
-                     storage.getAlarmHour(), storage.getAlarmMinute());
-            alarmCol = lv_color_hex(0xe8b339);   // yellow
-        }
+        lv_color_t alarmCol = alarmOn ? lv_color_hex(0xe8b339)   // yellow = on
+                                      : lv_color_hex(0x6e7280);  // grey   = off
+        snprintf(alarmBuf, sizeof(alarmBuf), "\xEF\x83\xB3 %02d:%02d",
+                 storage.getAlarmHour(), storage.getAlarmMinute());
         lv_label_set_text(clockAlarmLabel, alarmBuf);
         lv_obj_set_style_text_color(clockAlarmLabel, alarmCol, 0);
         lv_obj_set_style_border_color(clockAlarmLabel, alarmCol, 0);
@@ -936,6 +932,7 @@ private:
         lv_obj_t* row = lv_obj_create(card);
         lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(row, 8, 0);
         lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
         lv_obj_set_style_border_width(row, 0, 0);
 
@@ -1058,13 +1055,17 @@ private:
         static bool sAlarmEnabled;
         sAlarmEnabled = storage.getAlarmEnabled();
 
+        // Keep "ALARM ON" and its switch close together and centred (roughly the
+        // same footprint as the two time rollers above), instead of pinned to the
+        // far edges of a full-width row.
         lv_obj_t* toggleRow = lv_obj_create(card);
-        lv_obj_set_size(toggleRow, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_size(toggleRow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(toggleRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(toggleRow, 0, 0);
         lv_obj_set_style_pad_all(toggleRow, 0, 0);
+        lv_obj_set_style_pad_column(toggleRow, 12, 0);
         lv_obj_set_flex_flow(toggleRow, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(toggleRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_flex_align(toggleRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         lv_obj_t* toggleLbl = lv_label_create(toggleRow);
         lv_label_set_text(toggleLbl, "ALARM ON");
@@ -1082,6 +1083,7 @@ private:
         lv_obj_t* btnRow = lv_obj_create(card);
         lv_obj_set_size(btnRow, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(btnRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(btnRow, 8, 0);
         lv_obj_set_style_bg_opa(btnRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(btnRow, 0, 0);
 
@@ -1106,7 +1108,86 @@ private:
 
     void openCalendarPopup() {
         lv_obj_t* card = openModal(lv_scr_act());
-        lv_calendar_create(card);
+
+        // Custom month grid. LVGL 8's lv_calendar always lays the week out
+        // Sunday-first with no option to change it, so we render our own grid
+        // that honours the WEEK STARTS setting (Mon or Sun).
+        time_t now = time(nullptr);
+        struct tm t; localtime_r(&now, &t);
+        int year = t.tm_year + 1900;
+        int month = t.tm_mon;         // 0..11
+        int today = t.tm_mday;
+
+        struct tm first = {};
+        first.tm_year = t.tm_year; first.tm_mon = month; first.tm_mday = 1;
+        first.tm_hour = 12; first.tm_isdst = -1;
+        mktime(&first);
+        int firstWday = first.tm_wday;   // 0=Sun..6=Sat
+
+        static const int dimTbl[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+        int daysInMonth = dimTbl[month];
+        if (month == 1 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)) daysInMonth = 29;
+
+        bool sunFirst = (storage.getWeekStart() == 0);
+
+        static const char* monthNames[12] = {"JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE",
+                                             "JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"};
+        lv_obj_t* title = lv_label_create(card);
+        char tbuf[24]; snprintf(tbuf, sizeof(tbuf), "%s %d", monthNames[month], year);
+        lv_label_set_text(title, tbuf);
+        lv_obj_set_style_text_color(title, lv_color_hex(0xcfcfd4), 0);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+
+        lv_obj_t* grid = lv_obj_create(card);
+        lv_obj_set_size(grid, 7 * 36, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(grid, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(grid, 0, 0);
+        lv_obj_set_style_pad_all(grid, 0, 0);
+        lv_obj_set_style_pad_row(grid, 3, 0);
+        lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+
+        auto makeCell = [&]() -> lv_obj_t* {
+            lv_obj_t* c = lv_obj_create(grid);
+            lv_obj_set_size(c, 36, 26);
+            lv_obj_set_style_bg_opa(c, LV_OPA_0, 0);
+            lv_obj_set_style_border_width(c, 0, 0);
+            lv_obj_set_style_pad_all(c, 0, 0);
+            lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+            return c;
+        };
+
+        static const char* hdrSun[7] = {"S","M","T","W","T","F","S"};
+        static const char* hdrMon[7] = {"M","T","W","T","F","S","S"};
+        const char** hdr = sunFirst ? hdrSun : hdrMon;
+        for (int i = 0; i < 7; i++) {
+            lv_obj_t* h = makeCell();
+            lv_obj_t* l = lv_label_create(h);
+            lv_label_set_text(l, hdr[i]);
+            lv_obj_set_style_text_color(l, lv_color_hex(0x6e7280), 0);
+            lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
+            lv_obj_center(l);
+        }
+
+        int offset = sunFirst ? firstWday : (firstWday + 6) % 7;
+        for (int i = 0; i < offset; i++) makeCell();   // leading blanks
+
+        for (int d = 1; d <= daysInMonth; d++) {
+            lv_obj_t* c = makeCell();
+            bool isToday = (d == today);
+            if (isToday) {
+                lv_obj_set_style_bg_color(c, lv_color_hex(0x2eaa50), 0);
+                lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+                lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
+            }
+            lv_obj_t* l = lv_label_create(c);
+            char db[4]; snprintf(db, sizeof(db), "%d", d);
+            lv_label_set_text(l, db);
+            lv_obj_set_style_text_color(l, isToday ? lv_color_hex(0x06150a) : lv_color_hex(0xcfcfd4), 0);
+            lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+            lv_obj_center(l);
+        }
+
         lv_obj_t* closeBtn = addModalButton(card, "CLOSE", false);
         static lv_obj_t* sCard; sCard = card;
         lv_obj_add_event_cb(closeBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
@@ -1118,11 +1199,14 @@ private:
         lv_label_set_text(title, "DEVICE SETUP");
         lv_obj_set_style_text_color(title, lv_color_hex(0x9a9a9e), 0);
 
-        String setupUrl = "https://turbousd.com/setup/" + storage.getNodeCode();
-        addQrCode(card, setupUrl.c_str(), 120);
+        // QR + link point to the node's PUBLIC page (bio, stats, owner info),
+        // not the private /setup/ owner-config route (which 404s for visitors
+        // and for any code the backend hasn't registered). See web/app/node/.
+        String publicUrl = "https://network.turbousd.com/node/" + storage.getNodeCode();
+        addQrCode(card, publicUrl.c_str(), 120);
 
         lv_obj_t* urlHint = lv_label_create(card);
-        lv_label_set_text(urlHint, setupUrl.c_str());
+        lv_label_set_text(urlHint, publicUrl.c_str());
         lv_obj_set_style_text_color(urlHint, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(urlHint, &lv_font_montserrat_10, 0);
 
@@ -1130,12 +1214,12 @@ private:
         lv_label_set_text(prefsTitle, "DISPLAY PREFERENCES");
         lv_obj_set_style_text_color(prefsTitle, lv_color_hex(0x9a9a9e), 0);
 
+        // TEMPERATURE toggle intentionally removed: the base D1 has no environmental
+        // sensor and we no longer surface temp/humidity anywhere, so a °C/°F choice
+        // would be a dead setting. (setTempUnit still exists for geo-locale use.)
+
         // Any manual change here locks locale, so the geo-IP autodetect can
         // never later overwrite the user's explicit choice (setLocaleLocked).
-        addPrefToggleRow(card, "TEMPERATURE", "\xC2\xB0" "C", "\xC2\xB0" "F",
-                          storage.getTempUnit() == 'C',
-                          [](bool leftActive){ storage.setTempUnit(leftActive ? 'C' : 'F'); storage.setLocaleLocked(true); });
-
         addPrefToggleRow(card, "DATE FORMAT", "DD/MM", "MM/DD",
                           storage.getDateFormat() == "DD/MM",
                           [](bool leftActive){ storage.setDateFormat(leftActive ? "DD/MM" : "MM/DD"); storage.setLocaleLocked(true); });
@@ -1204,7 +1288,24 @@ private:
             Serial.println("reloadDebtHistory: no data returned, leaving chart as-is.");
             return;
         }
+        // Find the data's min/max so we can (a) fit the Y axis to it and (b) fill
+        // the axis legend.
+        double minUsd = points[0].totalDebtUsd, maxUsd = points[0].totalDebtUsd;
+        for (int i = 1; i < count; i++) {
+            if (points[i].totalDebtUsd < minUsd) minUsd = points[i].totalDebtUsd;
+            if (points[i].totalDebtUsd > maxUsd) maxUsd = points[i].totalDebtUsd;
+        }
+
         lv_chart_set_point_count(debtScreen.getChart(), count);
+        // Fit the Y axis to the data. lv_chart's DEFAULT range is 0..100, but our
+        // scaled values are ~200..365 (tenths of a trillion), so without this the
+        // whole series was clipped to a flat line pinned at the top of the chart.
+        lv_coord_t loScaled = (lv_coord_t)(minUsd / 1e11);
+        lv_coord_t hiScaled = (lv_coord_t)(maxUsd / 1e11);
+        if (hiScaled <= loScaled) hiScaled = loScaled + 1;
+        lv_coord_t pad = (hiScaled - loScaled) / 12 + 1;   // small headroom so it isn't glued to the edges
+        lv_chart_set_range(debtScreen.getChart(), LV_CHART_AXIS_PRIMARY_Y, loScaled - pad, hiScaled + pad);
+
         for (int i = 0; i < count; i++) {
             // Scale to an integer-friendly range for lv_chart (raw USD values
             // are far too large for lv_coord_t); express in tenths of a
@@ -1212,6 +1313,7 @@ private:
             lv_coord_t scaled = (lv_coord_t)(points[i].totalDebtUsd / 1e11);
             lv_chart_set_next_value(debtScreen.getChart(), debtScreen.getSeries(), scaled);
         }
+        debtScreen.updateAxisLegend(points[0].year, points[count - 1].year, minUsd, maxUsd);
         // Derive the debt-clock rate ($/sec) from the most recent year-over-year
         // change, then refresh the SINCE / RATE widgets.
         if (count >= 2) {
