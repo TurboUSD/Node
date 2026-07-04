@@ -28,57 +28,51 @@ bool alarmActive = false;
 uint32_t alarmStartedAt = 0;
 const uint32_t ALARM_MAX_DURATION_MS = 5UL * 60UL * 1000UL; // auto-stop after 5 min even with no STOP_ALARM, so a dropped command can't buzz forever
 
-// Simple two-tone alarm pattern, distinct from a single flat beep so it
-// reads as "alarm" rather than "low battery warning" or similar. Frequencies
-// chosen to be clearly audible through a small buzzer without being
-// unpleasantly harsh.
-const uint16_t ALARM_TONE_A_HZ = 1800;
-const uint16_t ALARM_TONE_B_HZ = 1400;
-const uint16_t TONE_DURATION_MS = 220;
+// IMPORTANT — the SenseCAP buzzer (MLT-8530) is an ACTIVE buzzer: it has its
+// own built-in oscillator and sounds whenever it's simply driven. Seeed's own
+// example (examples/buzzer/buzzer.ino) drives it with a plain
+// `analogWrite(19, 127)` and NO analogWriteFreq(). Calling analogWriteFreq()
+// (as this firmware used to, at 1800/1400/2200 Hz) fights the buzzer's internal
+// oscillator and produces little or NO sound — that was the "alarm never
+// buzzes" bug. So we NEVER set a PWM frequency; we just drive a duty for volume
+// and make the alarm "beep-beep" by toggling the buzzer on and off.
+const uint16_t BEEP_ON_MS  = 250;   // buzzer-on time per beep
+const uint16_t BEEP_OFF_MS = 180;   // silence between beeps
 
-uint32_t lastToneToggleAt = 0;
-bool playingToneA = true;
+uint32_t lastToggleAt = 0;
+bool     beepIsOn     = false;
 
-// Volume control via PWM duty cycle on the passive buzzer.
-// analogWrite() range is 0–255 on the RP2040 Arduino core.
-// Beyond 50% duty cycle (~128) a passive buzzer gets no louder, so 128 is max.
-// Values are tuned so level 2 ("soft default") is clearly audible without
-// being startling, while level 5 is the full 50% square-wave maximum.
+// Volume via PWM duty (0–255). Higher than the old values so even level 1 is
+// clearly audible; 255 = continuous drive = loudest for an active buzzer.
 uint8_t currentVolume = 2; // default; overridden by PLAY_ALARM_Vn commands
-const uint8_t VOLUME_DUTY[5] = { 8, 25, 60, 100, 128 };
+const uint8_t VOLUME_DUTY[5] = { 40, 90, 150, 210, 255 };
 
-void startTone(uint16_t freqHz) {
-    analogWriteFreq(freqHz);
-    analogWrite(BUZZER_PIN, VOLUME_DUTY[currentVolume - 1]);
-}
-
-void stopTone() {
-    analogWrite(BUZZER_PIN, 0);
-}
+void buzzerOn()  { analogWrite(BUZZER_PIN, VOLUME_DUTY[currentVolume - 1]); }  // no analogWriteFreq — see note above
+void buzzerOff() { analogWrite(BUZZER_PIN, 0); }
 
 void handleAlarmPattern() {
     if (!alarmActive) return;
 
     if (millis() - alarmStartedAt > ALARM_MAX_DURATION_MS) {
         alarmActive = false;
-        stopTone();
+        buzzerOff();
         return;
     }
 
-    if (millis() - lastToneToggleAt > TONE_DURATION_MS) {
-        lastToneToggleAt = millis();
-        playingToneA = !playingToneA;
-        startTone(playingToneA ? ALARM_TONE_A_HZ : ALARM_TONE_B_HZ);
+    uint32_t interval = beepIsOn ? BEEP_ON_MS : BEEP_OFF_MS;
+    if (millis() - lastToggleAt > interval) {
+        lastToggleAt = millis();
+        beepIsOn = !beepIsOn;
+        if (beepIsOn) buzzerOn(); else buzzerOff();
     }
 }
 
 void playChimeBlocking() {
     // Short and blocking is fine here -- a UI-feedback chime is meant to be
     // near-instant, and nothing else needs this chip's attention mid-chime.
-    analogWriteFreq(2200);
-    analogWrite(BUZZER_PIN, VOLUME_DUTY[currentVolume - 1]);
-    delay(80);
-    analogWrite(BUZZER_PIN, 0);
+    buzzerOn();
+    delay(90);
+    buzzerOff();
     delay(20);
 }
 
@@ -86,7 +80,8 @@ void startAlarm(uint8_t volume) {
     currentVolume = constrain(volume, 1, 5);
     alarmActive = true;
     alarmStartedAt = millis();
-    lastToneToggleAt = 0;
+    lastToggleAt = 0;
+    beepIsOn = false;   // next toggle turns it on
 }
 
 void sendAck() {

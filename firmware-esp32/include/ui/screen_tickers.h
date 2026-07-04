@@ -925,8 +925,25 @@ private:
                     http.setTimeout(8000);
                     int code = http.GET();
                     if (code == 200) {
+                        // DexScreener /search returns ~30 pairs, each a big object
+                        // (txns, volume, fdv, socials…). Parsing all of that in the
+                        // background task used enough heap to risk an out-of-memory
+                        // reset. A filter keeps ONLY the handful of fields we use,
+                        // so the parsed document stays tiny. ([0] applies to every
+                        // element of the "pairs" array.)
+                        JsonDocument filter;
+                        filter["pairs"][0]["chainId"]              = true;
+                        filter["pairs"][0]["pairAddress"]          = true;
+                        filter["pairs"][0]["priceUsd"]             = true;
+                        filter["pairs"][0]["liquidity"]["usd"]     = true;
+                        filter["pairs"][0]["priceChange"]["h24"]   = true;
+                        filter["pairs"][0]["baseToken"]["symbol"]  = true;
+                        filter["pairs"][0]["baseToken"]["name"]    = true;
+                        filter["pairs"][0]["quoteToken"]["symbol"] = true;
+
                         JsonDocument doc;
-                        DeserializationError err = deserializeJson(doc, http.getStream());
+                        DeserializationError err = deserializeJson(doc, http.getStream(),
+                                                                   DeserializationOption::Filter(filter));
                         if (!err) {
                             JsonArray pairs = doc["pairs"].as<JsonArray>();
                             int n = 0;

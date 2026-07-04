@@ -187,18 +187,14 @@ public:
     // Real TurboUSD treasury/supply/price data -- see config.h for the URL.
     TreasuryData fetchTreasuryData() {
         TreasuryData result;
-        // The treasury response is large (~40 KB: chartData, operations[47],
-        // strategicRows, flywheelData…). The old 8 s timeout on a plain client
-        // often expired mid-download over TLS, so the parse never completed and
-        // SUPPLY / TOTAL BURNED stayed "--". Use an explicit insecure TLS client
-        // (belt-and-suspenders vs cert-bundle gaps) with a generous timeout.
-        WiFiClientSecure client;
-        client.setInsecure();
+        // The treasury response is large (~40 KB). The old 8 s timeout often
+        // expired mid-download, so SUPPLY / TOTAL BURNED stayed "--". Just give
+        // it more time on the same plain client the other https calls use (an
+        // explicit WiFiClientSecure here was memory-heavy and destabilised the
+        // heap). http.begin(url) already negotiates TLS via the cert bundle.
         HTTPClient http;
-        http.begin(client, ENDPOINT_TREASURY_DATA);
-        http.setConnectTimeout(8000);
+        http.begin(ENDPOINT_TREASURY_DATA);
         http.setTimeout(20000);
-        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
         int statusCode = http.GET();
         if (statusCode != 200) {
             Serial.printf("fetchTreasuryData failed, HTTP %d\n", statusCode);
