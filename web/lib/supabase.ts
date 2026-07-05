@@ -10,7 +10,12 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-export const FUNCTIONS_BASE_URL = process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL!
+// Falls back to deriving the Functions URL from the project URL, so a missing
+// NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL env in Vercel can't silently break every
+// Edge Function call (which is exactly what happened: fetch("undefined/…")).
+export const FUNCTIONS_BASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL
+  ?? supabaseUrl.replace('.supabase.co', '.functions.supabase.co')
 
 export async function callFunction<T>(name: string, body: unknown): Promise<T> {
   const res = await fetch(`${FUNCTIONS_BASE_URL}/${name}`, {
