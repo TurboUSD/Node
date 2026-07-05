@@ -632,7 +632,10 @@ function Header({ nodeCode, isVerified, isGenesis, stats }: {
           {isVerified && <span style={s.badge}>✓</span>}
           {isGenesis  && <span style={s.genBadge}>⚡</span>}
         </span>
-        <a href="/setup" style={s.setupLink}>Flash new device</a>
+        {/* Right zone mirrors the left zone's flex so the title is TRULY centered */}
+        <span style={{ flex: '1 0 0', display: 'flex', justifyContent: 'flex-end' }}>
+          <a href="/setup" style={s.setupLink}>Flash new device</a>
+        </span>
       </header>
       {stats && (
         <div style={s.statsBar}>
@@ -764,14 +767,16 @@ function ToggleRow({ label, value, options, onChange }: {
 const SCREEN_LABELS: Record<number, string> = {
   0: 'Home',        // CLOCK — always fixed first
   1: 'TurboStats',  // TURBO_STATS
-  2: 'Debt',        // DEBT
+  2: 'US Debt',     // DEBT
   3: 'Inflation',   // INFLATION_GAME
-  4: 'My Node',     // NODE_NETWORK
-  5: 'NFT',         // NFT
+  4: 'Mining',      // NODE_NETWORK (live mining view)
+  5: 'NFTs',        // NFT
   6: 'Tickers',     // TICKERS
 }
 
-const DEFAULT_ORDER = [0, 1, 2, 3, 4, 5, 6]
+// Matches the firmware's default _swipeOrder = {0,1,6,2,3,5,4}:
+// Home → TurboStats → Tickers → US Debt → Inflation → NFTs → Mining.
+const DEFAULT_ORDER = [0, 1, 6, 2, 3, 5, 4]
 
 function parseOrder(raw: string | null): number[] {
   if (!raw) return DEFAULT_ORDER
@@ -1062,12 +1067,12 @@ const s: Record<string, React.CSSProperties> = {
     position: 'sticky', top: 0, background: 'rgba(0,0,0,0.92)',
     backdropFilter: 'blur(12px)', zIndex: 10,
   },
-  back:      { color: C.muted, textDecoration: 'none', fontSize: 14 },
+  back:      { color: C.muted, textDecoration: 'none', fontSize: 14, flex: '1 0 0' },
   logoWrap:  { display: 'flex', alignItems: 'center', gap: 10 },
-  logo:      { fontSize: 16, fontWeight: 'bold', color: C.text, display: 'flex', gap: 6, alignItems: 'center' },
+  logo:      { fontSize: 16, fontWeight: 'bold', color: C.text, display: 'flex', gap: 6, alignItems: 'center', flex: '0 0 auto', justifyContent: 'center' },
   badge:     { background: C.green, color: C.onGreen, fontSize: 10, fontWeight: 'bold', padding: '2px 6px', borderRadius: 4 },
   genBadge:  { fontSize: 14 },
-  setupLink: { color: C.muted, fontSize: 13, textDecoration: 'none', border: `1px solid ${C.border}`, padding: '5px 10px', borderRadius: 6 },
+  setupLink: { color: C.muted, fontSize: 13, textDecoration: 'none', border: `1px solid ${C.border}`, padding: '5px 10px', borderRadius: 6, flex: '0 0 auto' },
   statsBar:  { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 36, padding: '12px 20px', borderBottom: `1px solid ${C.border}`, background: C.card },
 
   section: {
