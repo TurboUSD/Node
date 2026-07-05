@@ -221,7 +221,7 @@ function CandlestickChart({ candles, width = 360, height = 160 }: { candles: Can
 
 // ── Compact card ──────────────────────────────────────────────────────────────
 function CompactCard({
-  ticker, live, sparkCandles, onExpand, onRemove, isOwner,
+  ticker, live, sparkCandles, onExpand, onRemove, isOwner, onMoveUp, onMoveDown,
 }: {
   ticker:       StoredTicker
   live:         LiveData | null
@@ -229,6 +229,8 @@ function CompactCard({
   onExpand:     () => void
   onRemove:     () => void
   isOwner:      boolean
+  onMoveUp?:    () => void   // undefined = already first
+  onMoveDown?:  () => void   // undefined = already last
 }) {
   const isUp   = (live?.change24h ?? 0) >= 0
   const chgCol = isUp ? C.green : C.red
@@ -267,6 +269,14 @@ function CompactCard({
 
       {/* Buttons */}
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        {isOwner && (
+          <>
+            <button style={{ ...s.iconBtn, opacity: onMoveUp ? 1 : 0.25 }} disabled={!onMoveUp}
+              onClick={e => { e.stopPropagation(); onMoveUp?.() }} title="Move up">↑</button>
+            <button style={{ ...s.iconBtn, opacity: onMoveDown ? 1 : 0.25 }} disabled={!onMoveDown}
+              onClick={e => { e.stopPropagation(); onMoveDown?.() }} title="Move down">↓</button>
+          </>
+        )}
         <button style={s.iconBtn} onClick={onExpand} title="Expand">⤢</button>
         {isOwner && <button style={{ ...s.iconBtn, color: C.muted }} onClick={e => { e.stopPropagation(); onRemove() }} title="Remove">✕</button>}
       </div>
@@ -517,6 +527,19 @@ export default function TickerBoard({ nodeCode, isOwner }: { nodeCode: string; i
     })
   }, [expanded, timeframe, tickers])
 
+  // Swap two adjacent tickers and persist the new display order.
+  function moveTicker(idx: number, dir: -1 | 1) {
+    const next = [...tickers]
+    const to = idx + dir
+    if (to < 0 || to >= next.length) return
+    ;[next[idx], next[to]] = [next[to], next[idx]]
+    setTickers(next)
+    callFunction('reorder-node-tickers', {
+      node_code:      nodeCode,
+      pool_addresses: next.map(t => t.pool_address),
+    }).catch(() => { /* best-effort; order still applied locally */ })
+  }
+
   async function removeTicker(poolAddress: string) {
     const t = tickers.find(t => t.pool_address === poolAddress)
     if (!t) return
@@ -550,7 +573,7 @@ export default function TickerBoard({ nodeCode, isOwner }: { nodeCode: string; i
       )}
 
       {/* Ticker list */}
-      {tickers.map(t => {
+      {tickers.map((t, idx) => {
         const liveD = live[t.pool_address] ?? null
         const sparks = sparkCandles[t.pool_address] ?? []
         if (expanded === t.pool_address) {
@@ -573,6 +596,8 @@ export default function TickerBoard({ nodeCode, isOwner }: { nodeCode: string; i
         return (
           <CompactCard
             key={t.pool_address}
+            onMoveUp={idx > 0 ? () => moveTicker(idx, -1) : undefined}
+            onMoveDown={idx < tickers.length - 1 ? () => moveTicker(idx, +1) : undefined}
             ticker={t}
             live={liveD}
             sparkCandles={sparks}
