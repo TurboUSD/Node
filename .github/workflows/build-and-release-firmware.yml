@@ -53,6 +53,21 @@ jobs:
           sed -i "s|YOUR-PROJECT-REF|${PROJECT_REF}|g" firmware-esp32/include/config.h
           sed -i "s|YOUR-SUPABASE-ANON-KEY|${{ secrets.SUPABASE_ANON_KEY }}|g" firmware-esp32/include/config.h
 
+      # OpenSea now returns 401 to keyless requests on the account-NFTs
+      # endpoint, so the NFT Gallery needs a (free) API key baked in. Set the
+      # OPENSEA_API_KEY repo secret; if it's absent this step is a no-op and
+      # the gallery will show a clear "needs API key" error on-device.
+      - name: Inject OpenSea API key into config.h (optional)
+        env:
+          OPENSEA_KEY: ${{ secrets.OPENSEA_API_KEY }}
+        run: |
+          if [ -n "$OPENSEA_KEY" ]; then
+            sed -i "s|#define OPENSEA_API_KEY .*|#define OPENSEA_API_KEY \"$OPENSEA_KEY\"|" firmware-esp32/include/config.h
+            echo "OpenSea key injected."
+          else
+            echo "No OPENSEA_API_KEY secret set — NFT gallery will require it at runtime."
+          fi
+
       - name: Build ESP32-S3 firmware
         working-directory: firmware-esp32
         run: pio run
