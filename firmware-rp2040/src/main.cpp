@@ -184,13 +184,13 @@ void setup() {
     pinMode(BUZZER_PIN, OUTPUT);          // factory beep_init()
     delay(500);                           // factory settle delay before first beep
 
-    // Boot self-test: two short beeps, factory drive (plain analogWrite 127,
+    // Boot self-test: THREE short beeps, factory drive (plain analogWrite 127,
     // default 1 kHz PWM). Beeps BEFORE any UART/I2C init so a hung peripheral
-    // can never silence them:
-    //   • Beeps at power-on  → buzzer hardware/pin OK; any "alarm silent"
-    //     issue is upstream (UART link or the ESP32 not sending the command).
+    // can never silence them.
+    //   • THREE beeps = THIS firmware generation (with the RX-blip
+    //     diagnostic). TWO beeps = an older UF2 is still flashed.
     //   • No beep at power-on → buzzer pin/drive problem.
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         analogWrite(BUZZER_PIN, 127);     // EXACTLY factory beep_on()
         delay(120);
         analogWrite(BUZZER_PIN, 0);

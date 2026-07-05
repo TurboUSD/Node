@@ -254,7 +254,19 @@ void loop() {
     static const uint32_t CHIME_AT[3] = { 6000, 12000, 20000 };
     if (linkChimesSent < 3 && millis() > CHIME_AT[linkChimesSent]) {
         linkChimesSent++;
+        rp2040Link.printStatus();                      // visible even if the monitor attached late
+        Serial.printf("RP-link: chime attempt %d\n", linkChimesSent);
         rp2040Link.playChime();   // three attempts → three chances to hear the link
+    }
+
+    // One explicit round-trip test at 30 s: sends PING and waits for the
+    // RP2040's ACK byte. The result line tells us whether the problem is the
+    // TX direction, the RX direction, or neither.
+    static bool linkPinged = false;
+    if (!linkPinged && millis() > 30000) {
+        linkPinged = true;
+        bool ok = rp2040Link.ping(300);
+        Serial.printf("RP-link: ping %s\n", ok ? "OK — link is ALIVE both ways" : "FAILED — no ACK from RP2040");
     }
 
     // While the provisioning portal is up, prioritize serving it.

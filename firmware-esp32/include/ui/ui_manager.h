@@ -882,11 +882,11 @@ private:
         refreshSharedHeader(tickerScreen.header, t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
         refreshSharedHeader(nftScreen.header,    t, _tempC, _humidityPct, is24h, tempUnit, _sensorValid);
 
-        // Refresh every footer (node name/code + "| N NODES"). Nothing was
-        // calling this, so all footers showed LVGL's default "Text". Until the
-        // device has a display name, show its node code; before it's even
-        // registered, show a short placeholder.
-        String footerName = storage.getNodeCode();
+        // Refresh every footer (node name/code + "| N NODES"). Prefer the
+        // DISPLAY NAME (synced from the backend on each heartbeat); fall back
+        // to the node code, then to a placeholder for unregistered devices.
+        String footerName = storage.getDisplayName();
+        if (footerName.length() == 0) footerName = storage.getNodeCode();
         if (footerName.length() == 0) footerName = "NEW NODE";
         refreshSharedFooter(clockFooterRefs,     footerName, _onlineNodeCount);
         refreshSharedFooter(turboScreen.footer,  footerName, _onlineNodeCount);

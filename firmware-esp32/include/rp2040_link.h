@@ -47,14 +47,20 @@ public:
         cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
         cfg.source_clk = UART_SCLK_APB;   // IDF 4.4 (Arduino 2.0.x) has no UART_SCLK_DEFAULT
 
-        esp_err_t e1 = uart_driver_install(LINK_UART, 512, 512, 0, nullptr, 0);
-        esp_err_t e2 = uart_param_config(LINK_UART, &cfg);
-        esp_err_t e3 = uart_set_pin(LINK_UART, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN,
-                                    UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-        Serial.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d)\n",
-                      (int)e1, (int)e2, (int)e3, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN, (int)LINK_UART);
-        _ok = (e1 == ESP_OK && e2 == ESP_OK && e3 == ESP_OK);
+        _e1 = uart_driver_install(LINK_UART, 512, 512, 0, nullptr, 0);
+        _e2 = uart_param_config(LINK_UART, &cfg);
+        _e3 = uart_set_pin(LINK_UART, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN,
+                           UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        printStatus();
+        _ok = (_e1 == ESP_OK && _e2 == ESP_OK && _e3 == ESP_OK);
         if (!_ok) Serial.println("RP-link: INIT FAILED — alarm commands cannot reach the RP2040");
+    }
+
+    // Re-printable at any time — serial monitors usually attach AFTER boot,
+    // so the one-shot init line kept getting missed.
+    void printStatus() {
+        Serial.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d)\n",
+                      (int)_e1, (int)_e2, (int)_e3, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN, (int)LINK_UART);
     }
 
     // volume: 1 (whisper) – 5 (max). Default 2 matches the soft-default in
@@ -126,6 +132,7 @@ private:
     // (ESP32_COMM_PORT_NUM = 2, TXD 19, RXD 20).
     static const uart_port_t LINK_UART = UART_NUM_2;
     bool _ok = false;
+    esp_err_t _e1 = ESP_FAIL, _e2 = ESP_FAIL, _e3 = ESP_FAIL;   // init results, reprintable
 
     // Non-blocking single-byte read; -1 when nothing is waiting.
     int _readByte() {
