@@ -283,7 +283,7 @@ export default function NetworkPage() {
 
       {/* ── Block ticker: mined lane (left) | dashed divider | pending (fixed right) ── */}
       <div style={s.tickerWrap} aria-hidden="true">
-        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}>
           <div style={s.tickerMinedLane}>
             {minedOldestFirst.length === 0
               ? <span style={{ alignSelf: 'center', color: C.muted, fontSize: 11, whiteSpace: 'nowrap' }}>No blocks mined yet — first one below ↓</span>
@@ -358,7 +358,7 @@ export default function NetworkPage() {
                     onSelect={setSelectedNode}
                   />
                   <LeaderColumn
-                    title="⚡ Uptime"
+                    title="Uptime"
                     nodes={[...nodes].sort((a, b) => b.uptime_pct - a.uptime_pct)}
                     right={(node: NodeRow) => (
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -375,7 +375,7 @@ export default function NetworkPage() {
                 <>
                   <div style={{ ...s.toggle, marginBottom: 12 }}>
                     <button style={leaderSort === 'rewards' ? { ...s.toggleBtn, ...s.toggleActive } : s.toggleBtn} onClick={() => setLeaderSort('rewards')}>₸ Rewards</button>
-                    <button style={leaderSort === 'uptime'  ? { ...s.toggleBtn, ...s.toggleActive } : s.toggleBtn} onClick={() => setLeaderSort('uptime')}>⚡ Uptime</button>
+                    <button style={leaderSort === 'uptime'  ? { ...s.toggleBtn, ...s.toggleActive } : s.toggleBtn} onClick={() => setLeaderSort('uptime')}>Uptime</button>
                   </div>
                   {leaderboard.map((node, idx) => (
                     <NodeRowCard key={node.node_code} node={node}
@@ -388,7 +388,7 @@ export default function NetworkPage() {
                             </div>
                           : <div style={{ textAlign: 'right', flexShrink: 0 }}>
                               <div style={{ fontSize: 14, fontWeight: 'bold', color: node.uptime_pct >= 90 ? C.green : node.uptime_pct >= 60 ? C.yellow : C.muted }}>
-                                ⚡ {node.uptime_pct}%
+                                {node.uptime_pct}%
                               </div>
                               <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>uptime</div>
                             </div>
@@ -408,12 +408,12 @@ export default function NetworkPage() {
       {/* ── Install banner (mobile only, fixed to bottom) ── */}
       {showInstall && (
         <div style={s.installBanner}>
-          <span style={{ fontSize: 22, flexShrink: 0 }}>⚡</span>
+          <span style={{ fontSize: 22, flexShrink: 0 }}>📲</span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 'bold', fontSize: 14, color: C.text }}>Add to Home Screen</div>
             <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
               {isIos
-                ? 'Tap Share ⎙ → "Add to Home Screen" for the full app'
+                ? 'Tap Share 📤 → "Add to Home Screen" for the full app'
                 : 'Install for quick access — works offline too'}
             </div>
           </div>
@@ -521,28 +521,29 @@ function GetNotifiedBanner() {
   if (dismissed) return null
   return (
     <div style={s.notifBanner}>
-      <span style={{ fontSize: 20 }}>📱</span>
+      {/* Dismiss pinned to the corner so it doesn't eat a column of width */}
+      <button
+        onClick={() => setDismissed(true)}
+        style={{ position: 'absolute', top: 4, right: 6, background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 13, padding: 2, lineHeight: 1 }}
+        aria-label="Dismiss"
+      >✕</button>
+      <span style={{ fontSize: 16 }}>📱</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 'bold', color: C.text }}>Get mining alerts on Telegram</div>
-        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-          DM{' '}
-          <a href="https://t.me/ami9000_bot" target="_blank" rel="noreferrer" style={{ color: C.blue, fontWeight: 'bold', textDecoration: 'none' }}>@ami9000_bot</a>
-          {' '}the command{' '}
-          <code style={{ background: C.surface, padding: '1px 5px', borderRadius: 4, fontSize: 11 }}>/mynode YOUR_CODE</code>
+        <div style={{ fontSize: 12, fontWeight: 'bold', color: C.text }}>
+          Mining alerts on Telegram{' '}
+          <span style={{ fontWeight: 'normal', color: C.muted }}>
+            — DM <a href="https://t.me/ami9000_bot" target="_blank" rel="noreferrer" style={{ color: C.blue, fontWeight: 'bold', textDecoration: 'none' }}>@ami9000_bot</a>:{' '}
+            <code style={{ background: C.surface, padding: '1px 4px', borderRadius: 4, fontSize: 10 }}>/mynode YOUR_CODE</code>
+          </span>
         </div>
       </div>
       <a
         href="https://t.me/ami9000_bot"
         target="_blank" rel="noreferrer"
-        style={{ padding: '7px 14px', background: C.blue, color: '#fff', borderRadius: 20, fontSize: 12, fontWeight: 'bold', textDecoration: 'none', flexShrink: 0 }}
+        style={{ padding: '6px 14px', background: C.blue, color: '#fff', borderRadius: 20, fontSize: 12, fontWeight: 'bold', textDecoration: 'none', flexShrink: 0, marginRight: 10 }}
       >
         Open →
       </a>
-      <button
-        onClick={() => setDismissed(true)}
-        style={{ background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 16, padding: '0 2px', flexShrink: 0 }}
-        aria-label="Dismiss"
-      >✕</button>
     </div>
   )
 }
@@ -809,7 +810,8 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
 }) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10 }}>{title}</div>
+      <div style={{ fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10,
+                    height: 16, lineHeight: '16px', display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>{title}</div>
       {nodes.map((node, idx) => (
         <div key={node.node_code} style={{ ...s.nodeRow, padding: '9px 10px' }} onClick={() => onSelect(node)} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && onSelect(node)}>
           <div style={{ ...s.rank, fontSize: 11 }}>{idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}</div>
@@ -887,7 +889,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
 
   function shareOnX() {
     const name = node.display_name || `Node #${node.node_code}`
-    const text = `My node "${name}" is live on the @turbousd network ⛏\n${node.blocks_won} blocks won · ${node.total_tusd_earned.toFixed(2)} ₸USD earned · ⚡ ${node.uptime_pct}% uptime`
+    const text = `My node "${name}" is live on the @turbousd network ⛏\n${node.blocks_won} blocks won · ${node.total_tusd_earned.toFixed(2)} ₸USD earned · ${node.uptime_pct}% uptime`
     const url  = `https://network.turbousd.com/node/${node.node_code}`
     window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank')
   }
@@ -938,7 +940,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
         <div style={s.detailGrid}>
           <DetailStat label="Total earned" value={`₸${node.total_tusd_earned.toFixed(4)}`} color={C.green}  />
           <DetailStat label="Blocks won"   value={String(node.blocks_won)}                 color={C.blue}   />
-          <DetailStat label="Uptime"       value={`⚡ ${node.uptime_pct}%`}               color={uptimeColor} />
+          <DetailStat label="Uptime"       value={`${node.uptime_pct}%`}               color={uptimeColor} />
           <DetailStat label="Since"        value={new Date(node.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} color={C.yellow} />
         </div>
 
@@ -1016,8 +1018,11 @@ const s: Record<string, React.CSSProperties> = {
   tickerWrap:  { width: '100%', overflow: 'hidden', background: '#050505', borderBottom: `1px solid ${C.border}` },
   // Mined blocks: right-aligned in a clipped lane, so each newly mined block
   // appears next to the divider and pushes the older ones to the left.
-  tickerMinedLane: { flex: 1, display: 'flex', gap: 8, padding: '12px 8px', overflow: 'hidden', justifyContent: 'flex-end', minWidth: 0 },
-  tickerDivider:   { width: 0, borderLeft: '2px dashed #3a3a42', margin: '10px 2px' },
+  // No flex:1 — the lane shrinks to its content so the whole strip (mined +
+  // divider + pending) sits CENTERED; when it grows past ~70% width it clips
+  // on the left, keeping the newest blocks visible next to the divider.
+  tickerMinedLane: { display: 'flex', gap: 8, padding: '12px 8px', overflow: 'hidden', justifyContent: 'flex-end', minWidth: 0, maxWidth: 'calc(100% - 180px)' },
+  tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '10px 16px', opacity: 0.75 },
 
   block: {
     minWidth: 96, height: 110, padding: '10px 10px 8px',
@@ -1026,19 +1031,22 @@ const s: Record<string, React.CSSProperties> = {
   },
   blockMined:   { background: 'linear-gradient(160deg,#081a10,#050d08)', border: `1px solid ${C.green}28` },
   blockPending: { background: 'linear-gradient(160deg,#1a1300,#0a0800)', border: `1px solid ${C.yellow}28` },
-  blockNum:     { fontSize: 9, color: C.muted, opacity: 0.6, letterSpacing: 0.5, marginBottom: 4 },
+  blockNum:     { fontSize: 12, fontWeight: 700, color: '#c4c4cc', letterSpacing: 0.5, marginBottom: 4 },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green, flex: 1, display: 'flex', alignItems: 'center' },
-  blockWinner:  { fontSize: 9, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 88 },
+  blockWinner: { fontSize: 12, fontWeight: 600, color: '#e8e8e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 96 },
 
   // Stats
-  statsBar: { display: 'flex', justifyContent: 'center', gap: 10, padding: '20px 16px 8px', flexWrap: 'wrap' },
-  statPill: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 28px', textAlign: 'center', minWidth: 90 },
+  // nowrap + flexible pills: the three stats must share ONE line even on
+  // narrow phones (the fixed 28px side padding used to push "Verified" down).
+  statsBar: { display: 'flex', justifyContent: 'center', gap: 8, padding: '20px 12px 8px', flexWrap: 'nowrap' },
+  statPill: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center', flex: '1 1 0', maxWidth: 150, minWidth: 0 },
 
   // Get notified banner — inside content div, matches content width automatically
   notifBanner: {
-    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+    position: 'relative',                 // anchors the corner ✕
+    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
     background: `${C.blue}08`, border: `1px solid ${C.blue}40`, borderRadius: 10,
-    marginBottom: 24, flexWrap: 'wrap',
+    marginBottom: 24,
   },
 
   // Content

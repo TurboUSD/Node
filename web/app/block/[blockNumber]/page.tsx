@@ -244,6 +244,6 @@ const s: Record<string, React.CSSProperties> = {
   btn: { display: 'inline-block', padding: '10px 20px', border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, textDecoration: 'none', fontSize: 14, marginTop: 16 },
 
   navRow:         { display: 'flex', justifyContent: 'space-between', gap: 12 },
-  navBtn:         { padding: '10px 18px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, textDecoration: 'none', fontSize: 13, fontWeight: 600 },
-  navBtnDisabled: { padding: '10px 18px', background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 13, opacity: 0.4 },
+  navBtn:         { padding: '10px 18px', background: '#1e1e24', border: '1px solid #4a4a52', borderRadius: 8, color: '#ffffff', textDecoration: 'none', fontSize: 13, fontWeight: 700, display: 'inline-block', cursor: 'pointer' },
+  navBtnDisabled: { padding: '10px 18px', background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 13, opacity: 0.4, display: 'inline-block' },
 }
