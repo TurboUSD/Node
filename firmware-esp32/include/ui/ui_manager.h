@@ -352,7 +352,10 @@ private:
     int debtYearsRangeIndex = 4;
     int sincePeriodIndex = 4;
     int rateUnitIndex = 0;
-    int gameYearsIndex = 1;
+    int gameYearsIndex = 0;            // 0 = REAL TIME (default), then 1Y…100Y
+    bool   _gameRtActive   = false;    // real-time game mode currently driving the chart
+    double _gameRtBaseline = 0.0;      // dollar value mapped to chart unit 0
+    int    _gameRtCount    = 0;        // points drawn so far (fill phase: left → right)
     double _debtPerSecond = 0.0;   // US-debt-clock rate, derived from history
     bool   _debtHistLoaded = false;
     bool   _debtRangeDirty = false; // range picker changed → refetch history (debounced)
@@ -927,6 +930,10 @@ private:
             static const int yearValues[] = {5, 10, 20, 30, 50, 75};
             reloadDebtHistory(yearValues[debtYearsRangeIndex % 6]);
         }
+
+        // Real-time inflation game: tick once per second while visible.
+        if (currentScreen == ScreenId::INFLATION_GAME && _gameRtActive)
+            _tickGameRealtime();
 
         // Real mining countdown (pending block opened_at + 1 h), once per tick.
         if (_pendingBlockCreatedAt > 0) {
@@ -1504,12 +1511,37 @@ private:
     // Recompute the inflation-game projection ($10,000 eroded by the real annual
     // debasement rate over the selected horizon) and redraw its chart + labels.
     void _updateGameProjection() {
-        static const int yearOpts[9] = {1, 3, 5, 10, 20, 30, 50, 75, 100};
-        int years = yearOpts[gameYearsIndex % 9];
+        static const int yearOpts[10] = {0, 1, 3, 5, 10, 20, 30, 50, 75, 100};
+        int years = yearOpts[gameYearsIndex % 10];   // 0 = REAL TIME
         double rate = _annualDebasementRate;
 
         lv_obj_t* c = gameScreen.getChart();
         lv_chart_series_t* s = gameScreen.getSeries();
+
+        if (years == 0) {
+            // ── REAL TIME ── rolling 2-minute window, one point per second,
+            // fed by _tickGameRealtime(). Chart units are 0.0001 $ offsets
+            // from a baseline so the ~$0.000024/s fall is visible on an
+            // integer axis. Re-entering resets the window so the line draws
+            // itself from scratch.
+            if (!_gameRtActive) {
+                _gameRtActive   = true;
+                _gameRtBaseline = 0.0;   // set on the first tick
+                _gameRtCount    = 0;     // draw from the LEFT edge
+                lv_chart_set_point_count(c, GAME_RT_POINTS);
+                lv_chart_set_update_mode(c, LV_CHART_UPDATE_MODE_SHIFT);
+                lv_chart_set_all_value(c, s, LV_CHART_POINT_NONE);
+            }
+            _tickGameRealtime();         // draw/refresh immediately
+            return;
+        }
+
+        // ── Projection mode (1Y…100Y) ──
+        if (_gameRtActive) {
+            _gameRtActive = false;
+            lv_chart_set_update_mode(c, LV_CHART_UPDATE_MODE_CIRCULAR);
+            gameScreen.setRealtimeAxis(false, 0.0);
+        }
         const int N = 24;
         lv_chart_set_point_count(c, N);
 
@@ -1530,8 +1562,8 @@ private:
     }
 
     void openGameYearsPicker() {
-        static const char* options = "1Y\n3Y\n5Y\n10Y\n20Y\n30Y\n50Y\n75Y\n100Y";
-        static const int yearOpts[9] = {1, 3, 5, 10, 20, 30, 50, 75, 100};
+        static const char* options = "REAL TIME\n1Y\n3Y\n5Y\n10Y\n20Y\n30Y\n50Y\n75Y\n100Y";
+        static const int yearOpts[10] = {0, 1, 3, 5, 10, 20, 30, 50, 75, 100};
         lv_obj_t* card = openModal(lv_scr_act());
         lv_obj_t* roller = addOptionPicker(card, options, gameYearsIndex);
         lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
@@ -1540,11 +1572,64 @@ private:
         // Live-apply (see note above openSincePeriodPicker).
         lv_obj_add_event_cb(roller, [](lv_event_t* e) {
             sSelf->gameYearsIndex = lv_roller_get_selected(lv_event_get_target(e));
-            char lbl[10]; snprintf(lbl, sizeof(lbl), "%dY \xEF\x81\xB8", yearOpts[sSelf->gameYearsIndex % 9]);
+            int yrs = yearOpts[sSelf->gameYearsIndex % 10];
+            char lbl[16];
+            if (yrs == 0) snprintf(lbl, sizeof(lbl), "REAL TIME \xEF\x81\xB8");
+            else          snprintf(lbl, sizeof(lbl), "%dY \xEF\x81\xB8", yrs);
             sSelf->gameScreen.setYearsButtonLabel(lbl);
             sSelf->_updateGameProjection();
         }, LV_EVENT_VALUE_CHANGED, nullptr);
         lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
+    }
+
+    // ── Real-time inflation tick (1/s while the game screen shows REAL TIME) ──
+    // $10,000 eroded continuously at the derived annual debasement rate since
+    // the node went online; the 4th decimal falls every few seconds.
+    static const int GAME_RT_POINTS = 120;   // 2-minute rolling window
+    void _tickGameRealtime() {
+        lv_obj_t* c = gameScreen.getChart();
+        lv_chart_series_t* s = gameScreen.getSeries();
+        double rate     = _annualDebasementRate;
+        double secsYear = 365.25 * 86400.0;
+        double elapsed  = (double)millis() / 1000.0;
+        double v        = 10000.0 * pow(1.0 / (1.0 + rate), elapsed / secsYear);
+        double perSec   = v * log(1.0 + rate) / secsYear;   // $ lost per second
+
+        if (_gameRtBaseline == 0.0) {
+            _gameRtBaseline = v;
+            gameScreen.setRealtimeAxis(true, _gameRtBaseline, false);
+        }
+        // Chart unit = 0.0001 $ offset from baseline (negative, falling).
+        long scaledL = lround((v - _gameRtBaseline) * 10000.0);
+        if (scaledL < -30000) {   // int16 lv_coord_t headroom — re-baseline
+            _gameRtBaseline = v;
+            _gameRtCount    = 0;
+            gameScreen.setRealtimeAxis(true, _gameRtBaseline, false);
+            lv_chart_set_all_value(c, s, LV_CHART_POINT_NONE);
+            scaledL = 0;
+        }
+        lv_coord_t scaled = (lv_coord_t)scaledL;
+
+        // Time flows left → right: FILL the window from the left edge first
+        // (set_value_by_id), and only once it's full let the chart scroll
+        // (set_next_value + SHIFT). The X labels flip from absolute
+        // (0s → +2 min) to relative (-2 min → now) at that moment.
+        if (_gameRtCount < GAME_RT_POINTS) {
+            lv_chart_set_value_by_id(c, s, (uint16_t)_gameRtCount, scaled);
+            _gameRtCount++;
+            if (_gameRtCount == GAME_RT_POINTS)
+                gameScreen.setRealtimeAxis(true, _gameRtBaseline, true);
+        } else {
+            lv_chart_set_next_value(c, s, scaled);
+        }
+
+        // Window the Y axis to [now .. now + expected 2-min fall] so the tiny
+        // decline fills the plot height and visibly slides downward.
+        lv_coord_t fallWin = (lv_coord_t)(perSec * 10000.0 * GAME_RT_POINTS) + 4;
+        lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, scaled - 3, scaled + fallWin);
+
+        int dayCount = (int)(millis() / 86400000UL);
+        gameScreen.updateRealtime(dayCount, v, perSec);
     }
 
     void showScreen(ScreenId id, bool animate = true,

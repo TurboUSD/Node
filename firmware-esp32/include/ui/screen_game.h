@@ -89,7 +89,7 @@ public:
         lv_obj_add_event_cb(yearsButton, onYearsBtnTapped, LV_EVENT_CLICKED, userData);
         yearsButtonLabel = lv_label_create(yearsButton);
         lv_obj_set_style_text_font(yearsButtonLabel, &lv_font_montserrat_10, 0);
-        lv_label_set_text(yearsButtonLabel, "3Y \xEF\x81\xB8");
+        lv_label_set_text(yearsButtonLabel, "REAL TIME \xEF\x81\xB8");
 
         // X-axis: real calendar years ("now", 2027, 2028…) spread across the
         // plot width, filled by setXAxisYears() whenever the horizon changes.
@@ -133,6 +133,52 @@ public:
         _refreshXAxis(years);
     }
 
+    // ── Real-time mode ────────────────────────────────────────────────────
+    // Big number with 4 decimals ticking down + "losing live" detail line.
+    void updateRealtime(int dayCount, double value, double lossPerSec) {
+        char captionBuf[64];
+        snprintf(captionBuf, sizeof(captionBuf), "$10,000 SINCE THIS NODE WENT ONLINE - DAY %d", dayCount);
+        lv_label_set_text(captionLabel, captionBuf);
+
+        char money[32];
+        _fmtMoney4(money, sizeof(money), value);
+        lv_label_set_text(projectedValueLabel, money);
+
+        char detailBuf[96];
+        snprintf(detailBuf, sizeof(detailBuf),
+                 "losing value LIVE - lost $%.4f (-$%.6f/s)",
+                 10000.0 - value, lossPerSec);
+        lv_label_set_text(detailLabel, detailBuf);
+    }
+
+    // Switch the axes between projection mode (years) and real-time mode
+    // (rolling 2-minute window; Y ticks show the 4-decimal fraction of the
+    // dollar value so the tiny per-second fall is actually readable).
+    // `scrolling` = false while the line is still drawing itself left→right
+    // (X axis is absolute: 0s → +2 min); true once the window is full and the
+    // chart starts sliding (X axis becomes relative: -2 min → now).
+    void setRealtimeAxis(bool on, double baseline, bool scrolling = false) {
+        _rtMode     = on;
+        _rtBaseline = baseline;
+        if (!xLabels[X_LABELS - 1]) return;
+        if (on && !scrolling) {
+            lv_label_set_text(xLabels[0], "0s");
+            lv_label_set_text(xLabels[1], "");
+            lv_label_set_text(xLabels[2], "+1 min");
+            lv_label_set_text(xLabels[3], "");
+            lv_label_set_text(xLabels[4], "+2 min");
+        } else if (on) {
+            lv_label_set_text(xLabels[0], "-2 min");
+            lv_label_set_text(xLabels[1], "");
+            lv_label_set_text(xLabels[2], "-1 min");
+            lv_label_set_text(xLabels[3], "");
+            lv_label_set_text(xLabels[4], "now");
+        } else {
+            lv_label_set_text(xLabels[0], "now");
+            for (int i = 1; i < X_LABELS; i++) lv_label_set_text(xLabels[i], "");
+        }
+    }
+
     void setYearsButtonLabel(const String& text) { lv_label_set_text(yearsButtonLabel, text.c_str()); }
     // Kept for API compatibility; the horizon now feeds the X-axis year labels.
     void setHorizonLabel(int years) { _refreshXAxis(years); }
@@ -154,6 +200,8 @@ private:
     lv_obj_t* yearsButton = nullptr;
     lv_obj_t* yearsButtonLabel = nullptr;
     lv_obj_t* xLabels[X_LABELS] = { nullptr };
+    bool   _rtMode     = false;   // real-time mode: Y ticks = dollar fraction
+    double _rtBaseline = 0.0;     // dollar value that chart-unit 0 maps to
 
     // "now", then real calendar years evenly spread over the horizon
     // (e.g. 10Y from 2026 → now · 2029 · 2031 · 2034 · 2036).
@@ -192,12 +240,41 @@ private:
         out[o] = '\0';
     }
 
+    // "$9,997.8932" — thousands separators + 4 decimals (real-time mode).
+    static void _fmtMoney4(char* out, size_t sz, double v) {
+        long long u  = llround((v < 0 ? -v : v) * 10000.0);
+        long long ip = u / 10000, fp = u % 10000;
+        char digits[24];
+        snprintf(digits, sizeof(digits), "%lld", ip);
+        int n = strlen(digits);
+        size_t o = 0;
+        if (v < 0 && o < sz - 1) out[o++] = '-';
+        if (o < sz - 1) out[o++] = '$';
+        for (int i = 0; i < n && o < sz - 1; i++) {
+            out[o++] = digits[i];
+            int rem = n - 1 - i;
+            if (rem > 0 && rem % 3 == 0 && o < sz - 1) out[o++] = ',';
+        }
+        snprintf(out + o, sz - o, ".%04lld", fp);
+    }
+
     // Formats the Y-axis $ ticks compactly ("$10k", "$7k"…).
     static void _axisDrawCb(lv_event_t* e) {
+        GameScreen* self = (GameScreen*)lv_event_get_user_data(e);
         lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
         if (!lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) return;
         if (dsc->text == NULL) return;
         if (dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
+            if (self && self->_rtMode) {
+                // Chart units are 0.0001 $ offsets from the baseline dollar
+                // value; the tick shows the 4-decimal fraction (".8932") —
+                // the integer dollars barely move, the decimals are the show.
+                double v = self->_rtBaseline + (double)dsc->value * 0.0001;
+                double frac = v - floor(v);
+                snprintf(dsc->text, dsc->text_length, ".%04d",
+                         (int)llround(frac * 10000.0) % 10000);
+                return;
+            }
             int v = (int)dsc->value;
             if (v >= 1000) snprintf(dsc->text, dsc->text_length, "$%.1fk", v / 1000.0);
             else           snprintf(dsc->text, dsc->text_length, "$%d", v);

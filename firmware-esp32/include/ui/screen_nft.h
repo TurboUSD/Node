@@ -932,6 +932,12 @@ private:
 
     void _startImageFetch() {
         if (_imgTask || _nftCache.empty()) return;
+        // Don't spawn (and log) a no-op worker when everything visible is
+        // already decoded or attempted.
+        bool anyPending = false;
+        for (auto& it : _nftCache)
+            if (!it.img_pixels && !it.img_tried && it.image_url[0]) { anyPending = true; break; }
+        if (!anyPending) return;
         xTaskCreatePinnedToCore(_bgImgFetchFn, "nft_img", 12288, nullptr, 1, (TaskHandle_t*)&_imgTask, 0);
     }
 
@@ -1036,113 +1042,136 @@ private:
             return;
         }
 
-        // ── Step 1: Fetch NFT list from OpenSea ─────────────────────────────
-        // GET /api/v2/chain/{chain}/account/{address}/nfts?limit=50
-        String nftsUrl = String(ENDPOINT_OPENSEA_BASE) +
-                         "/chain/" + NFT_OPENSEA_CHAIN +
-                         "/account/" + wallet +
-                         "/nfts?limit=24";
-
-        // Up to 3 attempts, 2.5 s apart: the first try often lands while the
-        // ticker worker still holds a TLS connection and internal RAM is too
-        // low for another handshake ("SSL - Memory allocation failed" →
-        // HTTP -1). A couple of seconds later the heap has recovered.
-        HTTPClient http;
-        int code = -1;
-        for (int attempt = 0; attempt < 3; attempt++) {
-            if (attempt > 0) {
-                Serial.printf("NFT fetch retry %d (prev code %d)\n", attempt, code);
-                vTaskDelay(pdMS_TO_TICKS(2500));
-            }
-            http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
-            http.begin(nftsUrl);
-            if (strlen(OPENSEA_API_KEY) > 0)
-                http.addHeader("X-API-KEY", OPENSEA_API_KEY);
-            http.addHeader("Accept", "application/json");
-            http.setTimeout(20000);
-            code = http.GET();
-            if (code == 200) break;
-            http.end();
-        }
-        if (code != 200) {
-            if (code == 401 || code == 403) {
-                // OpenSea now requires an API key for the account-NFTs
-                // endpoint. The key is baked in at build time (see the
-                // OPENSEA_API_KEY secret in the release workflow).
-                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
-                         "OpenSea requires an API key (HTTP %d).\nRebuild with OPENSEA_API_KEY set.", code);
-            } else {
-                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
-                         "OpenSea HTTP %d", code);
-            }
-            _pendingResult.error = true;
-            _pendingResult.ready = true;
-            http.end();
-            netUnlock();
-        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
-            vTaskDelete(nullptr);
-            return;
-        }
-
-        // Parse NFTs — collect slugs and basic info
+        // ── Step 1: Fetch the NFT list from OpenSea, PAGINATED ──────────────
+        // OpenSea returns NFTs by acquisition date (newest first), so a single
+        // page from a wallet that just bought 24 of one collection contains
+        // ONLY that collection (this is exactly what happened: 24× Penimals,
+        // one slug, every grid cell the same). Walk the `next` cursor across
+        // several pages and cap how many we keep per collection, so every
+        // collection in the wallet gets represented.
         struct RawNft {
             char name[64]       = {};
             char slug[64]       = {};
             char image_url[256] = {};
         };
-
-        // We parse in two passes to keep heap low on the ESP32.
-        // First pass: collect slugs and item count per slug.
-        // JsonDocument needs to fit the response (~50 NFTs * ~300 bytes = ~15 KB).
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, http.getStream());
-        http.end();
-
-        if (err) {
-            snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
-                     "JSON parse error: %s", err.c_str());
-            _pendingResult.error = true;
-            _pendingResult.ready = true;
-            netUnlock();
-        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
-            vTaskDelete(nullptr);
-            return;
-        }
-
-        JsonArray nfts = doc["nfts"].as<JsonArray>();
-        Serial.printf("NFT: OpenSea returned %d NFTs for %s\n", (int)nfts.size(), wallet.c_str());
-
-        // Collect unique slugs and raw items (limited to NFT_MAX_ITEMS)
         static RawNft rawNfts[NFT_MAX_ITEMS];
         static char slugList[NFT_MAX_COLLECTIONS][64];
+        static uint8_t perSlug[NFT_MAX_COLLECTIONS];
         int rawCount  = 0;
         int slugCount = 0;
+        memset(perSlug, 0, sizeof(perSlug));
+        const int MAX_PER_COLLECTION = 6;   // grid carousels don't need more
+        const int MAX_PAGES          = 5;   // up to ~250 NFTs scanned
 
-        for (JsonObject nft : nfts) {
-            if (rawCount >= NFT_MAX_ITEMS) break;
+        String nextCursor = "";
+        int    code       = -1;
+        for (int page = 0; page < MAX_PAGES && rawCount < NFT_MAX_ITEMS; page++) {
+            String nftsUrl = String(ENDPOINT_OPENSEA_BASE) +
+                             "/chain/" + NFT_OPENSEA_CHAIN +
+                             "/account/" + wallet +
+                             "/nfts?limit=50";
+            if (nextCursor.length()) nftsUrl += "&next=" + nextCursor;
 
-            const char* slug     = nft["collection"] | "";
-            const char* name     = nft["name"]        | "";
-            // display_image_url is OpenSea's pre-resized variant (~500px) —
-            // ideal for on-device decode. NEVER metadata_url (that's JSON).
-            const char* imgUrl   = nft["display_image_url"] | nft["image_url"] | "";
-
-            if (!slug[0]) continue;  // skip NFTs with no collection slug
-            if (!imgUrl[0]) continue; // skip NFTs with no image
-
-            // Add slug to unique list
-            bool knownSlug = false;
-            for (int si = 0; si < slugCount; si++) {
-                if (strcmp(slugList[si], slug) == 0) { knownSlug = true; break; }
+            // Up to 3 attempts on the FIRST page (TLS handshakes can fail
+            // while internal RAM is momentarily fragmented); later pages are
+            // best-effort — whatever was gathered so far still renders.
+            HTTPClient http;
+            code = -1;
+            int attempts = (page == 0) ? 3 : 1;
+            for (int attempt = 0; attempt < attempts; attempt++) {
+                if (attempt > 0) {
+                    Serial.printf("NFT fetch retry %d (prev code %d)\n", attempt, code);
+                    vTaskDelay(pdMS_TO_TICKS(2500));
+                }
+                http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
+                http.begin(nftsUrl);
+                if (strlen(OPENSEA_API_KEY) > 0)
+                    http.addHeader("X-API-KEY", OPENSEA_API_KEY);
+                http.addHeader("Accept", "application/json");
+                http.setTimeout(20000);
+                code = http.GET();
+                if (code == 200) break;
+                http.end();
             }
-            if (!knownSlug && slugCount < NFT_MAX_COLLECTIONS) {
-                strncpy(slugList[slugCount++], slug, 63);
+            if (code != 200) {
+                if (page > 0) break;   // keep earlier pages' items
+                if (code == 401 || code == 403) {
+                    snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
+                             "OpenSea requires an API key (HTTP %d).\nRebuild with OPENSEA_API_KEY set.", code);
+                } else {
+                    snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
+                             "OpenSea HTTP %d", code);
+                }
+                _pendingResult.error = true;
+                _pendingResult.ready = true;
+                http.end();
+                netUnlock();
+                if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+                vTaskDelete(nullptr);
+                return;
             }
 
-            strncpy(rawNfts[rawCount].name,      name,   sizeof(rawNfts[0].name)-1);
-            strncpy(rawNfts[rawCount].slug,      slug,   sizeof(rawNfts[0].slug)-1);
-            strncpy(rawNfts[rawCount].image_url, imgUrl, sizeof(rawNfts[0].image_url)-1);
-            rawCount++;
+            // Filtered parse: only the four fields we use + the page cursor —
+            // keeps the JsonDocument small even at limit=50.
+            JsonDocument filter;
+            filter["next"] = true;
+            filter["nfts"][0]["collection"]        = true;
+            filter["nfts"][0]["name"]              = true;
+            filter["nfts"][0]["display_image_url"] = true;
+            filter["nfts"][0]["image_url"]         = true;
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, http.getStream(),
+                                                       DeserializationOption::Filter(filter));
+            http.end();
+            if (err) {
+                if (page > 0) break;
+                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
+                         "JSON parse error: %s", err.c_str());
+                _pendingResult.error = true;
+                _pendingResult.ready = true;
+                netUnlock();
+                if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+                vTaskDelete(nullptr);
+                return;
+            }
+
+            JsonArray nfts = doc["nfts"].as<JsonArray>();
+            for (JsonObject nft : nfts) {
+                if (rawCount >= NFT_MAX_ITEMS) break;
+
+                const char* slug   = nft["collection"] | "";
+                const char* name   = nft["name"]       | "";
+                // display_image_url is OpenSea's pre-resized variant (~500px) —
+                // ideal for on-device decode. NEVER metadata_url (that's JSON).
+                const char* imgUrl = nft["display_image_url"] | nft["image_url"] | "";
+
+                if (!slug[0])  continue;   // no collection slug
+                if (!imgUrl[0]) continue;  // no image
+
+                // Find/register the collection; cap items kept per collection.
+                int si = -1;
+                for (int k = 0; k < slugCount; k++)
+                    if (strcmp(slugList[k], slug) == 0) { si = k; break; }
+                if (si < 0) {
+                    if (slugCount >= NFT_MAX_COLLECTIONS) continue;
+                    si = slugCount++;
+                    strncpy(slugList[si], slug, 63);
+                }
+                if (perSlug[si] >= MAX_PER_COLLECTION) continue;
+                perSlug[si]++;
+
+                strncpy(rawNfts[rawCount].name,      name,   sizeof(rawNfts[0].name)-1);
+                strncpy(rawNfts[rawCount].slug,      slug,   sizeof(rawNfts[0].slug)-1);
+                strncpy(rawNfts[rawCount].image_url, imgUrl, sizeof(rawNfts[0].image_url)-1);
+                rawCount++;
+            }
+
+            const char* nx = doc["next"] | "";
+            Serial.printf("NFT: page %d -> %d kept, %d collections so far%s\n",
+                          page + 1, rawCount, slugCount, nx[0] ? "" : " (last page)");
+            if (!nx[0]) break;
+            nextCursor = nx;
+            delay(NFT_RATELIMIT_DELAY_MS);
         }
 
         // ── Step 2: Fetch floor price for each unique slug ───────────────────
