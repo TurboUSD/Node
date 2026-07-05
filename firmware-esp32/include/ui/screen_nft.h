@@ -40,6 +40,7 @@
 #include "storage.h"
 #include "ui/shared_components.h"
 #include "ui/modal.h"
+#include "net_lock.h"
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 #define NFT_MAX_ITEMS          50   // practical cap; 81 (9×9) would need PSRAM placement for _pendingResult
@@ -306,13 +307,15 @@ private:
     static void _bgPinlistFetchFn(void* /*pvArg*/) {
         NftScreen* self = s_instance;
         if (!self) { vTaskDelete(nullptr); return; }
+        netLock();   // exclusive TLS ownership — see net_lock.h
 
         String pinlist = storage.getNftPinlist();
         if (pinlist.length() == 0) {
             snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "Pinlist is empty.");
             _pendingResult.error = true;
             _pendingResult.ready = true;
-            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+            netUnlock();
+        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -351,7 +354,8 @@ private:
             snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "No valid pinlist entries.");
             _pendingResult.error = true;
             _pendingResult.ready = true;
-            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+            netUnlock();
+        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -423,6 +427,7 @@ private:
 
         _pendingResult.ready = true;
         self->_bgTask = nullptr;
+        netUnlock();
         if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
         vTaskDelete(nullptr);
     }
@@ -822,6 +827,7 @@ private:
     static void _bgFetchFn(void* pvArg) {
         NftScreen* self = s_instance;
         if (!self) { vTaskDelete(nullptr); return; }
+        netLock();   // exclusive TLS ownership — see net_lock.h
 
         String wallet = storage.getNftWallet();
 
@@ -849,7 +855,8 @@ private:
                          "Could not resolve %s", wallet.c_str());
                 _pendingResult.error = true;
                 _pendingResult.ready = true;
-                if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+                netUnlock();
+        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
                 vTaskDelete(nullptr);
                 return;
             }
@@ -859,7 +866,8 @@ private:
             snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "No wallet configured.");
             _pendingResult.error = true;
             _pendingResult.ready = true;
-            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+            netUnlock();
+        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -906,7 +914,8 @@ private:
             _pendingResult.error = true;
             _pendingResult.ready = true;
             http.end();
-            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+            netUnlock();
+        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -930,7 +939,8 @@ private:
                      "JSON parse error: %s", err.c_str());
             _pendingResult.error = true;
             _pendingResult.ready = true;
-            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+            netUnlock();
+        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -1039,6 +1049,7 @@ private:
         _pendingResult.ready = true;
 
         self->_bgTask = nullptr;
+        netUnlock();
         if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
         vTaskDelete(nullptr);
     }

@@ -37,7 +37,7 @@ public:
     void setNodeCode(const String& code) { prefs.putString(NVS_KEY_NODE_CODE, code); }
 
     // --- Node identity (synced down from the backend on each heartbeat) ---
-    String getDisplayName()            { return prefs.getString("disp_name", ""); }
+    String getDisplayName()            { return prefs.isKey("disp_name") ? prefs.getString("disp_name", "") : ""; }
     void   setDisplayName(const String& n) { prefs.putString("disp_name", n); }
     bool   getIsVerified()             { return prefs.getBool("verified", false); }
     void   setIsVerified(bool v)       { prefs.putBool("verified", v); }
@@ -156,7 +156,7 @@ public:
 
     // --- NFT Gallery settings ---
     // Wallet address used to query OpenSea (can differ from reward wallet_address).
-    String getNftWallet()               { return prefs.getString(NVS_KEY_NFT_WALLET, ""); }
+    String getNftWallet()               { return prefs.isKey(NVS_KEY_NFT_WALLET) ? prefs.getString(NVS_KEY_NFT_WALLET, "") : ""; }
     bool   hasNftWallet()               { return prefs.isKey(NVS_KEY_NFT_WALLET); }
     void   setNftWallet(const String& w){ prefs.putString(NVS_KEY_NFT_WALLET, w); }
 
@@ -176,14 +176,14 @@ public:
     // Format: "chain:contract:tokenId,chain:contract:tokenId,..."  (max 20 items).
     // e.g. "ethereum:0xbd3531da5cf5857e7cfaa92426877b022e612cf8:3968,base:0x...:1"
     // Empty string means pinlist is not active; device falls back to NFT wallet.
-    String getNftPinlist()                   { return prefs.getString("nft_pinlist", ""); }
+    String getNftPinlist()                   { return prefs.isKey("nft_pinlist") ? prefs.getString("nft_pinlist", "") : ""; }
     void   setNftPinlist(const String& p)    { prefs.putString("nft_pinlist", p); }
     bool   hasNftPinlist()                   { String p = getNftPinlist(); return p.length() > 0; }
 
     // --- Screen swipe order ---
     // Stored as a comma-separated string of ScreenId enum values, e.g. "0,1,2,3,4,5,6".
     // Position 0 is always 0 (CLOCK/Home). The web setup page can reorder positions 1-6.
-    String getScreenOrder()                 { return prefs.getString("screen_order", ""); }
+    String getScreenOrder()                 { return prefs.isKey("screen_order") ? prefs.getString("screen_order", "") : ""; }
     void   setScreenOrder(const String& o)  { prefs.putString("screen_order", o); }
 
 private:

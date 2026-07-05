@@ -10,12 +10,15 @@
 #include <time.h>
 #include <functional>
 #include "config.h"
+#include "net_lock.h"
 #include "storage.h"
 #include "wifi_manager.h"
 #include "api_client.h"
 #include "rp2040_link.h"
 #include "ota_updater.h"
 #include "ui/ui_manager.h"
+
+SemaphoreHandle_t gNetLock = nullptr;   // see net_lock.h
 
 Storage storage;
 WifiManager wifiManager;
@@ -221,6 +224,7 @@ void setup() {
 
     pinMode(BTN_USER_GPIO, INPUT_PULLUP);  // top user button, active LOW
 
+    netLockInit();   // single-TLS-at-a-time lock — see net_lock.h
     storage.begin();
     rp2040Link.begin();
     uiManager.begin(); // lv_init + hardware bring-up + build all screens
@@ -284,6 +288,12 @@ void loop() {
     }
 
     uint32_t now = millis();
+
+    // ── Network section: runs only when no worker task holds the TLS lock ──
+    // Every HTTPS handshake needs ~45 KB of INTERNAL RAM; two at once → 
+    // "SSL - Memory allocation failed" everywhere. Workers (tickers/NFT)
+    // hold the lock for their whole run; we just postpone to the next pass.
+    if (netTryLock()) {
 
     if (!nodeRegistered) ensureNodeIsRegistered();
 
@@ -361,6 +371,9 @@ void loop() {
             uiManager.showOtaBadge(ver.c_str());
         }
     }
+
+    netUnlock();
+    }   // end network section
 
     // Ambient temp/humidity comes from the AHT20 on the RP2040 (the S3 has no
     // sensor of its own). Poll it on a slow cadence; the UI keeps the last good

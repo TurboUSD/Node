@@ -26,6 +26,7 @@
 #include "config.h"
 #include "storage.h"
 #include "ui/shared_components.h"
+#include "net_lock.h"
 // LVGL bundles lodepng (compiled as C when LV_USE_PNG=1). We use exactly one
 // function from it — declared here directly instead of including lodepng.h,
 // because that header conflicts with extern "C" (it exposes its own C++
@@ -1117,6 +1118,8 @@ private:
         TickerScreen* self = s_instance;
         if (!self) { delete p; vTaskDelete(nullptr); return; }
 
+        netLock();   // exclusive TLS ownership for this whole job — see net_lock.h
+
         switch (p->type) {
 
             case TT_LOAD_LIST: {
@@ -1389,6 +1392,7 @@ private:
             }
         }
 
+        netUnlock();
         delete p;
         self->_bgTask = nullptr;
         vTaskDelete(nullptr);
