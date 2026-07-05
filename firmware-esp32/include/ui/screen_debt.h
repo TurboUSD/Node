@@ -74,14 +74,25 @@ public:
         lv_obj_set_style_text_font(chartTitle, &lv_font_montserrat_10, 0);
         lv_obj_set_style_pad_left(chartTitle, 46, 0);   // over the plot, not the Y labels
 
-        chart = lv_chart_create(body);
-        lv_obj_set_width(chart, LV_PCT(100));
-        lv_obj_set_flex_grow(chart, 1);   // takes exactly the leftover space — can't overlap SINCE/RATE
+        // IMPORTANT: LVGL 8 draws PRIMARY_Y tick labels OUTSIDE the chart's
+        // left edge (draw_y_ticks uses x_ofs = obj->coords.x1, i.e. the widget
+        // boundary — the chart's own pad_left does NOT hold them). A
+        // full-width chart therefore paints its labels off-screen: only the
+        // trailing "t-" was visible. The fix is a transparent wrapper whose
+        // pad_left reserves real in-parent space for the labels.
+        lv_obj_t* chartWrap = lv_obj_create(body);
+        lv_obj_set_width(chartWrap, LV_PCT(100));
+        lv_obj_set_flex_grow(chartWrap, 1);   // takes exactly the leftover space — can't overlap SINCE/RATE
+        lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(chartWrap, 0, 0);
+        lv_obj_set_style_pad_all(chartWrap, 0, 0);
+        lv_obj_set_style_pad_left(chartWrap, 48, 0);   // ← the Y tick labels live here
+        lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
+
+        chart = lv_chart_create(chartWrap);
+        lv_obj_set_size(chart, LV_PCT(100), LV_PCT(100));
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
-        // Left padding holds the Y-axis $T tick labels; a little bottom padding
-        // keeps the line off the very edge. The series still uses the full plot.
-        lv_obj_set_style_pad_left(chart, 46, 0);
         lv_obj_set_style_pad_right(chart, 4, 0);
         lv_obj_set_style_pad_top(chart, 4, 0);
         lv_obj_set_style_pad_bottom(chart, 2, 0);
@@ -114,9 +125,11 @@ public:
         for (int i = 0; i < X_LABELS; i++) xYear[i] = _axisLabel(xRow);
 
         // SINCE (left) and RATE (right) on one flex row, pushed to the edges and
-        // vertically centred.
+        // vertically centred. SIZE_CONTENT: a fixed 58 px was shorter than the
+        // columns' real content, so the value labels spilled out of the row and
+        // the two sides looked vertically misaligned.
         lv_obj_t* bottomRow = lv_obj_create(body);
-        lv_obj_set_size(bottomRow, LV_PCT(100), 58);
+        lv_obj_set_size(bottomRow, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(bottomRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(bottomRow, 0, 0);
         lv_obj_set_style_pad_all(bottomRow, 0, 0);

@@ -51,11 +51,21 @@ public:
         treasuryValueLabel = makeStatCell(row2, "TREASURY", lv_color_hex(0xe8b339),
                                           (lv_border_side_t)(LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT));
 
-        chart = lv_chart_create(body);
-        lv_obj_set_size(chart, LV_PCT(100), LV_PCT(50));
+        // Wrapper with pad_left: LVGL 8 draws Y tick labels OUTSIDE the chart's
+        // left edge (not inside its own pad_left), so they need real reserved
+        // space in the parent or they render off-screen.
+        lv_obj_t* chartWrap = lv_obj_create(body);
+        lv_obj_set_size(chartWrap, LV_PCT(100), LV_PCT(50));
+        lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(chartWrap, 0, 0);
+        lv_obj_set_style_pad_all(chartWrap, 0, 0);
+        lv_obj_set_style_pad_left(chartWrap, 48, 0);   // ← Y tick labels live here
+        lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
+
+        chart = lv_chart_create(chartWrap);
+        lv_obj_set_size(chart, LV_PCT(100), LV_PCT(100));
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
-        lv_obj_set_style_pad_left(chart, 46, 0);   // room for the Y-axis price labels
         lv_obj_set_style_pad_right(chart, 6, 0);
         lv_obj_set_style_pad_top(chart, 6, 0);
         lv_chart_set_type(chart, LV_CHART_TYPE_BAR);

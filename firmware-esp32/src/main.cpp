@@ -239,6 +239,16 @@ void loop() {
     // a display/pin problem but is really "the UI was never drawn".
     uiManager.loop();
 
+    // Link self-test: ONE chime ~6 s after boot (RP2040 is fully up by then).
+    // Boot sounds now tell the whole story: two beeps = RP2040 alive (its own
+    // firmware), a third beep = the ESP32→RP2040 UART link works end-to-end —
+    // i.e. the alarm WILL sound. Two beeps but no third = link problem.
+    static bool linkChimeSent = false;
+    if (!linkChimeSent && millis() > 6000) {
+        linkChimeSent = true;
+        rp2040Link.playChime();
+    }
+
     // While the provisioning portal is up, prioritize serving it.
     if (wifiManager.isPortalActive()) {
         wifiManager.loopPortal();

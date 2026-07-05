@@ -50,12 +50,23 @@ public:
         lv_obj_set_style_text_font(detailLabel, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_align(detailLabel, LV_TEXT_ALIGN_CENTER, 0);
 
-        chart = lv_chart_create(body);
-        lv_obj_set_width(chart, LV_PCT(100));
-        lv_obj_set_flex_grow(chart, 1);            // fill what's left, never overflow
+        // Wrapper with pad_left: LVGL 8 draws Y tick labels OUTSIDE the
+        // chart's left edge (not inside its pad_left), so a full-width chart
+        // painted them off-screen — only "k-" was visible. The wrapper's
+        // padding reserves real space for them inside the parent.
+        lv_obj_t* chartWrap = lv_obj_create(body);
+        lv_obj_set_width(chartWrap, LV_PCT(100));
+        lv_obj_set_flex_grow(chartWrap, 1);        // fill what's left, never overflow
+        lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(chartWrap, 0, 0);
+        lv_obj_set_style_pad_all(chartWrap, 0, 0);
+        lv_obj_set_style_pad_left(chartWrap, 48, 0);   // ← Y tick labels live here
+        lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
+
+        chart = lv_chart_create(chartWrap);
+        lv_obj_set_size(chart, LV_PCT(100), LV_PCT(100));
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
-        lv_obj_set_style_pad_left(chart, 46, 0);    // room for the Y-axis $ labels
         lv_obj_set_style_pad_bottom(chart, 2, 0);
         lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
         lv_chart_set_point_count(chart, 24);
@@ -148,8 +159,14 @@ private:
         struct tm t;
         localtime_r(&nowT, &t);
         int nowYear = 1900 + t.tm_year;
+        int prevYr = nowYear;
         for (int i = 1; i < X_LABELS; i++) {
             int yr = nowYear + (int)lroundf((float)years * i / (X_LABELS - 1));
+            if (yr <= prevYr) {                       // short horizons (e.g. 3Y over 5
+                lv_label_set_text(xLabels[i], "");    // slots) produced duplicate years
+                continue;
+            }
+            prevYr = yr;
             char b[8]; snprintf(b, sizeof(b), "%d", yr);
             lv_label_set_text(xLabels[i], b);
         }

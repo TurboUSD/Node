@@ -411,6 +411,7 @@ private:
         lv_obj_set_style_clip_corner(w.symBg, true, 0);   // clip the logo round
         lv_obj_set_style_pad_all(w.symBg, 0, 0);
         lv_obj_clear_flag(w.symBg, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(w.symBg, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
 
         w.symbolLabel = lv_label_create(w.symBg);
         lv_label_set_text(w.symbolLabel, t.base_symbol[0] ? t.base_symbol : "?");
@@ -458,6 +459,12 @@ private:
         lv_obj_set_flex_flow(textCol, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(textCol, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         lv_obj_clear_flag(textCol, LV_OBJ_FLAG_SCROLLABLE);
+        // CRITICAL for tap-to-expand: plain lv_obj containers are CLICKABLE by
+        // default and swallow the tap before it reaches the card container —
+        // that's why expanding/collapsing "only worked sometimes" (only taps
+        // on empty card padding got through). Every inner container and chart
+        // must let taps fall through.
+        lv_obj_clear_flag(textCol, LV_OBJ_FLAG_CLICKABLE);
 
         w.nameLabel = lv_label_create(textCol);
         lv_label_set_text(w.nameLabel, t.base_name);
@@ -475,6 +482,7 @@ private:
         lv_obj_set_style_pad_column(metaRow, 6, 0);
         lv_obj_set_flex_flow(metaRow, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(metaRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(metaRow, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
 
         // Ticker · MCAP · 24h% — 12pt and clearly readable (10pt muted-grey
         // was too small and too dark to read at arm's length).
@@ -511,6 +519,7 @@ private:
             lv_obj_set_style_bg_opa(w.chart, LV_OPA_0, 0);
             lv_obj_set_style_border_width(w.chart, 0, 0);
             lv_obj_set_style_size(w.chart, 0, LV_PART_INDICATOR);
+            lv_obj_clear_flag(w.chart, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
             lv_chart_set_div_line_count(w.chart, 0, 0);
 
             bool up = (t.change_24h >= 0);
@@ -560,6 +569,7 @@ private:
         lv_obj_set_flex_flow(topRow, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(topRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(topRow, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(topRow, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
 
         _buildSymCircle(idx, topRow);
 
@@ -572,6 +582,7 @@ private:
         lv_obj_set_flex_flow(nameCol, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(nameCol, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         lv_obj_clear_flag(nameCol, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(nameCol, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
 
         w.nameLabel = lv_label_create(nameCol);
         lv_label_set_text(w.nameLabel, t.base_name);
@@ -593,18 +604,19 @@ private:
         // collapse glyph doesn't exist in LVGL's built-in symbol font, so the
         // collapse chevron is the closest equivalent).
         w.removeBtn = lv_btn_create(topRow);
-        lv_obj_set_size(w.removeBtn, 26, 26);
+        lv_obj_set_size(w.removeBtn, 36, 36);                 // finger-sized
         lv_obj_set_style_bg_color(w.removeBtn, lv_color_hex(CLR_SURFACE), 0);
         lv_obj_set_style_border_color(w.removeBtn, lv_color_hex(CLR_BORDER), 0);
         lv_obj_set_style_border_width(w.removeBtn, 1, 0);
         lv_obj_set_style_radius(w.removeBtn, 6, 0);
         lv_obj_set_style_pad_all(w.removeBtn, 0, 0);
+        lv_obj_set_ext_click_area(w.removeBtn, 10);           // forgiving touch target
         lv_obj_set_user_data(w.removeBtn, (void*)(intptr_t)idx);
         lv_obj_add_event_cb(w.removeBtn, _onCollapseTapped, LV_EVENT_CLICKED, this);
         lv_obj_t* xLbl = lv_label_create(w.removeBtn);
         lv_label_set_text(xLbl, LV_SYMBOL_UP);
-        lv_obj_set_style_text_font(xLbl, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(xLbl, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_style_text_font(xLbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(xLbl, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(xLbl);
 
         // ── Row 2: FDV (big) + price (small) + change ──
@@ -617,6 +629,7 @@ private:
         lv_obj_set_flex_align(priceRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
         lv_obj_set_style_pad_column(priceRow, 12, 0);
         lv_obj_clear_flag(priceRow, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(priceRow, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
 
         w.fdvLabel = lv_label_create(priceRow);
         _updateFdvLabel(idx);
@@ -639,14 +652,25 @@ private:
         // DRAW_PART_BEGIN and paints the open→close body (green/red) on top
         // in DRAW_PART_END. It also rewrites the Y-axis ticks into real USD
         // prices so the chart is actually readable.
-        w.chart = lv_chart_create(w.container);
-        lv_obj_set_size(w.chart, LV_PCT(100), 72);
+        // Wrapper with pad_left: LVGL 8 draws Y tick labels OUTSIDE the chart's
+        // left edge, so they need reserved space in the parent (see screen_debt).
+        lv_obj_t* chartWrap = lv_obj_create(w.container);
+        lv_obj_set_size(chartWrap, LV_PCT(100), 72);
+        lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(chartWrap, 0, 0);
+        lv_obj_set_style_pad_all(chartWrap, 0, 0);
+        lv_obj_set_style_pad_left(chartWrap, 48, 0);   // ← Y tick labels live here
+        lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_CLICKABLE);
+
+        w.chart = lv_chart_create(chartWrap);
+        lv_obj_set_size(w.chart, LV_PCT(100), LV_PCT(100));
         lv_chart_set_type(w.chart, LV_CHART_TYPE_BAR);
         lv_chart_set_point_count(w.chart, CHART_BARS);
         lv_chart_set_range(w.chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
         lv_obj_set_style_bg_opa(w.chart, LV_OPA_0, 0);
         lv_obj_set_style_border_width(w.chart, 0, 0);
-        lv_obj_set_style_pad_left(w.chart, 46, 0);   // room for the Y-axis price labels
+        lv_obj_clear_flag(w.chart, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
         lv_chart_set_div_line_count(w.chart, 3, 0);   // vdiv MUST be 0 or >= 2 (LVGL div-by-zero)
         lv_chart_set_axis_tick(w.chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 46);
         lv_obj_set_style_line_color(w.chart, lv_color_hex(CLR_BORDER), LV_PART_MAIN);
@@ -667,6 +691,7 @@ private:
         lv_obj_set_flex_flow(xRow, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(xRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(xRow, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(xRow, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
         static const char* XT[3] = { "-24d", "-12d", "now" };
         for (int i = 0; i < 3; i++) {
             lv_obj_t* l = lv_label_create(xRow);
@@ -1372,6 +1397,7 @@ private:
         http.useHTTP10(true);   // avoid chunked encoding — parsed from getStream()
         http.begin(url);
         int code = http.GET();
+        char baseTokenAddr[68] = {};
         if (code == 200) {
             JsonDocument doc;
             deserializeJson(doc, http.getStream());
@@ -1383,12 +1409,37 @@ private:
                 // doesn't report a circulating-supply-based cap for the token.
                 te.fdv        = pair["marketCap"] | (pair["fdv"] | 0.0f);
                 strncpy(te.logo_url, pair["info"]["imageUrl"] | "", sizeof(te.logo_url)-1);
+                strncpy(baseTokenAddr, pair["baseToken"]["address"] | "", sizeof(baseTokenAddr)-1);
                 te.live_loaded = true;
                 self->_pending.type        = PR_LIVE_LOADED;
                 self->_pending.tickerIndex = idx;
             }
         }
         http.end();
+
+        // Some pools don't carry `info.imageUrl` even when the token HAS a
+        // logo on other pools (this is why e.g. CLAWD showed no logo while LFI
+        // did). Fallback: ask the tokens endpoint for ALL of the token's pairs
+        // and take the first imageUrl any of them provides.
+        if (!te.logo_url[0] && baseTokenAddr[0] && !te.logo_ready) {
+            HTTPClient th;
+            th.useHTTP10(true);
+            th.begin(String(ENDPOINT_DEXSCREENER_TOKENS) + baseTokenAddr);
+            th.setTimeout(8000);
+            if (th.GET() == 200) {
+                JsonDocument filter;
+                filter["pairs"][0]["info"]["imageUrl"] = true;
+                JsonDocument doc;
+                if (deserializeJson(doc, th.getStream(),
+                                    DeserializationOption::Filter(filter)) == DeserializationError::Ok) {
+                    for (JsonObject pr : doc["pairs"].as<JsonArray>()) {
+                        const char* iu = pr["info"]["imageUrl"] | "";
+                        if (iu[0]) { strncpy(te.logo_url, iu, sizeof(te.logo_url)-1); break; }
+                    }
+                }
+            }
+            th.end();
+        }
 
         // Token logo: download + decode once (skipped if already have it).
         if (te.logo_url[0] && !te.logo_ready) _fetchLogo(self, idx);

@@ -104,7 +104,11 @@ public:
     }
 
 private:
-    HardwareSerial link{1};
+    // UART port 2 — matches Seeed's own esp32_rp2040_comm example exactly
+    // (ESP32_COMM_PORT_NUM = 2, TXD 19, RXD 20). Any port can map to any pin
+    // via the GPIO matrix, but after the alarm link stayed dead we align every
+    // parameter with the reference that's known to work on this hardware.
+    HardwareSerial link{2};
 
     void sendCommand(Rp2040Command cmd) {
         // Frame: [0x7E][cmd][checksum]. Checksum is a trivial XOR -- this
