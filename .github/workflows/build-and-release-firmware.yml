@@ -80,13 +80,20 @@ jobs:
           #    writes this to the inactive app slot, so it must stay app-only.
           cp $BUILD/firmware.bin esp32s3-${{ steps.extract_version.outputs.version }}.bin
 
-          # 2) Web-flasher image = a FULL factory image (bootloader + partition
-          #    table + otadata + app) starting at flash address 0x0. esp-web-tools
-          #    writes the manifest's part verbatim at offset 0, so it must be the
-          #    whole image — shipping the bare app here (the previous bug) put the
-          #    app where the bootloader belongs, causing "SHA-256 comparison failed"
-          #    and a TG0WDT/RTCWDT boot loop (black screen). Offsets match
-          #    firmware-esp32/partitions.csv.
+          # 2) Web-flasher parts. The manifest (firmware-esp32/manifest.json) flashes
+          #    these at their real offsets SEPARATELY rather than as one merged blob
+          #    starting at 0x0. A merged blob spans the NVS partition (0x9000) and
+          #    fills it with 0xFF, so every web re-flash wiped the saved WiFi creds
+          #    even when the user didn't ask to erase. Writing discrete parts skips
+          #    the NVS region (0x9000) entirely, so updates keep WiFi + settings.
+          #    Offsets match firmware-esp32/partitions.csv.
+          cp "$BUILD/bootloader.bin" bootloader.bin
+          cp "$BUILD/partitions.bin" partitions.bin
+          cp "$BOOT_APP0"            boot_app0.bin
+          cp "$BUILD/firmware.bin"   app.bin
+
+          # Also keep a merged single-file image for manual full flashes / recovery
+          # (esptool write_flash 0x0 firmware-esp32s3.bin — this DOES erase NVS).
           python -m esptool --chip esp32s3 merge_bin -o firmware-esp32s3.bin \
             --flash_mode dio --flash_size 8MB \
             0x0     "$BUILD/bootloader.bin" \
@@ -105,6 +112,10 @@ jobs:
           path: |
             esp32s3-${{ steps.extract_version.outputs.version }}.bin
             firmware-esp32s3.bin
+            bootloader.bin
+            partitions.bin
+            boot_app0.bin
+            app.bin
             firmware-esp32/manifest.json
 
       - name: Save sha for downstream job
@@ -183,6 +194,10 @@ jobs:
           files: |
             artifacts/esp32s3-*.bin
             artifacts/firmware-esp32s3.bin
+            artifacts/bootloader.bin
+            artifacts/partitions.bin
+            artifacts/boot_app0.bin
+            artifacts/app.bin
             artifacts/firmware-esp32/manifest.json
             artifacts/rp2040-*.uf2
           generate_release_notes: true
