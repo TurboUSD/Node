@@ -367,6 +367,7 @@ private:
                        + "/nfts/" + e.tokenId;
 
             HTTPClient http;
+            http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
             http.begin(url);
             if (strlen(OPENSEA_API_KEY) > 0) http.addHeader("X-API-KEY", OPENSEA_API_KEY);
             http.addHeader("Accept", "application/json");
@@ -391,6 +392,7 @@ private:
             if (slug[0]) {
                 String statsUrl = String(ENDPOINT_OPENSEA_BASE) + "/collections/" + slug + "/stats";
                 HTTPClient hStats;
+                hStats.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
                 hStats.begin(statsUrl);
                 if (strlen(OPENSEA_API_KEY) > 0) hStats.addHeader("X-API-KEY", OPENSEA_API_KEY);
                 hStats.addHeader("Accept", "application/json");
@@ -815,6 +817,7 @@ private:
                          "/nfts?limit=50";
 
         HTTPClient http;
+        http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
         http.begin(nftsUrl);
         if (strlen(OPENSEA_API_KEY) > 0)
             http.addHeader("X-API-KEY", OPENSEA_API_KEY);
@@ -898,6 +901,7 @@ private:
             String statsUrl = String(ENDPOINT_OPENSEA_BASE) +
                               "/collections/" + slugList[si] + "/stats";
             HTTPClient hStats;
+            hStats.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
             hStats.begin(statsUrl);
             if (strlen(OPENSEA_API_KEY) > 0)
                 hStats.addHeader("X-API-KEY", OPENSEA_API_KEY);

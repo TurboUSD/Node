@@ -146,12 +146,28 @@ void checkAlarmTrigger() {
         && t.tm_min  == storage.getAlarmMinute()
         && t.tm_sec  < 5; // 5-second window so we fire exactly once per minute
 
+    static uint32_t alarmFiredAt = 0;
     if (shouldFire && !alarmCurrentlyFiring) {
         alarmCurrentlyFiring = true;
+        alarmFiredAt = millis();
         rp2040Link.playAlarm(storage.getAlarmVolume());
         uiManager.showAlarmFiringOverlay();
     } else if (!shouldFire) {
         alarmCurrentlyFiring = false;
+    }
+
+    // While the overlay is up (user hasn't tapped STOP), re-send PLAY_ALARM
+    // every 10 s. The UART link has no retransmission, so if the single
+    // original frame was lost/corrupted the alarm would otherwise stay
+    // silent. Re-sending restarts the RP2040's 5-min auto-stop window, so we
+    // stop re-sending after 5 min ourselves — an unattended alarm then still
+    // goes quiet instead of buzzing forever.
+    static uint32_t lastAlarmResendAt = 0;
+    if (uiManager.isAlarmOverlayActive()
+        && millis() - alarmFiredAt < 5UL * 60UL * 1000UL
+        && millis() - lastAlarmResendAt > 10000) {
+        lastAlarmResendAt = millis();
+        rp2040Link.playAlarm(storage.getAlarmVolume());
     }
 }
 
@@ -185,6 +201,16 @@ void applyPendingOtaUpdate() {
 void setup() {
     Serial.begin(115200);
     Serial.println("\nTurboUSD Node booting, firmware " FIRMWARE_VERSION);
+
+    // Log WHY we booted. If the device is mysteriously restarting (e.g. "it
+    // reboots when I open screen X"), this line on the serial monitor tells us
+    // whether it was a panic (4), an interrupt/task watchdog (5/6), brownout
+    // (9), etc. — invaluable for diagnosing in the field.
+    esp_reset_reason_t rr = esp_reset_reason();
+    static const char* RR_NAMES[] = {"UNKNOWN","POWERON","EXT","SW","PANIC","INT_WDT",
+                                     "TASK_WDT","WDT","DEEPSLEEP","BROWNOUT","SDIO"};
+    Serial.printf("Reset reason: %d (%s)\n", (int)rr,
+                  (rr >= 0 && rr <= 10) ? RR_NAMES[rr] : "?");
 
     pinMode(BTN_USER_GPIO, INPUT_PULLUP);  // top user button, active LOW
 
@@ -247,7 +273,11 @@ void loop() {
         lastGeoSyncAt = now;
     }
 
-    if (nodeRegistered && (now - lastHeartbeatAt > HEARTBEAT_INTERVAL_MS)) {
+    // First heartbeat fires immediately (lastHeartbeatAt == 0), not 3 minutes
+    // in — it's what pulls the web-configured settings (alarm, brightness,
+    // tickers order…) down to the device, so a freshly booted node should sync
+    // right away.
+    if (nodeRegistered && (lastHeartbeatAt == 0 || now - lastHeartbeatAt > HEARTBEAT_INTERVAL_MS)) {
         uint32_t uptimeSeconds = (now - bootMillis) / 1000;
         apiClient.sendHeartbeat(uptimeSeconds);
         // Heartbeat response may have updated screen_brightness in NVS via

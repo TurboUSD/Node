@@ -245,8 +245,9 @@ private:
     SearchResultEntry _searchResults[12];
     int               _searchResultCount = 0;
 
-    // FreeRTOS async task
-    TaskHandle_t      _bgTask    = nullptr;
+    // FreeRTOS async task. `volatile` because it's written by the bg task on
+    // core 0 (self-clearing on exit) and read by the UI on core 1.
+    volatile TaskHandle_t _bgTask = nullptr;
     SemaphoreHandle_t _dataMutex = nullptr;
 
     // Pending result from background task (written under mutex, read on timer cb)
@@ -729,10 +730,15 @@ private:
     // ── Async task dispatcher ─────────────────────────────────────────────────
 
     void _dispatchTask(TickerTaskType type, int tickerIdx = -1) {
-        if (_bgTask) {
-            vTaskDelete(_bgTask);
-            _bgTask = nullptr;
-        }
+        // NEVER vTaskDelete() a live worker here. Killing a task mid-HTTPS
+        // leaves the WiFiClientSecure/TLS context (~45 KB of internal RAM) and
+        // the lwIP socket permanently leaked — a few repeated searches were
+        // enough to exhaust internal heap and reboot the device (which showed
+        // up as "random" resets, e.g. while swiping to the Debt screen).
+        // The worker self-clears _bgTask when it finishes; until then, new
+        // requests are simply dropped (the in-flight one will report via
+        // _pending, so spinners still resolve).
+        if (_bgTask) return;
         TickerTaskPayload* payload = new TickerTaskPayload();
         payload->type         = type;
         payload->ticker_index = tickerIdx;
@@ -744,27 +750,27 @@ private:
         }
 
         xTaskCreatePinnedToCore(
-            _bgTaskFn, "ticker_bg", 8192, payload, 1, &_bgTask, 0
+            _bgTaskFn, "ticker_bg", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0
         );
     }
 
     void _dispatchAdd(int searchResultIdx) {
-        if (_bgTask) { vTaskDelete(_bgTask); _bgTask = nullptr; }
+        if (_bgTask) return;   // worker busy — see note in _dispatchTask
         TickerTaskPayload* payload = new TickerTaskPayload();
         payload->type    = TT_ADD;
         strncpy(payload->node_code, _nodeCode, sizeof(payload->node_code) - 1);
         payload->to_add  = _searchResults[searchResultIdx];
-        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_add", 8192, payload, 1, &_bgTask, 0);
+        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_add", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
     }
 
     void _dispatchRemove(int tickerIdx) {
-        if (_bgTask) { vTaskDelete(_bgTask); _bgTask = nullptr; }
+        if (_bgTask) return;   // worker busy — see note in _dispatchTask
         TickerTaskPayload* payload = new TickerTaskPayload();
         payload->type         = TT_REMOVE;
         payload->ticker_index = tickerIdx;
         strncpy(payload->node_code,       _nodeCode,                    sizeof(payload->node_code) - 1);
         strncpy(payload->pool_to_remove,  _tickers[tickerIdx].pool_address, sizeof(payload->pool_to_remove) - 1);
-        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_rm", 8192, payload, 1, &_bgTask, 0);
+        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_rm", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
     }
 
     // ── Static FreeRTOS task ──────────────────────────────────────────────────
@@ -788,6 +794,7 @@ private:
                 String url = String(ENDPOINT_TICKER_CONFIG) + p->node_code +
                              "&order=display_order.asc";
                 HTTPClient http;
+                http.useHTTP10(true);   // body parsed from getStream(): HTTP/1.1 would arrive chunked and break the JSON parser
                 http.begin(url);
                 http.addHeader("apikey", SUPABASE_ANON_KEY);
                 http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
@@ -831,6 +838,7 @@ private:
                              "/pools/" + te.pool_address +
                              "/ohlcv/hour?aggregate=1&limit=" + CHART_BARS + "&currency=usd&token=base";
                 HTTPClient http;
+                http.useHTTP10(true);   // avoid chunked encoding — parsed from getStream()
                 http.begin(url);
                 http.addHeader("Accept", "application/json");
                 int code = http.GET();
@@ -879,6 +887,7 @@ private:
                     strncpy(contractAddr, q, 42);  // trim to exactly 42 chars
                     String url = String(ENDPOINT_DEXSCREENER_TOKENS) + contractAddr;
                     HTTPClient http;
+                    http.useHTTP10(true);   // DexScreener replies chunked on HTTP/1.1 — this broke ALL searches
                     http.begin(url);
                     http.setTimeout(8000);
                     int code = http.GET();
@@ -921,6 +930,7 @@ private:
                     query.replace(" ", "%20");
                     String url = String(ENDPOINT_DEXSCREENER_SEARCH) + query;
                     HTTPClient http;
+                    http.useHTTP10(true);   // DexScreener replies chunked on HTTP/1.1 — this broke ALL searches
                     http.begin(url);
                     http.setTimeout(8000);
                     int code = http.GET();
@@ -1026,6 +1036,7 @@ private:
         String url = String(ENDPOINT_DEXSCREENER_PAIRS) +
                      te.chain_id + "/" + te.pool_address;
         HTTPClient http;
+        http.useHTTP10(true);   // avoid chunked encoding — parsed from getStream()
         http.begin(url);
         int code = http.GET();
         if (code == 200) {

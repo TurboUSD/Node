@@ -236,6 +236,11 @@ public:
 
     std::function<void()> onAlarmDismissed;
 
+    // True while the yellow "alarm firing" overlay is up (i.e. the user hasn't
+    // tapped STOP yet). main.cpp uses this to periodically re-send PLAY_ALARM
+    // to the RP2040, so one lost UART frame can't result in a silent alarm.
+    bool isAlarmOverlayActive() const { return alarmOverlay != nullptr; }
+
     // Called from the touch input driver whenever the screen is physically touched.
     // Resets the inactivity timer and wakes the backlight if it was off.
     void _onTouchActivity() {
@@ -1449,8 +1454,20 @@ private:
         // Instant (non-animated) load for the very first screen at boot: a screen
         // animation that's still running when the provisioning screen loads can
         // corrupt LVGL and crash. Navigation taps/swipes still animate.
-        if (animate) lv_scr_load_anim(screens[(int)id], anim, 300, 0, false);
-        else         lv_scr_load(screens[(int)id]);
+        //
+        // Same protection for fast swiping: starting a second lv_scr_load_anim
+        // while the previous 300 ms one is still running is a known LVGL 8
+        // crash/corruption source (two screens animating, one gets unloaded
+        // mid-anim). If the user swipes again before the animation finished,
+        // load the next screen instantly instead of animating.
+        static uint32_t lastAnimStartAt = 0;
+        if (animate && millis() - lastAnimStartAt < 350) animate = false;
+        if (animate) {
+            lastAnimStartAt = millis();
+            lv_scr_load_anim(screens[(int)id], anim, 300, 0, false);
+        } else {
+            lv_scr_load(screens[(int)id]);
+        }
         // Trigger data load when ticker screen becomes visible
         if (id == ScreenId::TICKERS) {
             tickerScreen.onShow(storage.getNodeCode().c_str());

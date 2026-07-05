@@ -28,26 +28,34 @@ bool alarmActive = false;
 uint32_t alarmStartedAt = 0;
 const uint32_t ALARM_MAX_DURATION_MS = 5UL * 60UL * 1000UL; // auto-stop after 5 min even with no STOP_ALARM, so a dropped command can't buzz forever
 
-// IMPORTANT — the SenseCAP buzzer (MLT-8530) is an ACTIVE buzzer: it has its
-// own built-in oscillator and sounds whenever it's simply driven. Seeed's own
-// example (examples/buzzer/buzzer.ino) drives it with a plain
-// `analogWrite(19, 127)` and NO analogWriteFreq(). Calling analogWriteFreq()
-// (as this firmware used to, at 1800/1400/2200 Hz) fights the buzzer's internal
-// oscillator and produces little or NO sound — that was the "alarm never
-// buzzes" bug. So we NEVER set a PWM frequency; we just drive a duty for volume
-// and make the alarm "beep-beep" by toggling the buzzer on and off.
+// IMPORTANT — buzzer drive method, settled against Seeed's OFFICIAL example
+// (SenseCAP_Indicator_RP2040/examples/buzzer/buzzer.ino, verified 2026-07-05):
+//
+//     #define Buzzer 19
+//     analogWrite(Buzzer, 127);   // no analogWriteFreq() call at all
+//
+// On the earlephilhower arduino-pico core (which this project uses) that
+// means PWM at the DEFAULT 1 kHz with 50% duty — and that is the drive this
+// hardware is known to sound with. So:
+//   • We do NOT call analogWriteFreq() anywhere (field evidence from a
+//     previous build: a boot beep using analogWriteFreq(2000) stayed silent
+//     on the device, while Seeed's freq-less method is their own reference).
+//   • The MLT-8530 is a passive magnetic buzzer: loudness peaks at 50% duty
+//     (127/255) and falls off above it — 255 = continuous DC = totally
+//     SILENT. The previous firmware mapped volume 5 → duty 255, so MAX
+//     volume produced no sound at all. Duty is therefore capped at 127,
+//     with volume 5 = exactly Seeed's reference value.
 const uint16_t BEEP_ON_MS  = 250;   // buzzer-on time per beep
 const uint16_t BEEP_OFF_MS = 180;   // silence between beeps
 
 uint32_t lastToggleAt = 0;
 bool     beepIsOn     = false;
 
-// Volume via PWM duty (0–255). Higher than the old values so even level 1 is
-// clearly audible; 255 = continuous drive = loudest for an active buzzer.
+// Volume via PWM duty, capped at 127 (= 50% = loudest for a passive buzzer).
 uint8_t currentVolume = 2; // default; overridden by PLAY_ALARM_Vn commands
-const uint8_t VOLUME_DUTY[5] = { 40, 90, 150, 210, 255 };
+const uint8_t VOLUME_DUTY[5] = { 13, 26, 51, 89, 127 };
 
-void buzzerOn()  { analogWrite(BUZZER_PIN, VOLUME_DUTY[currentVolume - 1]); }  // no analogWriteFreq — see note above
+void buzzerOn()  { analogWrite(BUZZER_PIN, VOLUME_DUTY[currentVolume - 1]); }  // Seeed method: plain analogWrite, default 1 kHz PWM
 void buzzerOff() { analogWrite(BUZZER_PIN, 0); }
 
 void handleAlarmPattern() {
@@ -185,8 +193,7 @@ void setup() {
     //     is upstream (UART link or the ESP32 not sending the command).
     //   • No beep at power-on → BUZZER_PIN wrong or buzzer not driven.
     for (int i = 0; i < 2; i++) {
-        analogWriteFreq(2000);
-        analogWrite(BUZZER_PIN, 128);   // ~50% duty = loudest a passive buzzer gets
+        analogWrite(BUZZER_PIN, 127);   // EXACTLY Seeed's reference drive (1 kHz default, 50% duty)
         delay(120);
         analogWrite(BUZZER_PIN, 0);
         delay(90);

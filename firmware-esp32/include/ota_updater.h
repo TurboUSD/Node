@@ -73,6 +73,7 @@ public:
 private:
     bool fetchLatestReleaseInfo(JsonDocument& outDoc) {
         HTTPClient http;
+        http.useHTTP10(true);   // body parsed from getStream() — HTTP/1.1 would arrive chunked and break the parser
         http.begin(String(ENDPOINT_LATEST_FIRMWARE) + "?target=esp32s3");
         int statusCode = http.GET();
         if (statusCode != 200) {

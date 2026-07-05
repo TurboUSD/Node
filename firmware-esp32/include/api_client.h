@@ -4,6 +4,16 @@
 //
 // Kept as one module so retry/timeout/JSON-parsing conventions are
 // consistent everywhere instead of repeated ad-hoc per call site.
+//
+// IMPORTANT convention: every request whose body is parsed with
+// deserializeJson(http.getStream()) MUST call http.useHTTP10(true) first.
+// With HTTP/1.1, DexScreener / treasury.turbousd.com / GeckoTerminal /
+// Supabase reply with "Transfer-Encoding: chunked", and Arduino-ESP32's
+// HTTPClient does NOT de-chunk getStream() — the parser then sees the raw
+// hex chunk-size lines and fails on EVERY response, which surfaced as
+// "no data anywhere" (blank Turbo screen, empty ticker search, etc.).
+// HTTP/1.0 forbids chunked, so the body arrives as plain bytes.
+// (http.getString() de-chunks correctly, so callers using it are fine.)
 
 #pragma once
 #include <HTTPClient.h>
@@ -66,6 +76,7 @@ public:
     // false on any network/parse error and the caller keeps current settings.
     bool fetchGeoLocale(GeoLocale& out) {
         HTTPClient http;
+        http.useHTTP10(true);   // body is parsed from getStream() — see header note
         http.begin(ENDPOINT_GEO_IP);
         http.setTimeout(8000);
         int code = http.GET();
@@ -152,6 +163,7 @@ public:
     // if the web setup page hasn't set that field yet.
     bool sendHeartbeat(uint32_t uptimeSeconds) {
         HTTPClient http;
+        http.useHTTP10(true);   // response config is parsed from getStream()
         http.begin(ENDPOINT_HEARTBEAT);
         http.setTimeout(8000);
         http.addHeader("Content-Type", "application/json");
@@ -193,6 +205,7 @@ public:
         // explicit WiFiClientSecure here was memory-heavy and destabilised the
         // heap). http.begin(url) already negotiates TLS via the cert bundle.
         HTTPClient http;
+        http.useHTTP10(true);   // treasury API replies chunked on HTTP/1.1 — see header note
         http.begin(ENDPOINT_TREASURY_DATA);
         http.setTimeout(20000);
         int statusCode = http.GET();
@@ -246,6 +259,7 @@ public:
     DebtData fetchUsDebt() {
         DebtData result;
         HTTPClient http;
+        http.useHTTP10(true);   // see header note
         http.begin(ENDPOINT_US_DEBT);
         http.setTimeout(8000);
         int statusCode = http.GET();
@@ -276,6 +290,7 @@ public:
     // Returns points oldest-first, capped to `yearsBack` and `maxPoints`.
     int fetchDebtHistory(int yearsBack, DebtHistoryPoint* outPoints, int maxPoints) {
         HTTPClient http;
+        http.useHTTP10(true);   // see header note
         http.begin("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/"
                    "debt_outstanding?fields=record_date,debt_outstanding_amt&sort=-record_date&page[size]=120");
         http.setTimeout(9000);
@@ -318,6 +333,7 @@ public:
     // 6-month history limitation this inherits.
     int fetchOhlcvHistory(OhlcvCandle* outCandles, int maxCandles) {
         HTTPClient http;
+        http.useHTTP10(true);   // see header note
         http.begin(ENDPOINT_OHLCV_HISTORY);
         http.setTimeout(8000);
 
@@ -349,6 +365,7 @@ public:
     // activity" animation on the Node & Network screen.
     int fetchMiningFeed(MiningFeedEntry* outEntries, int maxEntries) {
         HTTPClient http;
+        http.useHTTP10(true);   // see header note
         http.begin(ENDPOINT_MINING_FEED);
         http.setTimeout(8000);
         http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
@@ -380,6 +397,7 @@ private:
     // DexScreener: GET /tokens/{contract} → pairs[]; prefer our exact pool.
     double _fetchPriceDexScreener() {
         HTTPClient http;
+        http.useHTTP10(true);   // DexScreener replies chunked on HTTP/1.1 — see header note
         http.begin(String(ENDPOINT_DEXSCREENER_TOKENS) + TUSD_CONTRACT_ADDR);
         http.setTimeout(8000);
         if (http.GET() != 200) { http.end(); return 0; }
@@ -400,6 +418,7 @@ private:
     // GeckoTerminal fallback: GET /networks/{net}/pools/{pool}.
     double _fetchPriceGecko() {
         HTTPClient http;
+        http.useHTTP10(true);   // see header note
         http.begin(String(ENDPOINT_GECKOTERMINAL_OHLCV) + TUSD_CHAIN_SLUG + "/pools/" + TUSD_POOL_ADDR);
         http.setTimeout(8000);
         if (http.GET() != 200) { http.end(); return 0; }
