@@ -1422,6 +1422,11 @@ private:
     // to 1-2, which is why the screen used to crawl ticker by ticker.
     static void _fetchLiveBatch(TickerScreen* self) {
         bool needed[TICKER_MAX] = {};
+        // baseToken address per ticker index (for the logo fallback below).
+        // static (task stack is small) but cleared per call — stale entries
+        // would map to the wrong ticker after a reorder.
+        static char baseAddrs[TICKER_MAX][68];
+        memset(baseAddrs, 0, sizeof(baseAddrs));
         for (int i = 0; i < self->_tickerCount; i++) {
             TickerEntry& te = self->_tickers[i];
             needed[i] = !te.live_loaded || millis() - te.live_at > 2UL * 60UL * 1000UL;
@@ -1452,6 +1457,7 @@ private:
                 filter["pairs"][0]["marketCap"]            = true;
                 filter["pairs"][0]["fdv"]                  = true;
                 filter["pairs"][0]["info"]["imageUrl"]     = true;
+                filter["pairs"][0]["baseToken"]["address"] = true;
                 JsonDocument doc;
                 if (deserializeJson(doc, http.getStream(),
                                     DeserializationOption::Filter(filter)) == DeserializationError::Ok) {
@@ -1465,6 +1471,7 @@ private:
                             te.fdv        = pair["marketCap"] | (pair["fdv"] | 0.0f);
                             if (!te.logo_url[0])
                                 strncpy(te.logo_url, pair["info"]["imageUrl"] | "", sizeof(te.logo_url)-1);
+                            strncpy(baseAddrs[j], pair["baseToken"]["address"] | "", sizeof(baseAddrs[j])-1);
                             te.live_loaded = true;
                             te.live_at     = millis();
                             te.live_dirty  = true;   // pollPending updates the labels
@@ -1475,6 +1482,35 @@ private:
                 }
             }
             http.end();
+
+            // Logo-URL fallback for pools whose batched entry came WITHOUT
+            // `info` (some pools omit it even when the token has a logo on
+            // other pools — this was CLAWD's case): scan the token's OTHER
+            // pairs for any imageUrl. The single-ticker path already did
+            // this; the batch path silently skipped it.
+            for (int j = 0; j < self->_tickerCount; j++) {
+                TickerEntry& te = self->_tickers[j];
+                if (te.logo_url[0] || te.logo_ready || !baseAddrs[j][0]) continue;
+                HTTPClient th;
+                th.useHTTP10(true);
+                th.begin(String(ENDPOINT_DEXSCREENER_TOKENS) + baseAddrs[j]);
+                th.setTimeout(8000);
+                if (th.GET() == 200) {
+                    JsonDocument f2;
+                    f2["pairs"][0]["info"]["imageUrl"] = true;
+                    JsonDocument d2;
+                    if (deserializeJson(d2, th.getStream(),
+                                        DeserializationOption::Filter(f2)) == DeserializationError::Ok) {
+                        for (JsonObject pr : d2["pairs"].as<JsonArray>()) {
+                            const char* iu = pr["info"]["imageUrl"] | "";
+                            if (iu[0]) { strncpy(te.logo_url, iu, sizeof(te.logo_url)-1); break; }
+                        }
+                    }
+                }
+                th.end();
+                if (!te.logo_url[0])
+                    Serial.printf("logo[%s] no imageUrl anywhere (token %s)\n", te.base_symbol, baseAddrs[j]);
+            }
         }
     }
 

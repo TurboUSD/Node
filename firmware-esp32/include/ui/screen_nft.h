@@ -123,22 +123,22 @@ public:
         _btn2x2 = _makeSizeBtn(_sizeBar, "2x2");
         _btn3x3 = _makeSizeBtn(_sizeBar, "3x3");
 
-        // Carousel toggle
-        lv_obj_t* carLbl = lv_label_create(_sizeBar);
-        lv_label_set_text(carLbl, "Carousel");
-        lv_obj_set_style_text_font(carLbl, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(carLbl, lv_color_hex(NFT_CLR_MUTED), 0);
-        lv_obj_set_style_pad_left(carLbl, 8, 0);
-
-        _carouselSwitch = lv_switch_create(_sizeBar);
-        lv_obj_set_style_bg_color(_carouselSwitch, lv_color_hex(NFT_CLR_GREEN), LV_PART_INDICATOR | LV_STATE_CHECKED);
-        if (storage.getNftCarousel()) lv_obj_add_state(_carouselSwitch, LV_STATE_CHECKED);
+        // Carousel toggle — a subtle tappable WORD, not a big switch (the
+        // switch dominated the strip). Lit green when on, muted grey when off.
+        _carouselSwitch = lv_label_create(_sizeBar);
+        lv_label_set_text(_carouselSwitch, "Carousel");
+        lv_obj_set_style_text_font(_carouselSwitch, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_pad_left(_carouselSwitch, 8, 0);
+        lv_obj_add_flag(_carouselSwitch, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(_carouselSwitch, 10);
+        _refreshCarouselLabel();
         lv_obj_add_event_cb(_carouselSwitch, [](lv_event_t* e) {
             NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
-            bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+            bool on = !storage.getNftCarousel();
             storage.setNftCarousel(on);
+            self->_refreshCarouselLabel();
             self->_applyCarouselSetting(on);
-        }, LV_EVENT_VALUE_CHANGED, this);
+        }, LV_EVENT_CLICKED, this);
 
         // ── "+ Wallet" button (floats at the right of the strip) ──────────────
         // Dedicated target for entering/changing the NFT wallet, so the grid
@@ -687,6 +687,15 @@ private:
     }
 
     // ── Carousel setting ──────────────────────────────────────────────────────
+
+    // Green + full opacity when on; muted grey when off.
+    void _refreshCarouselLabel() {
+        if (!_carouselSwitch) return;
+        bool on = storage.getNftCarousel();
+        lv_obj_set_style_text_color(_carouselSwitch,
+            lv_color_hex(on ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
+        lv_obj_set_style_text_opa(_carouselSwitch, on ? LV_OPA_COVER : LV_OPA_70, 0);
+    }
 
     void _applyCarouselSetting(bool on) {
         // Rebuilding the grid respects getNftCarousel() and getNftSlideshowSecs()

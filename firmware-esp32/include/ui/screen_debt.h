@@ -236,10 +236,10 @@ private:
     lv_obj_t* makeMetricColumn(lv_obj_t* parent, const char* title, lv_obj_t** btnOut, lv_obj_t** btnLabelOut,
                                 lv_obj_t** valueOut, lv_event_cb_t onTap, void* userData, bool alignRight) {
         lv_obj_t* col = lv_obj_create(parent);
-        // FIXED height so both columns are identical boxes — with
-        // SIZE_CONTENT they measured differently (value text lengths differ)
-        // and cross-centering put SINCE and RATE at different heights.
-        lv_obj_set_size(col, LV_SIZE_CONTENT, 56);
+        // SIZE_CONTENT height + identical fixed-height INTERNALS (title row 28,
+        // value below): both columns measure the same, so they stay aligned —
+        // and unlike the fixed-56 attempt, the value can't get clipped away.
+        lv_obj_set_size(col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_set_style_pad_all(col, 0, 0);
         lv_obj_set_style_pad_row(col, 2, 0);   // title row ↔ value: tight (theme default gapped them apart)
         lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
@@ -253,11 +253,14 @@ private:
                                alignRight ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START);
 
         lv_obj_t* row = lv_obj_create(col);
-        lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_size(row, LV_SIZE_CONTENT, 28);   // fixed: keeps both columns' geometry identical
         lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
         lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_set_style_pad_column(row, 6, 0);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t* titleLabel = lv_label_create(row);
         lv_label_set_text(titleLabel, title);

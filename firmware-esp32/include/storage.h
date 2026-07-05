@@ -36,6 +36,14 @@ public:
     String getNodeCode() { return prefs.getString(NVS_KEY_NODE_CODE, ""); }
     void setNodeCode(const String& code) { prefs.putString(NVS_KEY_NODE_CODE, code); }
 
+    // --- Node identity (synced down from the backend on each heartbeat) ---
+    String getDisplayName()            { return prefs.getString("disp_name", ""); }
+    void   setDisplayName(const String& n) { prefs.putString("disp_name", n); }
+    bool   getIsVerified()             { return prefs.getBool("verified", false); }
+    void   setIsVerified(bool v)       { prefs.putBool("verified", v); }
+    float  getTotalEarned()            { return prefs.getFloat("earned", 0.0f); }
+    void   setTotalEarned(float v)     { prefs.putFloat("earned", v); }
+
     // --- Setup token (owner-only web setup) ---
     // Random per-device secret, generated ONCE on first use and persisted.
     // It is embedded in the Settings QR (/setup/CODE?t=TOKEN) and reported to
@@ -56,10 +64,19 @@ public:
     }
 
     // --- Alarm ---
+    // alarm_dirty: set whenever the alarm is changed ON THE DEVICE, cleared
+    // once the heartbeat has pushed it to the backend. While dirty, the
+    // heartbeat's config sync must NOT overwrite the local alarm — that was
+    // the "the alarm I set on the device doesn't stick" bug (the next
+    // heartbeat silently restored the server's older copy).
+    bool getAlarmDirty()   { return prefs.getBool("alarm_dirty", false); }
+    void clearAlarmDirty() { prefs.putBool("alarm_dirty", false); }
+
     uint8_t getAlarmHour() { return prefs.getUChar(NVS_KEY_ALARM_HOUR, 7); }
     uint8_t getAlarmMinute() { return prefs.getUChar(NVS_KEY_ALARM_MIN, 30); }
     bool getAlarmEnabled() { return prefs.getBool(NVS_KEY_ALARM_ON, true); }
     void setAlarm(uint8_t hour, uint8_t minute, bool enabled) {
+        prefs.putBool("alarm_dirty", true);
         prefs.putUChar(NVS_KEY_ALARM_HOUR, hour);
         prefs.putUChar(NVS_KEY_ALARM_MIN, minute);
         prefs.putBool(NVS_KEY_ALARM_ON, enabled);
@@ -88,7 +105,7 @@ public:
     // Bitmask of active alarm days: bit0=Mon, bit1=Tue, …, bit6=Sun (ISO order).
     // Default 0x7F = all seven days active.
     uint8_t getAlarmDays() { return prefs.getUChar(NVS_KEY_ALARM_DAYS, 0x7F); }
-    void setAlarmDays(uint8_t mask) { prefs.putUChar(NVS_KEY_ALARM_DAYS, mask); }
+    void setAlarmDays(uint8_t mask) { prefs.putBool("alarm_dirty", true); prefs.putUChar(NVS_KEY_ALARM_DAYS, mask); }
 
     // Returns true if alarm is globally enabled AND today's weekday is active.
     // tmWday follows struct tm convention: 0 = Sunday, 1 = Monday, …, 6 = Saturday.

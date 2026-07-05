@@ -311,6 +311,7 @@ private:
     int gameYearsIndex = 1;
     double _debtPerSecond = 0.0;   // US-debt-clock rate, derived from history
     bool   _debtHistLoaded = false;
+    bool   _debtRangeDirty = false; // range picker changed → refetch history (debounced)
     double _annualDebasementRate = 0.08;  // yearly $ debasement for the inflation game,
                                           // derived from real debt growth (fallback 8%)
 
@@ -874,6 +875,35 @@ private:
         refreshSharedFooter(tickerScreen.footer, footerName, _onlineNodeCount);
         refreshSharedFooter(nftScreen.footer,    footerName, _onlineNodeCount);
 
+        // Debounced debt-range refetch (set by the range picker's live-apply).
+        if (_debtRangeDirty) {
+            _debtRangeDirty = false;
+            static const int yearValues[] = {5, 10, 20, 30, 50, 75};
+            reloadDebtHistory(yearValues[debtYearsRangeIndex % 6]);
+        }
+
+        // Node & Network headline (name, badge, rewards hint, uptime) — the
+        // identity fields sync down from the backend on each heartbeat (see
+        // applyServerConfig); uptime counts from boot. Refresh every 30 s.
+        static uint32_t lastNodeStatusAt = 0;
+        if (lastNodeStatusAt == 0 || millis() - lastNodeStatusAt > 30000) {
+            lastNodeStatusAt = millis();
+            String nm = storage.getDisplayName();
+            if (nm.length() == 0) nm = "NODE " + storage.getNodeCode();
+            nodeScreen.setNodeName(nm);
+            bool ver = storage.getIsVerified();
+            nodeScreen.setVerified(ver);
+            nodeScreen.setRewards(ver, storage.getTotalEarned());
+            uint32_t secs = millis() / 1000;
+            char ub[20];
+            if      (secs < 3600)  snprintf(ub, sizeof(ub), "%lum", (unsigned long)(secs / 60));
+            else if (secs < 86400) snprintf(ub, sizeof(ub), "%luh %lum",
+                                            (unsigned long)(secs / 3600), (unsigned long)((secs % 3600) / 60));
+            else                   snprintf(ub, sizeof(ub), "%lud %luh",
+                                            (unsigned long)(secs / 86400), (unsigned long)((secs % 86400) / 3600));
+            nodeScreen.setUptime(ub);
+        }
+
         // Clock/Home screen text only below
         if (currentScreen != ScreenId::CLOCK) return;
 
@@ -1294,16 +1324,19 @@ private:
         lv_obj_t* roller = addOptionPicker(card, options, debtYearsRangeIndex);
         lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
         static lv_obj_t* sCard; sCard = card;
-        static lv_obj_t* sRoller; sRoller = roller;
         static UiManager* sSelf; sSelf = this;
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
-            sSelf->debtYearsRangeIndex = lv_roller_get_selected(sRoller);
-            int years = yearValues[sSelf->debtYearsRangeIndex];
+        // Live-apply: scrolling the roller updates the selection + button label
+        // immediately (closing with the X used to silently discard the pick).
+        // The actual history refetch is DEFERRED via _debtRangeDirty — it's a
+        // 1-2 s HTTPS call, too heavy to run per scroll detent.
+        lv_obj_add_event_cb(roller, [](lv_event_t* e) {
+            sSelf->debtYearsRangeIndex = lv_roller_get_selected(lv_event_get_target(e));
+            int years = yearValues[sSelf->debtYearsRangeIndex % 6];
             char btnLabel[12]; snprintf(btnLabel, sizeof(btnLabel), "LAST %dY \xEF\x81\xB8", years);
             sSelf->debtScreen.setRangeButtonLabel(btnLabel);
-            sSelf->reloadDebtHistory(years);
-            closeModal(sCard);
-        }, LV_EVENT_CLICKED, nullptr);
+            sSelf->_debtRangeDirty = true;   // picked up once a second in updateClockIfNeeded
+        }, LV_EVENT_VALUE_CHANGED, nullptr);
+        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
     }
 
     void reloadDebtHistory(int years) {
@@ -1329,7 +1362,9 @@ private:
         lv_coord_t hiScaled = (lv_coord_t)(maxUsd / 1e11);
         if (hiScaled <= loScaled) hiScaled = loScaled + 1;
         lv_coord_t pad = (hiScaled - loScaled) / 12 + 1;   // small headroom so it isn't glued to the edges
-        lv_chart_set_range(debtScreen.getChart(), LV_CHART_AXIS_PRIMARY_Y, loScaled - pad, hiScaled + pad);
+        lv_coord_t lo  = loScaled - pad;
+        if (lo < 0) lo = 0;   // debt can't be negative — the bottom tick used to read "$-3T"
+        lv_chart_set_range(debtScreen.getChart(), LV_CHART_AXIS_PRIMARY_Y, lo, hiScaled + pad);
 
         for (int i = 0; i < count; i++) {
             // Scale to an integer-friendly range for lv_chart (raw USD values

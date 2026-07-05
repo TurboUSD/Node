@@ -59,7 +59,7 @@ public:
         lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
-        lv_obj_set_style_pad_left(chartWrap, 56, 0);   // ← Y tick labels live here (mcap strings are wide)
+        lv_obj_set_style_pad_left(chartWrap, 64, 0);   // ← Y tick labels live here ("$26M" + tick + gap needs real room)
         lv_obj_set_style_pad_top(chartWrap, 7, 0);     // top/bottom tick labels are centered on the
         lv_obj_set_style_pad_bottom(chartWrap, 7, 0);  // edge ticks — without this they clip in half
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
@@ -82,7 +82,7 @@ public:
         lv_chart_set_div_line_count(chart, 3, 0);
         // Y axis: 5 price ticks; the draw callback maps the 0–1000 scaled
         // values back to real USD prices (see onChartDrawPart).
-        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 5, 1, true, 46);
+        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 5, 1, true, 60);
 
         auto chartCb = [](lv_event_t* e) {
             TurboScreen* self = (TurboScreen*)lv_event_get_user_data(e);

@@ -178,6 +178,17 @@ public:
         // Keeps the server-side copy of the owner token fresh — this is how
         // EXISTING nodes (registered before tokens existed) get one stored.
         reqDoc["setup_token"] = storage.getSetupToken();
+
+        // Alarm changed ON THE DEVICE since the last sync → push it up, so
+        // the server copy (and therefore future config syncs) reflect it
+        // instead of silently reverting the user's change.
+        bool alarmWasDirty = storage.getAlarmDirty();
+        if (alarmWasDirty) {
+            reqDoc["alarm_hour"]    = storage.getAlarmHour();
+            reqDoc["alarm_minute"]  = storage.getAlarmMinute();
+            reqDoc["alarm_enabled"] = storage.getAlarmEnabled();
+            reqDoc["alarm_days"]    = storage.getAlarmDays();
+        }
         String payload;
         serializeJson(reqDoc, payload);
 
@@ -193,10 +204,11 @@ public:
         if (deserializeJson(respDoc, http.getStream()) == DeserializationError::Ok) {
             JsonObjectConst cfg = respDoc["config"];
             if (!cfg.isNull()) {
-                applyServerConfig(cfg);
+                applyServerConfig(cfg, /*skipAlarm=*/alarmWasDirty);
             }
         }
         http.end();
+        if (alarmWasDirty) storage.clearAlarmDirty();   // pushed successfully
         return true;
     }
 
@@ -500,7 +512,15 @@ private:
 
     // Applies non-null fields from the heartbeat config payload to NVS.
     // Null JSON fields are skipped — they mean "not set yet, keep current value".
-    void applyServerConfig(JsonObjectConst cfg) {
+    // skipAlarm: true while a device-side alarm change is being pushed up —
+    // the server copy is (at best) what we just sent, and applying it back
+    // could race/revert the local value.
+    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false) {
+        // Node identity (Node & Network screen headline)
+        if (!cfg["display_name"].isNull())      storage.setDisplayName(cfg["display_name"].as<String>());
+        if (!cfg["is_verified"].isNull())       storage.setIsVerified(cfg["is_verified"].as<bool>());
+        if (!cfg["total_tusd_earned"].isNull()) storage.setTotalEarned(cfg["total_tusd_earned"].as<float>());
+
         // Display preferences
         if (!cfg["temp_unit"].isNull()) {
             const char* tu = cfg["temp_unit"];
@@ -530,18 +550,24 @@ private:
             storage.setLocaleLocked(true);
         }
 
-        // Alarm settings
-        // Read current values first so we only write NVS when something actually changed
-        uint8_t alarmHour    = storage.getAlarmHour();
-        uint8_t alarmMinute  = storage.getAlarmMinute();
-        bool    alarmEnabled = storage.getAlarmEnabled();
-        bool    alarmChanged = false;
-        if (!cfg["alarm_hour"].isNull())    { alarmHour    = cfg["alarm_hour"].as<uint8_t>();    alarmChanged = true; }
-        if (!cfg["alarm_minute"].isNull())  { alarmMinute  = cfg["alarm_minute"].as<uint8_t>();  alarmChanged = true; }
-        if (!cfg["alarm_enabled"].isNull()) { alarmEnabled = cfg["alarm_enabled"].as<bool>();     alarmChanged = true; }
-        if (alarmChanged) storage.setAlarm(alarmHour, alarmMinute, alarmEnabled);
-        if (!cfg["alarm_volume"].isNull()) {
-            storage.setAlarmVolume(cfg["alarm_volume"].as<uint8_t>());
+        // Alarm settings — skipped while a device-side change is in flight
+        // (see the skipAlarm parameter note above).
+        if (!skipAlarm) {
+            // Read current values first so we only write NVS when something actually changed
+            uint8_t alarmHour    = storage.getAlarmHour();
+            uint8_t alarmMinute  = storage.getAlarmMinute();
+            bool    alarmEnabled = storage.getAlarmEnabled();
+            bool    alarmChanged = false;
+            if (!cfg["alarm_hour"].isNull())    { alarmHour    = cfg["alarm_hour"].as<uint8_t>();    alarmChanged = true; }
+            if (!cfg["alarm_minute"].isNull())  { alarmMinute  = cfg["alarm_minute"].as<uint8_t>();  alarmChanged = true; }
+            if (!cfg["alarm_enabled"].isNull()) { alarmEnabled = cfg["alarm_enabled"].as<bool>();     alarmChanged = true; }
+            if (alarmChanged) {
+                storage.setAlarm(alarmHour, alarmMinute, alarmEnabled);
+                storage.clearAlarmDirty();   // server-originated — nothing to push back
+            }
+            if (!cfg["alarm_volume"].isNull()) {
+                storage.setAlarmVolume(cfg["alarm_volume"].as<uint8_t>());
+            }
         }
 
         // Screen brightness (stored in NVS; main.cpp calls uiManager.applyStoredBrightness()
