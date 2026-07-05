@@ -11,6 +11,7 @@
 #include <functional>
 #include "config.h"
 #include "net_lock.h"
+#include "disk_cache.h"
 #include "storage.h"
 #include "wifi_manager.h"
 #include "api_client.h"
@@ -224,7 +225,8 @@ void setup() {
 
     pinMode(BTN_USER_GPIO, INPUT_PULLUP);  // top user button, active LOW
 
-    netLockInit();   // single-TLS-at-a-time lock — see net_lock.h
+    netLockInit();
+    diskcache::init();   // mount the LittleFS art cache (logos/NFTs survive reboots)   // single-TLS-at-a-time lock — see net_lock.h
     storage.begin();
     rp2040Link.begin();
     uiManager.begin(); // lv_init + hardware bring-up + build all screens

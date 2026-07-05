@@ -27,6 +27,7 @@
 #include "storage.h"
 #include "ui/shared_components.h"
 #include "net_lock.h"
+#include "disk_cache.h"
 // LVGL bundles lodepng (compiled as C when LV_USE_PNG=1). We use exactly one
 // function from it — declared here directly instead of including lodepng.h,
 // because that header conflicts with extern "C" (it exposes its own C++
@@ -1674,6 +1675,26 @@ private:
     static void _fetchLogo(TickerScreen* self, int idx) {
         TickerEntry& te = self->_tickers[idx];
 
+        // Disk cache first: the finished 40×40 bitmap (4.8 KB) persists on the
+        // LittleFS partition, so reboots/re-flashes skip the CDN entirely.
+        {
+            size_t n = 0;
+            uint8_t* blob = diskcache::loadAlloc("logo", te.logo_url, &n);
+            if (blob && n == 40 * 40 * 3) {
+                te.logo_dsc.header.always_zero = 0;
+                te.logo_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
+                te.logo_dsc.header.w  = 40;
+                te.logo_dsc.header.h  = 40;
+                te.logo_dsc.data_size = 40 * 40 * 3;
+                te.logo_dsc.data      = blob;
+                te.logo_px            = blob;
+                te.logo_ready         = true;   // pollPending picks this up on core 1
+                Serial.printf("logo[%s] from disk cache\n", te.base_symbol);
+                return;
+            }
+            if (blob) free(blob);   // wrong size → stale format, refetch
+        }
+
         // Strip the original query (it requests 800×800) and try small CDN
         // variants. 64×64@q80 first; if the DECODER rejects that encode
         // (some variants use asymmetric chroma sampling tjpgd can't parse —
@@ -1806,6 +1827,7 @@ private:
         te.logo_dsc.data      = px;
         te.logo_px            = px;
         te.logo_ready         = true;   // pollPending picks this up on core 1
+        diskcache::save("logo", te.logo_url, px, W * H * 3);   // survive reboots
         Serial.printf("logo[%s] READY (%ux%u -> 40x40)\n", te.base_symbol, iw, ih);
         return true;
     }

@@ -680,18 +680,31 @@ private:
             cw.imgDsc.data_size          = item.img_w * item.img_h * 2;
             cw.imgDsc.data               = item.img_pixels;
 
-            // Square viewport that leaves room for the name/floor strip; zoom
-            // (pivot 0,0) scales the fixed 224px decode to whatever this grid
-            // size needs, and the box clips the rest.
-            lv_coord_t sideBox = min(cw_w, (lv_coord_t)(cw_h - 18));
-            lv_obj_t* imgObj = lv_img_create(cw.container);
+            // FULL-BLEED COVER: the artwork fills the entire cell (like the
+            // web gallery), name/floor overlay on top. A clipping wrapper
+            // spans the cell; the image sits centered inside it and is zoomed
+            // about its center until it covers the larger cell dimension —
+            // whatever spills past the wrapper is clipped. This adapts to any
+            // grid size (the old fixed square left dark bands around it).
+            lv_obj_t* imgBox = lv_obj_create(cw.container);
+            lv_obj_set_size(imgBox, cw_w, cw_h);
+            lv_obj_align(imgBox, LV_ALIGN_TOP_LEFT, 0, 0);
+            lv_obj_set_style_bg_opa(imgBox, LV_OPA_0, 0);
+            lv_obj_set_style_border_width(imgBox, 0, 0);
+            lv_obj_set_style_pad_all(imgBox, 0, 0);
+            lv_obj_set_style_radius(imgBox, 4, 0);
+            lv_obj_set_style_clip_corner(imgBox, true, 0);
+            lv_obj_clear_flag(imgBox, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_clear_flag(imgBox, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
+
+            lv_obj_t* imgObj = lv_img_create(imgBox);
             lv_img_set_src(imgObj, &cw.imgDsc);
-            lv_img_set_pivot(imgObj, 0, 0);
-            lv_img_set_zoom(imgObj, (uint16_t)max(1L, 256L * sideBox / (long)item.img_w));
-            lv_obj_set_size(imgObj, sideBox, sideBox);
-            lv_obj_align(imgObj, LV_ALIGN_TOP_MID, 0, 0);
-            lv_img_set_antialias(imgObj, false);
-            lv_obj_clear_flag(imgObj, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
+            lv_obj_center(imgObj);                    // center pivot + centered obj
+            lv_coord_t maxSide = cw_w > cw_h ? cw_w : cw_h;
+            long zoom = 256L * maxSide / (long)item.img_w + 2;   // +2: never underflow the box
+            lv_img_set_zoom(imgObj, (uint16_t)min(zoom, 1023L));
+            lv_img_set_antialias(imgObj, false);      // crisp pixel art
+            lv_obj_clear_flag(imgObj, LV_OBJ_FLAG_CLICKABLE);
         } else {
             // No decoded image — show a coloured tile with a subtle grid icon
             lv_obj_t* placeholder = lv_obj_create(cw.container);
@@ -973,8 +986,8 @@ private:
             int q = base.indexOf('?');
             if (q >= 0) base = base.substring(0, q);
             uint8_t* px = imgdec::fetchRgb565((base + "?w=256&auto=format").c_str(),
-                                              NFT_IMG_SIDE, NFT_IMG_SIDE, it.name);
-            if (!px) px = imgdec::fetchRgb565(it.image_url, NFT_IMG_SIDE, NFT_IMG_SIDE, it.name);
+                                              NFT_IMG_SIDE, NFT_IMG_SIDE, it.name, it.image_url);
+            if (!px) px = imgdec::fetchRgb565(it.image_url, NFT_IMG_SIDE, NFT_IMG_SIDE, it.name, it.image_url);
             if (px) {
                 it.img_pixels = px;
                 it.img_w = it.img_h = NFT_IMG_SIDE;

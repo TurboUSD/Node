@@ -7,6 +7,11 @@
 // logo pipeline in screen_tickers.h, generalised: decoding ONCE in a bg task
 // means zero per-frame decode cost on the RGB panel.
 //
+// Disk cache: pass `cacheKey` (usually the canonical source URL) and the
+// COMPRESSED download is persisted to the LittleFS partition — next boot the
+// bytes come from flash instead of the network (decode is repeated, but
+// that's tens of ms vs. a TLS handshake + download).
+//
 // Returns nullptr on any failure (HTTP error, unsupported format — e.g.
 // webp/gif —, decode error, out of memory). Caller owns the buffer (free()).
 
@@ -15,6 +20,7 @@
 #include <HTTPClient.h>
 #include <lvgl.h>
 #include <esp_heap_caps.h>
+#include "disk_cache.h"
 
 // lodepng is compiled into LVGL when LV_USE_PNG=1; we only need this one call.
 extern "C" unsigned lodepng_decode32(unsigned char** out, unsigned* w, unsigned* h,
@@ -58,52 +64,16 @@ static inline uint8_t* _alloc(size_t n) {
     return p ? p : (uint8_t*)malloc(n);
 }
 
-// Download `url` and produce an outW×outH RGB565 bitmap. `tag` is only for
-// serial logs. NULL on failure.
-static uint8_t* fetchRgb565(const char* url, int outW, int outH, const char* tag) {
-    HTTPClient http;
-    http.useHTTP10(true);
-    http.begin(url);
-    // No image/webp here: imgix-style CDNs (i.seadn.io) negotiate the format
-    // from Accept, and there's no webp decoder on-device.
-    http.addHeader("Accept", "image/jpeg,image/png");
-    http.setTimeout(15000);
-    int code = http.GET();
-    if (code != 200) {
-        Serial.printf("img[%s] GET %d %s\n", tag, code, url);
-        http.end();
-        return nullptr;
-    }
-
-    const size_t CAP = 300 * 1024;
-    int declared = http.getSize();
-    if (declared > (int)CAP) { Serial.printf("img[%s] too big (%d B)\n", tag, declared); http.end(); return nullptr; }
-    uint8_t* body = _alloc(declared > 0 ? declared : CAP);
-    if (!body) { http.end(); return nullptr; }
-    size_t len = 0;
-    WiFiClient* s = http.getStreamPtr();
-    uint32_t lastData = millis();
-    while ((http.connected() || s->available()) && millis() - lastData < 6000) {
-        size_t avail = s->available();
-        if (!avail) { delay(5); continue; }
-        size_t cap = (declared > 0 ? (size_t)declared : CAP) - len;
-        if (!cap) break;
-        int got = s->readBytes(body + len, min(avail, cap));
-        if (got > 0) { len += got; lastData = millis(); }
-        if (declared > 0 && len >= (size_t)declared) break;
-    }
-    http.end();
-    if (len < 8) { Serial.printf("img[%s] body too short (%u B)\n", tag, (unsigned)len); free(body); return nullptr; }
-    Serial.printf("img[%s] %u bytes, magic %02X%02X\n", tag, (unsigned)len, body[0], body[1]);
-
-    // Decode to RGBA8888 by magic bytes.
+// Decode `body` (PNG/JPEG by magic) and scale to outW×outH RGB565.
+// Does NOT free `body`. NULL on failure.
+static uint8_t* _decodeScale(const uint8_t* body, size_t len,
+                             int outW, int outH, const char* tag) {
     unsigned char* rgba = nullptr;
     unsigned iw = 0, ih = 0;
     bool rgbaFromLvMem = false;
 
     if (body[0] == 0x89 && body[1] == 0x50) {              // PNG
         unsigned rc = lodepng_decode32(&rgba, &iw, &ih, body, len);
-        free(body);
         if (rc != 0 || !rgba || iw == 0 || ih == 0) {
             Serial.printf("img[%s] png decode rc=%u\n", tag, rc);
             if (rgba) lv_mem_free(rgba);
@@ -112,22 +82,22 @@ static uint8_t* fetchRgb565(const char* url, int outW, int outH, const char* tag
         rgbaFromLvMem = true;                              // lodepng → lv_mem
     } else if (body[0] == 0xFF && body[1] == 0xD8) {       // baseline JPEG
         uint8_t* work = (uint8_t*)malloc(4096);            // tjpgd needs ~3.1 KB
-        if (!work) { free(body); return nullptr; }
+        if (!work) return nullptr;
         JDEC jd;
         JpegCtx ctx{ body, len, 0, nullptr, 0, 0 };
         if (jd_prepare(&jd, _jin, work, 4096, &ctx) != JDR_OK) {
             Serial.printf("img[%s] jd_prepare failed\n", tag);
-            free(work); free(body); return nullptr;
+            free(work); return nullptr;
         }
         ctx.w = jd.width; ctx.h = jd.height;
         if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 800u * 800u) {
             Serial.printf("img[%s] bad dims %ux%u\n", tag, ctx.w, ctx.h);
-            free(work); free(body); return nullptr;
+            free(work); return nullptr;
         }
         ctx.rgb = _alloc((uint32_t)ctx.w * ctx.h * 3);
-        if (!ctx.rgb) { free(work); free(body); return nullptr; }
+        if (!ctx.rgb) { free(work); return nullptr; }
         JRESULT dr = jd_decomp(&jd, _jout, 0);
-        free(work); free(body);
+        free(work);
         if (dr != JDR_OK) {
             Serial.printf("img[%s] tjpgd rc=%d (%ux%u)\n", tag, (int)dr, ctx.w, ctx.h);
             free(ctx.rgb); return nullptr;
@@ -144,7 +114,6 @@ static uint8_t* fetchRgb565(const char* url, int outW, int outH, const char* tag
         free(ctx.rgb);
     } else {
         Serial.printf("img[%s] unsupported format %02X%02X (webp/gif?)\n", tag, body[0], body[1]);
-        free(body);
         return nullptr;
     }
 
@@ -163,6 +132,68 @@ static uint8_t* fetchRgb565(const char* url, int outW, int outH, const char* tag
     }
     if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba);
     Serial.printf("img[%s] decoded %ux%u -> %dx%d OK\n", tag, iw, ih, outW, outH);
+    return px;
+}
+
+// Download `url` (or hit the disk cache if `cacheKey` was seen before) and
+// produce an outW×outH RGB565 bitmap. `tag` is only for serial logs.
+static uint8_t* fetchRgb565(const char* url, int outW, int outH,
+                            const char* tag, const char* cacheKey = nullptr) {
+    uint8_t* body    = nullptr;
+    size_t   len     = 0;
+    bool     fromDisk = false;
+
+    if (cacheKey) {
+        body = diskcache::loadAlloc("img", cacheKey, &len);
+        if (body) {
+            fromDisk = true;
+            Serial.printf("img[%s] from disk cache (%u B)\n", tag, (unsigned)len);
+        }
+    }
+
+    if (!body) {
+        HTTPClient http;
+        http.useHTTP10(true);
+        http.begin(url);
+        // No image/webp here: imgix-style CDNs (i.seadn.io) negotiate the
+        // format from Accept, and there's no webp decoder on-device.
+        http.addHeader("Accept", "image/jpeg,image/png");
+        http.setTimeout(15000);
+        int code = http.GET();
+        if (code != 200) {
+            Serial.printf("img[%s] GET %d %s\n", tag, code, url);
+            http.end();
+            return nullptr;
+        }
+        const size_t CAP = 300 * 1024;
+        int declared = http.getSize();
+        if (declared > (int)CAP) { Serial.printf("img[%s] too big (%d B)\n", tag, declared); http.end(); return nullptr; }
+        body = _alloc(declared > 0 ? declared : CAP);
+        if (!body) { http.end(); return nullptr; }
+        WiFiClient* s = http.getStreamPtr();
+        uint32_t lastData = millis();
+        while ((http.connected() || s->available()) && millis() - lastData < 6000) {
+            size_t avail = s->available();
+            if (!avail) { delay(5); continue; }
+            size_t cap = (declared > 0 ? (size_t)declared : CAP) - len;
+            if (!cap) break;
+            int got = s->readBytes(body + len, min(avail, cap));
+            if (got > 0) { len += got; lastData = millis(); }
+            if (declared > 0 && len >= (size_t)declared) break;
+        }
+        http.end();
+        if (len < 8) {
+            Serial.printf("img[%s] body too short (%u B)\n", tag, (unsigned)len);
+            free(body);
+            return nullptr;
+        }
+        Serial.printf("img[%s] %u bytes, magic %02X%02X\n", tag, (unsigned)len, body[0], body[1]);
+    }
+
+    uint8_t* px = _decodeScale(body, len, outW, outH, tag);
+    if (px && cacheKey && !fromDisk)  diskcache::save("img", cacheKey, body, len);
+    if (!px && cacheKey && fromDisk)  diskcache::remove("img", cacheKey);   // corrupt/stale entry
+    free(body);
     return px;
 }
 
