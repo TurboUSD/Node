@@ -50,6 +50,7 @@ interface MiningBlock {
   winner_display_name: string | null
   winner_node_code:    string | null
   mined_at:            string | null
+  created_at?:         string | null   // when the block was opened (pending countdown)
   candidates_count:    number | null
 }
 
@@ -181,11 +182,15 @@ export default function NetworkPage() {
     return () => clearInterval(t)
   }, [])
 
-  // nextBlockAt: last mined block timestamp + 1 hour
+  // nextBlockAt: last mined block timestamp + 1 hour. Before ANYTHING has
+  // been mined (only the first pending block exists), fall back to the
+  // pending block's created_at so the countdown ring still runs.
   const nextBlockAt = useMemo<Date | null>(() => {
     const last = blocks.find(b => b.mined_at != null)
-    if (!last?.mined_at) return null
-    return new Date(new Date(last.mined_at).getTime() + BLOCK_INTERVAL_MS)
+    if (last?.mined_at) return new Date(new Date(last.mined_at).getTime() + BLOCK_INTERVAL_MS)
+    const pending = blocks.find(b => b.mined_at == null)
+    if (pending?.created_at) return new Date(new Date(pending.created_at).getTime() + BLOCK_INTERVAL_MS)
+    return null
   }, [blocks])
 
   const msLeft       = nextBlockAt ? Math.max(0, nextBlockAt.getTime() - nowMs) : 0
@@ -220,8 +225,13 @@ export default function NetworkPage() {
     ? [...nodes].sort((a, b) => b.total_tusd_earned - a.total_tusd_earned)
     : [...nodes].sort((a, b) => b.uptime_pct - a.uptime_pct)
 
-  // Triplicate for seamless infinite ticker
-  const tickerBlocks = [...blocks, ...blocks, ...blocks]
+  // Ticker layout: mined blocks flow on the LEFT (newest pushes the rest
+  // leftwards), the pending block sits FIXED on the right behind a dashed
+  // divider. No looping marquee — with few blocks it just showed the same
+  // card repeated.
+  const pendingBlock     = blocks.find(b => b.mined_at == null) ?? null
+  const minedOldestFirst = blocks.filter(b => b.mined_at != null)
+                                 .sort((a, b) => a.block_number - b.block_number)
 
   async function handleInstall() {
     if (!deferredPrompt) return
@@ -271,12 +281,24 @@ export default function NetworkPage() {
         </div>
       )}
 
-      {/* ── Block ticker ── */}
+      {/* ── Block ticker: mined lane (left) | dashed divider | pending (fixed right) ── */}
       <div style={s.tickerWrap} aria-hidden="true">
-        <div style={s.tickerTrack}>
-          {tickerBlocks.map((b, i) => (
-            <BlockTile key={i} block={b} circlePct={circlePct} minsLeft={minsLeft} />
-          ))}
+        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+          <div style={s.tickerMinedLane}>
+            {minedOldestFirst.length === 0
+              ? <span style={{ alignSelf: 'center', color: C.muted, fontSize: 11, whiteSpace: 'nowrap' }}>No blocks mined yet — first one below ↓</span>
+              : minedOldestFirst.map(b => (
+                  <div key={b.block_number} style={{ animation: 'blockIn .6s ease', flexShrink: 0 }}>
+                    <BlockTile block={b} circlePct={circlePct} minsLeft={minsLeft} />
+                  </div>
+                ))}
+          </div>
+          <div style={s.tickerDivider} />
+          {pendingBlock && (
+            <div style={{ padding: '12px 10px 12px 6px', flexShrink: 0 }}>
+              <BlockTile block={pendingBlock} circlePct={circlePct} minsLeft={minsLeft} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -412,9 +434,9 @@ export default function NetworkPage() {
       )}
 
       <style>{`
-        @keyframes ticker {
-          0%   { transform: translateX(0); }
-          100% { transform: translateX(-33.333%); }
+        @keyframes blockIn {
+          from { transform: translateX(48px); opacity: 0; }
+          to   { transform: translateX(0);    opacity: 1; }
         }
         body { margin: 0; background: #000; }
         button { transition: opacity .15s; }
@@ -447,7 +469,7 @@ function BlockTile({ block, circlePct, minsLeft }: {
           {/* Reward — center, prominent */}
           <div style={s.blockReward}>₸{block.reward_tusd}</div>
           {/* Winner — bottom */}
-          <div style={s.blockWinner}>{block.winner_display_name ?? '—'}</div>
+          <div style={s.blockWinner}>{block.winner_display_name ?? (block.winner_node_code ? `#${block.winner_node_code}` : '—')}</div>
         </>
       ) : (
         /* Pending: circular countdown */
@@ -557,7 +579,8 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         })
         marker._isNodeMarker = true
 
-        const loc = [node.city, node.country].filter(Boolean).join(', ')
+        // Privacy: the map shows the COUNTRY only, never the city.
+        const loc = node.country ?? ''
         const memberSince = node.created_at
           ? Math.floor((Date.now() - new Date(node.created_at).getTime()) / 86400000)
           : 0
@@ -677,7 +700,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         style={{ height: 380, borderRadius: 12, overflow: 'hidden', border: `1px solid ${C.border}` }}
       />
       <p style={{ fontSize: 11, color: C.muted, marginTop: 8, opacity: 0.7 }}>
-        Location is auto-detected from each device&apos;s IP — city level only. Nodes can update their location from the setup page.
+        Location is auto-detected from each device&apos;s IP and blurred to country level — markers are intentionally NOT exact.
       </p>
     </section>
   )
@@ -991,7 +1014,10 @@ const s: Record<string, React.CSSProperties> = {
 
   // Ticker
   tickerWrap:  { width: '100%', overflow: 'hidden', background: '#050505', borderBottom: `1px solid ${C.border}` },
-  tickerTrack: { display: 'flex', gap: 8, padding: '12px 8px', animation: 'ticker 50s linear infinite', width: 'max-content' },
+  // Mined blocks: right-aligned in a clipped lane, so each newly mined block
+  // appears next to the divider and pushes the older ones to the left.
+  tickerMinedLane: { flex: 1, display: 'flex', gap: 8, padding: '12px 8px', overflow: 'hidden', justifyContent: 'flex-end', minWidth: 0 },
+  tickerDivider:   { width: 0, borderLeft: '2px dashed #3a3a42', margin: '10px 2px' },
 
   block: {
     minWidth: 96, height: 110, padding: '10px 10px 8px',
