@@ -113,6 +113,10 @@ inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
     lv_obj_set_style_border_width(row, 0, 0);
+    // ONLY the rollers scroll. The container itself must not — dragging just
+    // outside a roller used to scroll this whole section, which felt broken.
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(row, LV_SCROLLBAR_MODE_OFF);
 
     static const char* hourOptions =
         "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23";

@@ -871,15 +871,27 @@ private:
                          "/account/" + wallet +
                          "/nfts?limit=24";
 
+        // Up to 3 attempts, 2.5 s apart: the first try often lands while the
+        // ticker worker still holds a TLS connection and internal RAM is too
+        // low for another handshake ("SSL - Memory allocation failed" →
+        // HTTP -1). A couple of seconds later the heap has recovered.
         HTTPClient http;
-        http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
-        http.begin(nftsUrl);
-        if (strlen(OPENSEA_API_KEY) > 0)
-            http.addHeader("X-API-KEY", OPENSEA_API_KEY);
-        http.addHeader("Accept", "application/json");
-        http.setTimeout(20000);
-
-        int code = http.GET();
+        int code = -1;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) {
+                Serial.printf("NFT fetch retry %d (prev code %d)\n", attempt, code);
+                vTaskDelay(pdMS_TO_TICKS(2500));
+            }
+            http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
+            http.begin(nftsUrl);
+            if (strlen(OPENSEA_API_KEY) > 0)
+                http.addHeader("X-API-KEY", OPENSEA_API_KEY);
+            http.addHeader("Accept", "application/json");
+            http.setTimeout(20000);
+            code = http.GET();
+            if (code == 200) break;
+            http.end();
+        }
         if (code != 200) {
             if (code == 401 || code == 403) {
                 // OpenSea now requires an API key for the account-NFTs

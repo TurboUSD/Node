@@ -1076,6 +1076,7 @@ private:
         lv_obj_set_style_border_width(daysRow, 0, 0);
         lv_obj_set_style_pad_all(daysRow, 0, 0);
         lv_obj_set_style_pad_column(daysRow, 4, 0);
+        lv_obj_clear_flag(daysRow, LV_OBJ_FLAG_SCROLLABLE);   // taps only — no stray scrolling
         lv_obj_set_flex_flow(daysRow, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(daysRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 

@@ -1626,12 +1626,22 @@ private:
     static void _fetchLogo(TickerScreen* self, int idx) {
         TickerEntry& te = self->_tickers[idx];
 
-        // Ask the CDN for a small variant: strip the original query (which
-        // requests 800×800) and use 64×64 (a size the CDN accepts — 96 isn't).
-        String url = te.logo_url;
-        int q = url.indexOf('?');
-        if (q >= 0) url = url.substring(0, q);
-        url += "?width=64&height=64&quality=80";
+        // Strip the original query (it requests 800×800) and try small CDN
+        // variants. 64×64@q80 first; if the DECODER rejects that encode
+        // (some variants use asymmetric chroma sampling tjpgd can't parse —
+        // CLAWD's case, "jd_prepare failed"), 128×128@q80 re-encodes with
+        // standard 4:2:0 and decodes fine.
+        String base = te.logo_url;
+        int q = base.indexOf('?');
+        if (q >= 0) base = base.substring(0, q);
+        if (_tryLogoVariant(self, idx, base + "?width=64&height=64&quality=80")) return;
+        Serial.printf("logo[%s] retrying at 128x128\n", te.base_symbol);
+        _tryLogoVariant(self, idx, base + "?width=128&height=128&quality=80");
+    }
+
+    // One download+decode+downscale attempt. Returns true when te.logo_ready.
+    static bool _tryLogoVariant(TickerScreen* self, int idx, const String& url) {
+        TickerEntry& te = self->_tickers[idx];
 
         HTTPClient http;
         http.useHTTP10(true);
@@ -1641,15 +1651,15 @@ private:
         if (lcode != 200) {
             Serial.printf("logo[%s] GET %d url=%s\n", te.base_symbol, lcode, url.c_str());
             http.end();
-            return;
+            return false;
         }
 
         // Read the PNG body (Content-Length if present, else until close).
         const size_t PNG_CAP = 200 * 1024;
         int declared = http.getSize();
-        if (declared > (int)PNG_CAP) { http.end(); return; }
+        if (declared > (int)PNG_CAP) { http.end(); return false; }
         uint8_t* png = (uint8_t*)malloc(declared > 0 ? declared : PNG_CAP);
-        if (!png) { http.end(); return; }
+        if (!png) { http.end(); return false; }
         size_t pngLen = 0;
         WiFiClient* s = http.getStreamPtr();
         uint32_t lastData = millis();
@@ -1666,7 +1676,7 @@ private:
         if (pngLen < 8) {
             Serial.printf("logo[%s] body too short (%u bytes)\n", te.base_symbol, (unsigned)pngLen);
             free(png);
-            return;
+            return false;
         }
         Serial.printf("logo[%s] downloaded %u bytes, magic %02X%02X\n",
                       te.base_symbol, (unsigned)pngLen, png[0], png[1]);
@@ -1680,33 +1690,33 @@ private:
             // PNG
             unsigned rc = lodepng_decode32(&rgba, &iw, &ih, png, pngLen);
             free(png);
-            if (rc != 0 || !rgba || iw == 0 || ih == 0) { if (rgba) lv_mem_free(rgba); return; }
+            if (rc != 0 || !rgba || iw == 0 || ih == 0) { if (rgba) lv_mem_free(rgba); return false; }
             rgbaFromLvMem = true;
         } else if (png[0] == 0xFF && png[1] == 0xD8) {
             // Baseline JPEG via tjpgd (what DexScreener's CDN actually sends).
             uint8_t* work = (uint8_t*)malloc(4096);   // tjpgd workspace (needs ~3.1 KB)
-            if (!work) { Serial.printf("logo[%s] no mem for tjpgd work\n", te.base_symbol); free(png); return; }
+            if (!work) { Serial.printf("logo[%s] no mem for tjpgd work\n", te.base_symbol); free(png); return false; }
             JDEC jd;
             JpegCtx ctx{ png, pngLen, 0, nullptr, 0, 0 };
-            if (jd_prepare(&jd, _jpegIn, work, 4096, &ctx) != JDR_OK) { Serial.printf("logo[%s] jd_prepare failed\n", te.base_symbol); free(work); free(png); return; }
+            if (jd_prepare(&jd, _jpegIn, work, 4096, &ctx) != JDR_OK) { Serial.printf("logo[%s] jd_prepare failed\n", te.base_symbol); free(work); free(png); return false; }
             ctx.w = jd.width; ctx.h = jd.height;
-            if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 512u * 512u) { Serial.printf("logo[%s] bad dims %ux%u\n", te.base_symbol, ctx.w, ctx.h); free(work); free(png); return; }
+            if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 512u * 512u) { Serial.printf("logo[%s] bad dims %ux%u\n", te.base_symbol, ctx.w, ctx.h); free(work); free(png); return false; }
             ctx.rgb = (uint8_t*)heap_caps_malloc((uint32_t)ctx.w * ctx.h * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!ctx.rgb) ctx.rgb = (uint8_t*)malloc((uint32_t)ctx.w * ctx.h * 3);
-            if (!ctx.rgb) { Serial.printf("logo[%s] no mem for rgb\n", te.base_symbol); free(work); free(png); return; }
+            if (!ctx.rgb) { Serial.printf("logo[%s] no mem for rgb\n", te.base_symbol); free(work); free(png); return false; }
             JRESULT dr = jd_decomp(&jd, _jpegOut, 0);
             free(work);
             free(png);
             if (dr != JDR_OK) {
                 Serial.printf("logo[%s] tjpgd decomp failed rc=%d (%ux%u)\n", te.base_symbol, (int)dr, ctx.w, ctx.h);
                 free(ctx.rgb);
-                return;
+                return false;
             }
             // Expand RGB888 → RGBA8888 (alpha 255) so the scaler below is shared.
             iw = ctx.w; ih = ctx.h;
             rgba = (unsigned char*)heap_caps_malloc((uint32_t)iw * ih * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!rgba) rgba = (unsigned char*)malloc((uint32_t)iw * ih * 4);
-            if (!rgba) { Serial.printf("logo[%s] no mem for rgba\n", te.base_symbol); free(ctx.rgb); return; }
+            if (!rgba) { Serial.printf("logo[%s] no mem for rgba\n", te.base_symbol); free(ctx.rgb); return false; }
             for (uint32_t i = 0; i < (uint32_t)iw * ih; i++) {
                 rgba[i * 4 + 0] = ctx.rgb[i * 3 + 0];
                 rgba[i * 4 + 1] = ctx.rgb[i * 3 + 1];
@@ -1717,7 +1727,7 @@ private:
         } else {
             // webp/unknown — no decoder on-device; keep the letter fallback.
             free(png);
-            return;
+            return false;
         }
 
         // Nearest-neighbour downscale to 40×40, RGBA8888 → RGB565+A8 (LVGL
@@ -1725,7 +1735,7 @@ private:
         const int W = 40, H = 40;
         uint8_t* px = (uint8_t*)heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!px) px = (uint8_t*)malloc(W * H * 3);
-        if (!px) { Serial.printf("logo[%s] no mem for px\n", te.base_symbol); if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return; }
+        if (!px) { Serial.printf("logo[%s] no mem for px\n", te.base_symbol); if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return false; }
         for (int y = 0; y < H; y++) {
             unsigned sy = (unsigned)((uint64_t)y * ih / H);
             for (int x = 0; x < W; x++) {
@@ -1749,6 +1759,7 @@ private:
         te.logo_px            = px;
         te.logo_ready         = true;   // pollPending picks this up on core 1
         Serial.printf("logo[%s] READY (%ux%u -> 40x40)\n", te.base_symbol, iw, ih);
+        return true;
     }
 
     // ── Event callbacks (static, forwarded to instance) ───────────────────────
