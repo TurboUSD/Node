@@ -639,7 +639,7 @@ function Header({ nodeCode, isVerified, isGenesis, stats }: {
       </header>
       {stats && (
         <div style={s.statsBar}>
-          <StatChip label="Uptime"   value={`⚡ ${stats.uptime_pct}%`}  color={stats.uptime_pct >= 90 ? '#43e397' : stats.uptime_pct >= 60 ? '#ffcf72' : '#6e7280'} />
+          <StatChip label="Uptime"   value={`${stats.uptime_pct}%`}  color={stats.uptime_pct >= 90 ? '#43e397' : stats.uptime_pct >= 60 ? '#ffcf72' : '#6e7280'} />
           <StatChip label="Earned"   value={`₸${stats.total_tusd_earned.toFixed(2)}`} color="#43e397" />
           <StatChip label="Blocks"   value={String(stats.blocks_won)}   color="#5b8dee" />
         </div>
