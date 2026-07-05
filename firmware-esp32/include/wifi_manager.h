@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include "lwip/dns.h"   // secondary DNS fallback — see _installFallbackDns()
 #include "storage.h"
 
 class WifiManager {
@@ -20,6 +21,7 @@ public:
     }
 
     bool isConnected() { return WiFi.status() == WL_CONNECTED; }
+    // (fallback DNS helper defined below, installed on every successful connect)
 
     // Call from the main loop while the portal is active so DNS/HTTP keep
     // responding to the captive portal page.
@@ -38,8 +40,12 @@ public:
     void checkConnection() {
         if (portalActive || isConnected()) {
             _lastConnectedAt = millis();
+            // (Re)install the DNS fallback once per connection — DHCP renews
+            // and reconnects reset the server list.
+            if (isConnected() && !_dnsFallbackSet) { _installFallbackDns(); _dnsFallbackSet = true; }
             return;
         }
+        _dnsFallbackSet = false;   // dropped — reinstall after the next connect
         uint32_t now = millis();
         if (now - _lastReconnectAt < 30000) return;
         _lastReconnectAt = now;
@@ -51,6 +57,7 @@ private:
     WebServer server{80};
     DNSServer dnsServer;
     bool portalActive = false;
+    bool _dnsFallbackSet = false;
     uint32_t _lastConnectedAt = 0;
     uint32_t _lastReconnectAt = 0;
     String _scanOptions;   // cached <option> list, scanned once before the AP is up
@@ -90,7 +97,22 @@ private:
         } else {
             Serial.print("Connected, IP: ");
             Serial.println(WiFi.localIP());
+            _installFallbackDns();
         }
+    }
+
+    // Secondary DNS fallback. The firmware bursts requests at half a dozen
+    // different hosts (DexScreener, its CDN, GeckoTerminal, Supabase, OpenSea,
+    // ensideas…) and lwIP's tiny DNS cache + some router resolvers buckle,
+    // producing intermittent "DNS Failed for <host>" (surfacing as HTTP -1 /
+    // "connection refused"). Registering 8.8.8.8 as the SECONDARY server
+    // keeps the router's DNS as primary but gives every lookup a solid
+    // second chance.
+    void _installFallbackDns() {
+        ip_addr_t d;
+        IP_ADDR4(&d, 8, 8, 8, 8);
+        dns_setserver(1, &d);
+        Serial.println("DNS fallback (8.8.8.8) installed as secondary.");
     }
 
     void startProvisioningPortal() {

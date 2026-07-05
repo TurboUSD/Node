@@ -252,8 +252,13 @@ public:
     // Call this when the screen becomes visible (nav switched to this screen).
     void onShow(const char* nodeCode) {
         strncpy(_nodeCode, nodeCode, sizeof(_nodeCode) - 1);
-        _rebuildTickerCards();
-        _dispatchTask(TT_LOAD_LIST);
+        _rebuildTickerCards();   // instant: cached entries render immediately
+        // QUEUED, not direct: a direct dispatch was silently dropped whenever
+        // the worker was still busy (charts/logos take a while with 6
+        // tickers), so web-side add/remove/reorder never reached the device
+        // until a lucky re-entry. The flag retries every poll tick until the
+        // worker is free.
+        _listReloadRequested = true;
     }
 
     void refreshHeaderFooter(SharedHeaderRefs& h, SharedFooterRefs& f,
@@ -289,6 +294,7 @@ private:
     volatile bool    _rebuildRequested = false;
     volatile int     _chartLoadRequestIdx = -1;
     volatile bool    _listReloadRequested = false;  // retried until the worker is free
+    volatile bool    _searchRequested     = false;  // ditto, for the search dialog
 
     TickerEntry      _tickers[TICKER_MAX];
     int              _tickerCount = 0;
@@ -430,6 +436,7 @@ private:
         TickerEntry& t = _tickers[idx];
         CardWidgets& w = _cards[idx];
         if (!t.logo_ready || t.logo_applied || !w.symBg) return;
+        Serial.printf("logo[%s] applied to card\n", t.base_symbol);
         w.logoImg = lv_img_create(w.symBg);
         lv_img_set_src(w.logoImg, &t.logo_dsc);
         lv_obj_center(w.logoImg);
@@ -1173,14 +1180,18 @@ private:
                 //  • Charts: per pool (GeckoTerminal has no batch). TTL 15 min.
                 _fetchLiveBatch(self);
                 for (int i = 0; i < self->_tickerCount; i++) {
+                    if (self->_searchRequested) break;   // user is waiting — yield
                     TickerEntry& te = self->_tickers[i];
                     if (te.logo_url[0] && !te.logo_ready) _fetchLogo(self, i);
                 }
                 for (int i = 0; i < self->_tickerCount; i++) {
+                    if (self->_searchRequested) break;   // user is waiting — yield
                     TickerEntry& te = self->_tickers[i];
                     if (!te.chart_loaded || millis() - te.chart_at > 15UL * 60UL * 1000UL)
                         TickerScreen::_fetchChart(self, i);
                 }
+                // If we yielded to a search, resume the remaining work after it.
+                if (self->_searchRequested) self->_listReloadRequested = true;
                 break;
             }
 
@@ -1267,6 +1278,7 @@ private:
                     http.begin(url);
                     http.setTimeout(8000);
                     int code = http.GET();
+                    Serial.printf("search[%s]: HTTP %d\n", query.c_str(), code);
                     if (code == 200) {
                         // DexScreener /search returns ~30 pairs, each a big object
                         // (txns, volume, fdv, socials…). Parsing all of that in the
@@ -1308,6 +1320,9 @@ private:
                                 n++;
                             }
                             self->_searchResultCount = n;
+                            Serial.printf("search[%s]: %d results kept\n", query.c_str(), n);
+                        } else {
+                            Serial.printf("search[%s]: JSON parse error %s\n", query.c_str(), err.c_str());
                         }
                     }
                     // Always mark done so the spinner hides even on error/no-result.
@@ -1670,15 +1685,15 @@ private:
         } else if (png[0] == 0xFF && png[1] == 0xD8) {
             // Baseline JPEG via tjpgd (what DexScreener's CDN actually sends).
             uint8_t* work = (uint8_t*)malloc(4096);   // tjpgd workspace (needs ~3.1 KB)
-            if (!work) { free(png); return; }
+            if (!work) { Serial.printf("logo[%s] no mem for tjpgd work\n", te.base_symbol); free(png); return; }
             JDEC jd;
             JpegCtx ctx{ png, pngLen, 0, nullptr, 0, 0 };
-            if (jd_prepare(&jd, _jpegIn, work, 4096, &ctx) != JDR_OK) { free(work); free(png); return; }
+            if (jd_prepare(&jd, _jpegIn, work, 4096, &ctx) != JDR_OK) { Serial.printf("logo[%s] jd_prepare failed\n", te.base_symbol); free(work); free(png); return; }
             ctx.w = jd.width; ctx.h = jd.height;
-            if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 512u * 512u) { free(work); free(png); return; }
+            if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 512u * 512u) { Serial.printf("logo[%s] bad dims %ux%u\n", te.base_symbol, ctx.w, ctx.h); free(work); free(png); return; }
             ctx.rgb = (uint8_t*)heap_caps_malloc((uint32_t)ctx.w * ctx.h * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!ctx.rgb) ctx.rgb = (uint8_t*)malloc((uint32_t)ctx.w * ctx.h * 3);
-            if (!ctx.rgb) { free(work); free(png); return; }
+            if (!ctx.rgb) { Serial.printf("logo[%s] no mem for rgb\n", te.base_symbol); free(work); free(png); return; }
             JRESULT dr = jd_decomp(&jd, _jpegOut, 0);
             free(work);
             free(png);
@@ -1691,7 +1706,7 @@ private:
             iw = ctx.w; ih = ctx.h;
             rgba = (unsigned char*)heap_caps_malloc((uint32_t)iw * ih * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!rgba) rgba = (unsigned char*)malloc((uint32_t)iw * ih * 4);
-            if (!rgba) { free(ctx.rgb); return; }
+            if (!rgba) { Serial.printf("logo[%s] no mem for rgba\n", te.base_symbol); free(ctx.rgb); return; }
             for (uint32_t i = 0; i < (uint32_t)iw * ih; i++) {
                 rgba[i * 4 + 0] = ctx.rgb[i * 3 + 0];
                 rgba[i * 4 + 1] = ctx.rgb[i * 3 + 1];
@@ -1710,7 +1725,7 @@ private:
         const int W = 40, H = 40;
         uint8_t* px = (uint8_t*)heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!px) px = (uint8_t*)malloc(W * H * 3);
-        if (!px) { if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return; }
+        if (!px) { Serial.printf("logo[%s] no mem for px\n", te.base_symbol); if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return; }
         for (int y = 0; y < H; y++) {
             unsigned sy = (unsigned)((uint64_t)y * ih / H);
             for (int x = 0; x < W; x++) {
@@ -1733,6 +1748,7 @@ private:
         te.logo_dsc.data      = px;
         te.logo_px            = px;
         te.logo_ready         = true;   // pollPending picks this up on core 1
+        Serial.printf("logo[%s] READY (%ux%u -> 40x40)\n", te.base_symbol, iw, ih);
     }
 
     // ── Event callbacks (static, forwarded to instance) ───────────────────────
@@ -1828,7 +1844,9 @@ private:
         lv_obj_clear_flag(self->_searchSpinner, LV_OBJ_FLAG_HIDDEN);
         if (self->_searchResultsCont) lv_obj_clean(self->_searchResultsCont);
         self->_searchResultCount = 0;
-        self->_dispatchTask(TT_SEARCH);
+        // Queued like the list reload: a direct dispatch was dropped while the
+        // worker was busy, which surfaced as searches that never returned.
+        self->_searchRequested = true;
     }
 
     static void _onSearchKbReady(lv_event_t* e) {
@@ -1889,10 +1907,17 @@ public:
             }
         }
 
-        // A list reload was requested while the worker was busy (e.g. right
-        // after PR_ADD_DONE, when the ADD task might not have exited yet) —
-        // retry every tick until it can actually be dispatched.
-        if (self->_listReloadRequested && !self->_bgTask) {
+        // Queued work: retried every tick until the worker is free. Search
+        // jumps the queue ahead of list reloads (user is actively waiting).
+        if (self->_searchRequested && !self->_bgTask) {
+            if (self->_searchOverlay && self->_searchTA) {
+                self->_searchRequested = false;
+                self->_dispatchTask(TT_SEARCH);
+            } else {
+                self->_searchRequested = false;   // dialog closed meanwhile — cancel
+            }
+        }
+        else if (self->_listReloadRequested && !self->_bgTask) {
             self->_listReloadRequested = false;
             self->_dispatchTask(TT_LOAD_LIST);
         }

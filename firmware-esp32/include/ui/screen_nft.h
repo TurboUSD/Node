@@ -153,7 +153,7 @@ public:
         lv_obj_set_style_pad_hor(_addWalletBtn, 10, 0);
         lv_obj_set_ext_click_area(_addWalletBtn, 6);
         lv_obj_t* awLbl = lv_label_create(_addWalletBtn);
-        lv_label_set_text(awLbl, "+  Wallet");
+        lv_label_set_text(awLbl, "Wallet");
         lv_obj_set_style_text_font(awLbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(awLbl, lv_color_hex(0x06150a), 0);
         lv_obj_center(awLbl);

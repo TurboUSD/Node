@@ -53,6 +53,7 @@ struct MiningFeedEntry {
     String winnerDisplayName = "";
     bool mined = false;         // false = this is the currently-pending block
     time_t createdAtUtc = 0;    // when the block was opened (drives the countdown ring)
+    time_t minedAtUtc   = 0;    // when it was mined (countdown fallback: minedAt + 1 h)
 };
 
 // Parses "2026-07-05T12:34:56[.frac][+00:00|Z]" (UTC) → epoch seconds.
@@ -459,13 +460,15 @@ public:
 
         int statusCode = http.GET();
         if (statusCode != 200) {
+            Serial.printf("miningFeed: HTTP %d\n", statusCode);
             http.end();
             return 0;
         }
 
         JsonDocument doc;
-        deserializeJson(doc, http.getStream());
+        DeserializationError ferr = deserializeJson(doc, http.getStream());
         http.end();
+        if (ferr) { Serial.printf("miningFeed: parse %s\n", ferr.c_str()); return 0; }
 
         int count = 0;
         for (JsonObject row : doc.as<JsonArray>()) {
@@ -481,6 +484,7 @@ public:
                 outEntries[count].winnerDisplayName = "";
             outEntries[count].mined = !row["mined_at"].isNull();
             outEntries[count].createdAtUtc = parseIso8601Utc(row["created_at"] | "");
+            outEntries[count].minedAtUtc   = parseIso8601Utc(row["mined_at"]   | "");
             count++;
         }
         return count;

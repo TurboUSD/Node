@@ -198,15 +198,21 @@ public:
 
     void updateMiningFeed(MiningFeedEntry* entries, int count) {
         nodeScreen.updateMiningFeed(entries, count);
-        // Remember the pending block's opening time + reward: the per-second
-        // clock tick drives the real countdown (ring + header strip) from it.
+        // Remember when the countdown started, for the per-second ring/strip:
+        // preferred = the pending block's created_at; fallback (same rule the
+        // web uses, and what keeps this working if the DB view lacks
+        // created_at) = the newest mined block's mined_at.
+        time_t newestMined = 0;
         for (int i = 0; i < count; i++) {
-            if (!entries[i].mined && entries[i].createdAtUtc > 0) {
-                _pendingBlockCreatedAt = entries[i].createdAtUtc;
-                _pendingBlockReward    = entries[i].rewardTusd > 0 ? entries[i].rewardTusd : 100.0;
-                break;
+            if (entries[i].mined && entries[i].minedAtUtc > newestMined)
+                newestMined = entries[i].minedAtUtc;
+            if (!entries[i].mined) {
+                if (entries[i].createdAtUtc > 0) _pendingBlockCreatedAt = entries[i].createdAtUtc;
+                _pendingBlockReward = entries[i].rewardTusd > 0 ? entries[i].rewardTusd : 100.0;
             }
         }
+        if (_pendingBlockCreatedAt == 0 && newestMined > 0)
+            _pendingBlockCreatedAt = newestMined;
     }
 
     // Called from the main loop after a successful RP2040 sensor poll. The new
