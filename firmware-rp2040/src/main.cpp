@@ -217,6 +217,22 @@ void loop() {
 
     while (Serial1.available()) {
         uint8_t b = Serial1.read();
+
+        // ── Link diagnostic (first 2 minutes after boot only) ────────────────
+        // A very short blip for ANY received byte, at most one every 3 s.
+        // Combined with the ESP32's chime attempt ~6 s after ITS boot, the
+        // sounds tell the whole story without a serial monitor:
+        //   2 boot beeps + blip/chime later  → UART RX is alive.
+        //   2 boot beeps + silence           → no bytes ever arrive from the
+        //     ESP32 → electrical/pin-level problem, not firmware.
+        static uint32_t lastBlipAt = 0;
+        if (millis() < 120000 && millis() - lastBlipAt > 3000) {
+            lastBlipAt = millis();
+            analogWrite(BUZZER_PIN, 60);
+            delay(35);
+            analogWrite(BUZZER_PIN, 0);
+        }
+
         if (frameIndex == 0 && b != 0x7E) continue; // resync: wait for a start byte
         frame[frameIndex++] = b;
 

@@ -80,6 +80,9 @@ struct TickerEntry {
     bool  live_loaded      = false;
     bool  chart_loaded     = false;
     volatile bool chart_dirty = false;  // bg task → UI: fresh chart data to draw
+    volatile bool live_dirty  = false;  // bg task → UI: fresh price/mcap/change
+    uint32_t live_at       = 0;         // millis() of last live refresh (cache TTL)
+    uint32_t chart_at      = 0;         // millis() of last chart refresh (cache TTL)
     bool  is_expanded      = false;
 
     // Token logo (from DexScreener pair info.imageUrl), downloaded + decoded
@@ -659,7 +662,9 @@ private:
         lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
-        lv_obj_set_style_pad_left(chartWrap, 56, 0);   // ← Y tick labels live here (56: micro-cap prices are wide)
+        lv_obj_set_style_pad_left(chartWrap, 56, 0);   // ← Y tick labels live here
+        lv_obj_set_style_pad_top(chartWrap, 7, 0);     // edge tick labels are centered on the first/last
+        lv_obj_set_style_pad_bottom(chartWrap, 7, 0);  // tick — reserve space or they clip in half
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_CLICKABLE);
 
@@ -724,12 +729,20 @@ private:
         // Y-axis tick labels → real USD prices (values are scaled 0–1000).
         if (lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) {
             if (dsc->text && dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
-                // Compact price labels so they never overflow the 56 px gutter.
                 float p = w.chartMin + ((float)dsc->value / 1000.0f) * w.chartRange;
-                if      (p >= 100.0f)  snprintf(dsc->text, dsc->text_length, "$%.0f", p);
-                else if (p >= 1.0f)    snprintf(dsc->text, dsc->text_length, "$%.2f", p);
-                else if (p >= 0.001f)  snprintf(dsc->text, dsc->text_length, "$%.4f", p);
-                else                   snprintf(dsc->text, dsc->text_length, "%.0e", p);   // "4e-06"
+                // MARKET CAP ticks: mcap-per-price factor from the live data
+                // (mcap = price × supply → factor = mcap/price). Far more
+                // readable than raw micro-cap prices.
+                if (t.fdv > 0 && t.price_usd > 0) {
+                    double mc = (double)p * ((double)t.fdv / (double)t.price_usd);
+                    if      (mc >= 1e9) snprintf(dsc->text, dsc->text_length, "$%.1fB", mc / 1e9);
+                    else if (mc >= 1e6) snprintf(dsc->text, dsc->text_length, "$%.0fM", mc / 1e6);
+                    else if (mc >= 1e3) snprintf(dsc->text, dsc->text_length, "$%.0fk", mc / 1e3);
+                    else                snprintf(dsc->text, dsc->text_length, "$%.0f",  mc);
+                }
+                else if (p >= 1.0f)   snprintf(dsc->text, dsc->text_length, "$%.2f", p);
+                else if (p >= 0.001f) snprintf(dsc->text, dsc->text_length, "$%.4f", p);
+                else                  snprintf(dsc->text, dsc->text_length, "%.0e", p);
             }
             return;
         }
@@ -1110,19 +1123,16 @@ private:
                 http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
                 int code = http.GET();
                 if (code == 200) {
-                    // Snapshot old logo bitmaps by pool address so a list
-                    // reload doesn't re-download (or leak) already-decoded
-                    // logos. (Bitmaps are never freed here — LVGL on the
-                    // other core may be mid-draw with one.)
-                    struct { char pool[68]; uint8_t* px; lv_img_dsc_t dsc; bool ready; } oldLogos[TICKER_MAX];
+                    // Snapshot the WHOLE old entries so a list reload keeps
+                    // everything already fetched (prices, charts, decoded
+                    // logos). Re-entering the screen used to throw all of it
+                    // away and re-download ticker by ticker — slow, and with
+                    // 6+ tickers the later ones often never finished.
+                    // (static: ~7 KB, too big for this task's stack; safe
+                    // because list loads are serialised on one worker.)
+                    static TickerEntry oldEntries[TICKER_MAX];
                     int oldCount = self->_tickerCount;
-                    for (int i = 0; i < oldCount; i++) {
-                        strncpy(oldLogos[i].pool, self->_tickers[i].pool_address, sizeof(oldLogos[i].pool)-1);
-                        oldLogos[i].pool[sizeof(oldLogos[i].pool)-1] = 0;
-                        oldLogos[i].px    = self->_tickers[i].logo_px;
-                        oldLogos[i].dsc   = self->_tickers[i].logo_dsc;
-                        oldLogos[i].ready = self->_tickers[i].logo_ready;
-                    }
+                    for (int i = 0; i < oldCount; i++) oldEntries[i] = self->_tickers[i];
 
                     JsonDocument doc;
                     deserializeJson(doc, http.getStream());
@@ -1132,35 +1142,44 @@ private:
                         if (n >= TICKER_MAX) break;
                         TickerEntry& te = self->_tickers[n];
                         memset(&te, 0, sizeof(te));
-                        strncpy(te.pool_address, obj["pool_address"] | "",  sizeof(te.pool_address)-1);
-                        strncpy(te.chain_id,     obj["chain_id"]     | "",  sizeof(te.chain_id)-1);
-                        strncpy(te.base_symbol,  obj["base_symbol"]  | "",  sizeof(te.base_symbol)-1);
-                        strncpy(te.base_name,    obj["base_name"]    | "",  sizeof(te.base_name)-1);
-                        strncpy(te.quote_symbol, obj["quote_symbol"] | "USD", sizeof(te.quote_symbol)-1);
-                        // Re-attach a previously downloaded logo for this pool.
+                        const char* pool = obj["pool_address"] | "";
+                        // Carry over the cached entry for this pool, if any.
                         for (int j = 0; j < oldCount; j++) {
-                            if (oldLogos[j].ready && oldLogos[j].px &&
-                                strcasecmp(oldLogos[j].pool, te.pool_address) == 0) {
-                                te.logo_px    = oldLogos[j].px;
-                                te.logo_dsc   = oldLogos[j].dsc;
-                                te.logo_ready = true;
+                            if (strcasecmp(oldEntries[j].pool_address, pool) == 0) {
+                                te = oldEntries[j];
+                                te.is_expanded = false;   // cards rebuild collapsed
                                 break;
                             }
                         }
+                        strncpy(te.pool_address, pool,                       sizeof(te.pool_address)-1);
+                        strncpy(te.chain_id,     obj["chain_id"]     | "",   sizeof(te.chain_id)-1);
+                        strncpy(te.base_symbol,  obj["base_symbol"]  | "",   sizeof(te.base_symbol)-1);
+                        strncpy(te.base_name,    obj["base_name"]    | "",   sizeof(te.base_name)-1);
+                        strncpy(te.quote_symbol, obj["quote_symbol"] | "USD", sizeof(te.quote_symbol)-1);
+                        te.logo_applied = false;   // new cards → re-attach
                         n++;
                     }
                     self->_tickerCount = n;
                     self->_pending.type = PR_LIST_LOADED;
                 }
                 http.end();
-                // After loading the list, fetch live prices AND chart data for
-                // every ticker, so the compact cards' sparklines appear right
-                // away (they used to stay empty until the first expand).
+
+                // Refresh strategy (all cache-aware — instant when re-entering
+                // the screen within the TTLs):
+                //  • Live prices: ONE batched DexScreener request per chain
+                //    (it accepts comma-separated pool addresses) instead of a
+                //    TLS handshake per ticker. TTL 2 min.
+                //  • Logos: only for tickers that still lack one.
+                //  • Charts: per pool (GeckoTerminal has no batch). TTL 15 min.
+                _fetchLiveBatch(self);
                 for (int i = 0; i < self->_tickerCount; i++) {
-                    TickerScreen::_fetchLive(self, i);
+                    TickerEntry& te = self->_tickers[i];
+                    if (te.logo_url[0] && !te.logo_ready) _fetchLogo(self, i);
                 }
                 for (int i = 0; i < self->_tickerCount; i++) {
-                    TickerScreen::_fetchChart(self, i);
+                    TickerEntry& te = self->_tickers[i];
+                    if (!te.chart_loaded || millis() - te.chart_at > 15UL * 60UL * 1000UL)
+                        TickerScreen::_fetchChart(self, i);
                 }
                 break;
             }
@@ -1391,9 +1410,72 @@ private:
             }
             te.chart_count  = n;
             te.chart_loaded = true;
+            te.chart_at     = millis();
             te.chart_dirty  = true;   // pollPending redraws on core 1
         }
         http.end();
+    }
+
+    // ONE DexScreener request per chain for all tickers whose live data is
+    // stale (>2 min) — /latest/dex/pairs/{chain}/{a},{b},{c} accepts up to 30
+    // comma-separated pool addresses. Cuts 6 sequential TLS handshakes down
+    // to 1-2, which is why the screen used to crawl ticker by ticker.
+    static void _fetchLiveBatch(TickerScreen* self) {
+        bool needed[TICKER_MAX] = {};
+        for (int i = 0; i < self->_tickerCount; i++) {
+            TickerEntry& te = self->_tickers[i];
+            needed[i] = !te.live_loaded || millis() - te.live_at > 2UL * 60UL * 1000UL;
+        }
+
+        for (int i = 0; i < self->_tickerCount; i++) {
+            if (!needed[i]) continue;
+            // Build one request for every still-needed ticker on this chain.
+            const char* chain = self->_tickers[i].chain_id;
+            String url = String(ENDPOINT_DEXSCREENER_PAIRS) + chain + "/";
+            bool first = true;
+            for (int j = i; j < self->_tickerCount; j++) {
+                if (!needed[j] || strcmp(self->_tickers[j].chain_id, chain) != 0) continue;
+                if (!first) url += ",";
+                url += self->_tickers[j].pool_address;
+                first = false;
+            }
+
+            HTTPClient http;
+            http.useHTTP10(true);
+            http.begin(url);
+            http.setTimeout(9000);
+            if (http.GET() == 200) {
+                JsonDocument filter;
+                filter["pairs"][0]["pairAddress"]          = true;
+                filter["pairs"][0]["priceUsd"]             = true;
+                filter["pairs"][0]["priceChange"]["h24"]   = true;
+                filter["pairs"][0]["marketCap"]            = true;
+                filter["pairs"][0]["fdv"]                  = true;
+                filter["pairs"][0]["info"]["imageUrl"]     = true;
+                JsonDocument doc;
+                if (deserializeJson(doc, http.getStream(),
+                                    DeserializationOption::Filter(filter)) == DeserializationError::Ok) {
+                    for (JsonObject pair : doc["pairs"].as<JsonArray>()) {
+                        const char* addr = pair["pairAddress"] | "";
+                        for (int j = 0; j < self->_tickerCount; j++) {
+                            TickerEntry& te = self->_tickers[j];
+                            if (!needed[j] || strcasecmp(te.pool_address, addr) != 0) continue;
+                            te.price_usd  = atof(pair["priceUsd"] | "0");
+                            te.change_24h = pair["priceChange"]["h24"] | 0.0f;
+                            te.fdv        = pair["marketCap"] | (pair["fdv"] | 0.0f);
+                            if (!te.logo_url[0])
+                                strncpy(te.logo_url, pair["info"]["imageUrl"] | "", sizeof(te.logo_url)-1);
+                            te.live_loaded = true;
+                            te.live_at     = millis();
+                            te.live_dirty  = true;   // pollPending updates the labels
+                            needed[j] = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            http.end();
+        }
     }
 
     // Fetches live price/FDV from DexScreener for one ticker (called from bg task)
@@ -1419,6 +1501,7 @@ private:
                 strncpy(te.logo_url, pair["info"]["imageUrl"] | "", sizeof(te.logo_url)-1);
                 strncpy(baseTokenAddr, pair["baseToken"]["address"] | "", sizeof(baseTokenAddr)-1);
                 te.live_loaded = true;
+                te.live_at     = millis();
                 self->_pending.type        = PR_LIVE_LOADED;
                 self->_pending.tickerIndex = idx;
             }
@@ -1503,7 +1586,12 @@ private:
         http.useHTTP10(true);
         http.begin(url);
         http.setTimeout(9000);
-        if (http.GET() != 200) { http.end(); return; }
+        int lcode = http.GET();
+        if (lcode != 200) {
+            Serial.printf("logo[%s] GET %d url=%s\n", te.base_symbol, lcode, url.c_str());
+            http.end();
+            return;
+        }
 
         // Read the PNG body (Content-Length if present, else until close).
         const size_t PNG_CAP = 200 * 1024;
@@ -1524,7 +1612,13 @@ private:
             if (declared > 0 && pngLen >= (size_t)declared) break;
         }
         http.end();
-        if (pngLen < 8) { free(png); return; }
+        if (pngLen < 8) {
+            Serial.printf("logo[%s] body too short (%u bytes)\n", te.base_symbol, (unsigned)pngLen);
+            free(png);
+            return;
+        }
+        Serial.printf("logo[%s] downloaded %u bytes, magic %02X%02X\n",
+                      te.base_symbol, (unsigned)pngLen, png[0], png[1]);
 
         // Decode to RGBA8888 (rgba, iw×ih) — format picked by magic bytes.
         unsigned char* rgba = nullptr;
@@ -1552,7 +1646,11 @@ private:
             JRESULT dr = jd_decomp(&jd, _jpegOut, 0);
             free(work);
             free(png);
-            if (dr != JDR_OK) { free(ctx.rgb); return; }
+            if (dr != JDR_OK) {
+                Serial.printf("logo[%s] tjpgd decomp failed rc=%d (%ux%u)\n", te.base_symbol, (int)dr, ctx.w, ctx.h);
+                free(ctx.rgb);
+                return;
+            }
             // Expand RGB888 → RGBA8888 (alpha 255) so the scaler below is shared.
             iw = ctx.w; ih = ctx.h;
             rgba = (unsigned char*)heap_caps_malloc((uint32_t)iw * ih * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1742,6 +1840,16 @@ public:
             if (self->_tickers[i].chart_dirty) {
                 self->_tickers[i].chart_dirty = false;
                 self->_updateChartData(i);
+            }
+        }
+
+        // Apply fresh live prices from the batched fetch.
+        for (int i = 0; i < self->_tickerCount; i++) {
+            if (self->_tickers[i].live_dirty) {
+                self->_tickers[i].live_dirty = false;
+                self->_updateFdvLabel(i);
+                self->_updatePriceLabel(i);
+                self->_updateChangeLabel(i);
             }
         }
 

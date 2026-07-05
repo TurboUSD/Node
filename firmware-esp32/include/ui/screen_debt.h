@@ -87,6 +87,11 @@ public:
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
         lv_obj_set_style_pad_left(chartWrap, 48, 0);   // ← the Y tick labels live here
+        // Tick labels are vertically CENTERED on their tick, so the top and
+        // bottom ones stick half a line above/below the chart — reserve that
+        // space or they get clipped (the bottom label was cut in half).
+        lv_obj_set_style_pad_top(chartWrap, 7, 0);
+        lv_obj_set_style_pad_bottom(chartWrap, 7, 0);
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
 
         chart = lv_chart_create(chartWrap);
@@ -197,7 +202,7 @@ public:
         if (!lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) return;
         if (dsc->text == NULL) return;
         if (dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
-            snprintf(dsc->text, dsc->text_length, "$%.0ft", (double)dsc->value / 10.0);
+            snprintf(dsc->text, dsc->text_length, "$%.0fT", (double)dsc->value / 10.0);
         }
     }
 
@@ -231,14 +236,21 @@ private:
     lv_obj_t* makeMetricColumn(lv_obj_t* parent, const char* title, lv_obj_t** btnOut, lv_obj_t** btnLabelOut,
                                 lv_obj_t** valueOut, lv_event_cb_t onTap, void* userData, bool alignRight) {
         lv_obj_t* col = lv_obj_create(parent);
-        lv_obj_set_size(col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        // FIXED height so both columns are identical boxes — with
+        // SIZE_CONTENT they measured differently (value text lengths differ)
+        // and cross-centering put SINCE and RATE at different heights.
+        lv_obj_set_size(col, LV_SIZE_CONTENT, 56);
         lv_obj_set_style_pad_all(col, 0, 0);
+        lv_obj_set_style_pad_row(col, 2, 0);   // title row ↔ value: tight (theme default gapped them apart)
         lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_bg_opa(col, LV_OPA_0, 0);
         lv_obj_set_style_border_width(col, 0, 0);
         lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(col, alignRight ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START,
-                               LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        // Main axis (vertical): pack from the TOP for both. Cross axis
+        // (horizontal): right-align the RATE column's rows.
+        lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START,
+                               alignRight ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START,
+                               alignRight ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START);
 
         lv_obj_t* row = lv_obj_create(col);
         lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);

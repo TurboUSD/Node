@@ -1379,19 +1379,21 @@ private:
         debtScreen.setRateButtonLabel(buf);
     }
 
+    // NOTE on both pickers below: the selection applies LIVE as the roller
+    // moves (VALUE_CHANGED), not only on SAVE — users closed the modal with
+    // the X expecting their pick to stick, and it silently reverted.
     void openSincePeriodPicker() {
         static const char* options = "1H\n24H\n7D\n30D\nNODE ON";
         lv_obj_t* card = openModal(lv_scr_act());
         lv_obj_t* roller = addOptionPicker(card, options, sincePeriodIndex);
         lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
         static lv_obj_t* sCard;    sCard = card;
-        static lv_obj_t* sRoller;  sRoller = roller;
         static UiManager* sSelf;   sSelf = this;
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
-            sSelf->sincePeriodIndex = lv_roller_get_selected(sRoller);
+        lv_obj_add_event_cb(roller, [](lv_event_t* e) {
+            sSelf->sincePeriodIndex = lv_roller_get_selected(lv_event_get_target(e));
             sSelf->_computeDebtDerived();
-            closeModal(sCard);
-        }, LV_EVENT_CLICKED, nullptr);
+        }, LV_EVENT_VALUE_CHANGED, nullptr);
+        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
     }
 
     void openRateUnitPicker() {
@@ -1400,13 +1402,12 @@ private:
         lv_obj_t* roller = addOptionPicker(card, options, rateUnitIndex);
         lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
         static lv_obj_t* sCard;    sCard = card;
-        static lv_obj_t* sRoller;  sRoller = roller;
         static UiManager* sSelf;   sSelf = this;
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
-            sSelf->rateUnitIndex = lv_roller_get_selected(sRoller);
+        lv_obj_add_event_cb(roller, [](lv_event_t* e) {
+            sSelf->rateUnitIndex = lv_roller_get_selected(lv_event_get_target(e));
             sSelf->_computeDebtDerived();
-            closeModal(sCard);
-        }, LV_EVENT_CLICKED, nullptr);
+        }, LV_EVENT_VALUE_CHANGED, nullptr);
+        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
     }
 
     // Recompute the inflation-game projection ($10,000 eroded by the real annual
@@ -1444,15 +1445,15 @@ private:
         lv_obj_t* roller = addOptionPicker(card, options, gameYearsIndex);
         lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
         static lv_obj_t* sCard;   sCard = card;
-        static lv_obj_t* sRoller; sRoller = roller;
         static UiManager* sSelf;  sSelf = this;
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
-            sSelf->gameYearsIndex = lv_roller_get_selected(sRoller);
+        // Live-apply (see note above openSincePeriodPicker).
+        lv_obj_add_event_cb(roller, [](lv_event_t* e) {
+            sSelf->gameYearsIndex = lv_roller_get_selected(lv_event_get_target(e));
             char lbl[10]; snprintf(lbl, sizeof(lbl), "%dY \xEF\x81\xB8", yearOpts[sSelf->gameYearsIndex % 9]);
             sSelf->gameScreen.setYearsButtonLabel(lbl);
             sSelf->_updateGameProjection();
-            closeModal(sCard);
-        }, LV_EVENT_CLICKED, nullptr);
+        }, LV_EVENT_VALUE_CHANGED, nullptr);
+        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
     }
 
     void showScreen(ScreenId id, bool animate = true,

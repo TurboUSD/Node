@@ -272,7 +272,7 @@ private:
     uint8_t _slideshowCount = 0;   // counts seconds down
 
     // ── FreeRTOS ─────────────────────────────────────────────────────────────
-    TaskHandle_t _bgTask = nullptr;
+    volatile TaskHandle_t _bgTask = nullptr;   // written by workers on core 0, read on core 1
     static NftPendingResult _pendingResult;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -299,8 +299,8 @@ private:
             if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
         }
 
-        if (_bgTask) { vTaskDelete(_bgTask); _bgTask = nullptr; }
-        xTaskCreatePinnedToCore(_bgPinlistFetchFn, "nft_pin", 16384, nullptr, 1, &_bgTask, 0);
+        if (_bgTask) { _fetching = false; return; }   // never vTaskDelete — see _startFetch
+        xTaskCreatePinnedToCore(_bgPinlistFetchFn, "nft_pin", 16384, nullptr, 1, (TaskHandle_t*)&_bgTask, 0);
     }
 
     static void _bgPinlistFetchFn(void* /*pvArg*/) {
@@ -312,6 +312,7 @@ private:
             snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "Pinlist is empty.");
             _pendingResult.error = true;
             _pendingResult.ready = true;
+            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -350,6 +351,7 @@ private:
             snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "No valid pinlist entries.");
             _pendingResult.error = true;
             _pendingResult.ready = true;
+            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -421,6 +423,7 @@ private:
 
         _pendingResult.ready = true;
         self->_bgTask = nullptr;
+        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
         vTaskDelete(nullptr);
     }
 
@@ -439,8 +442,13 @@ private:
             if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
         }
 
-        if (_bgTask) { vTaskDelete(_bgTask); _bgTask = nullptr; }
-        xTaskCreatePinnedToCore(_bgFetchFn, "nft_fetch", 16384, nullptr, 1, &_bgTask, 0);
+        // NEVER vTaskDelete here: error exits inside _bgFetchFn used to leave
+        // a STALE handle in _bgTask, and deleting a dead/recycled task handle
+        // panics (StoreProhibited — this was the "crash swiping past the NFT
+        // screen"). The worker clears _bgTask itself on every exit path; if
+        // it's still set, a fetch is genuinely in flight → just skip.
+        if (_bgTask) { _fetching = false; return; }
+        xTaskCreatePinnedToCore(_bgFetchFn, "nft_fetch", 16384, nullptr, 1, (TaskHandle_t*)&_bgTask, 0);
     }
 
     void _pollPending() {
@@ -832,6 +840,7 @@ private:
                          "Could not resolve %s", wallet.c_str());
                 _pendingResult.error = true;
                 _pendingResult.ready = true;
+                if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
                 vTaskDelete(nullptr);
                 return;
             }
@@ -841,6 +850,7 @@ private:
             snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "No wallet configured.");
             _pendingResult.error = true;
             _pendingResult.ready = true;
+            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -875,6 +885,7 @@ private:
             _pendingResult.error = true;
             _pendingResult.ready = true;
             http.end();
+            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -898,6 +909,7 @@ private:
                      "JSON parse error: %s", err.c_str());
             _pendingResult.error = true;
             _pendingResult.ready = true;
+            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
             vTaskDelete(nullptr);
             return;
         }
@@ -1006,6 +1018,7 @@ private:
         _pendingResult.ready = true;
 
         self->_bgTask = nullptr;
+        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
         vTaskDelete(nullptr);
     }
 };

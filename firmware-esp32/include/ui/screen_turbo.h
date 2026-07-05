@@ -59,7 +59,9 @@ public:
         lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
-        lv_obj_set_style_pad_left(chartWrap, 48, 0);   // ← Y tick labels live here
+        lv_obj_set_style_pad_left(chartWrap, 56, 0);   // ← Y tick labels live here (mcap strings are wide)
+        lv_obj_set_style_pad_top(chartWrap, 7, 0);     // top/bottom tick labels are centered on the
+        lv_obj_set_style_pad_bottom(chartWrap, 7, 0);  // edge ticks — without this they clip in half
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
 
         chart = lv_chart_create(chartWrap);
@@ -89,23 +91,24 @@ public:
         lv_obj_add_event_cb(chart, chartCb, LV_EVENT_DRAW_PART_BEGIN, this);
         lv_obj_add_event_cb(chart, chartCb, LV_EVENT_DRAW_PART_END,   this);
 
-        // X-axis time legend (weekly candles, newest on the right).
+        // X-axis time legend — real dates ("Apr 12 · May 24 · Jul 05"), filled
+        // by loadRealCandles() once data arrives (NTP time isn't synced yet
+        // when this build() runs at boot, so they start empty).
         lv_obj_t* xRow = lv_obj_create(body);
         lv_obj_set_size(xRow, LV_PCT(100), 14);
         lv_obj_set_style_bg_opa(xRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(xRow, 0, 0);
         lv_obj_set_style_pad_all(xRow, 0, 0);
-        lv_obj_set_style_pad_left(xRow, 46, 0);
+        lv_obj_set_style_pad_left(xRow, 56, 0);
         lv_obj_set_style_pad_right(xRow, 6, 0);
         lv_obj_set_flex_flow(xRow, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(xRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(xRow, LV_OBJ_FLAG_SCROLLABLE);
-        static const char* XT[3] = { "-6m", "-3m", "now" };
         for (int i = 0; i < 3; i++) {
-            lv_obj_t* l = lv_label_create(xRow);
-            lv_label_set_text(l, XT[i]);
-            lv_obj_set_style_text_color(l, lv_color_hex(0x6e7280), 0);
-            lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
+            _xDateLabels[i] = lv_label_create(xRow);
+            lv_label_set_text(_xDateLabels[i], "");
+            lv_obj_set_style_text_color(_xDateLabels[i], lv_color_hex(0x6e7280), 0);
+            lv_obj_set_style_text_font(_xDateLabels[i], &lv_font_montserrat_10, 0);
         }
 
         return body;
@@ -113,6 +116,10 @@ public:
 
     void updateData(const TreasuryData& data) {
         char buf[32];
+
+        // Circulating supply — also used to convert the chart's Y-axis price
+        // ticks into MARKET CAP labels (mcap = price × circulating supply).
+        _circSupply = data.tusdSupplyNum - data.tusdBurnedNum;
 
         snprintf(buf, sizeof(buf), "%s", formatCompact(data.tusdSupplyNum - data.tusdBurnedNum).c_str());
         lv_label_set_text(supplyValueLabel, buf);
@@ -173,6 +180,19 @@ public:
             openValues[i] = min(scale(candles[i].open), scale(candles[i].close)); // body bottom
         }
         lv_chart_refresh(chart);
+
+        // Fill the X-axis date legend (weekly candles, newest = today).
+        if (_xDateLabels[2]) {
+            time_t nowT = time(nullptr);
+            for (int i = 0; i < 3; i++) {
+                time_t ts = nowT - (time_t)((count - 1) - i * (count - 1) / 2) * 7 * 86400;
+                struct tm tmv;
+                localtime_r(&ts, &tmv);
+                char dbuf[12];
+                strftime(dbuf, sizeof(dbuf), "%b %d", &tmv);
+                lv_label_set_text(_xDateLabels[i], dbuf);
+            }
+        }
     }
 
 public:
@@ -191,6 +211,16 @@ private:
 
     double _minPrice   = 0.0;  // set by loadRealCandles, used by draw callback
     double _priceRange = 1.0;
+    double _circSupply = 0.0;  // circulating supply → Y ticks as market cap
+    lv_obj_t* _xDateLabels[3] = { nullptr };
+
+    // "$26M" / "$850k" / "$1.2B" — compact, no decimals below a billion.
+    static void _fmtMcap(char* out, size_t sz, double v) {
+        if      (v >= 1e9) snprintf(out, sz, "$%.1fB", v / 1e9);
+        else if (v >= 1e6) snprintf(out, sz, "$%.0fM", v / 1e6);
+        else if (v >= 1e3) snprintf(out, sz, "$%.0fk", v / 1e3);
+        else               snprintf(out, sz, "$%.0f",  v);
+    }
 
     lv_obj_t* supplyValueLabel = nullptr;
     lv_obj_t* priceValueBox = nullptr;   // holds the multi-label price (with subscript)
@@ -279,10 +309,13 @@ private:
         if (lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) {
             if (dsc->text && dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
                 double p = _minPrice + ((double)dsc->value / 1000.0) * _priceRange;
-                if      (p >= 100.0)  snprintf(dsc->text, dsc->text_length, "$%.0f", p);
-                else if (p >= 1.0)    snprintf(dsc->text, dsc->text_length, "$%.2f", p);
-                else if (p >= 0.001)  snprintf(dsc->text, dsc->text_length, "$%.4f", p);
-                else                  snprintf(dsc->text, dsc->text_length, "%.0e", p);   // "4e-06" fits the gutter
+                // MARKET CAP ticks (price × circulating supply): far more
+                // readable than micro-cap prices ("$26M" vs "3.7e-06").
+                if (_circSupply > 0) {
+                    _fmtMcap(dsc->text, dsc->text_length, p * _circSupply);
+                } else if (p >= 1.0) snprintf(dsc->text, dsc->text_length, "$%.2f", p);
+                else if (p >= 0.001) snprintf(dsc->text, dsc->text_length, "$%.4f", p);
+                else                 snprintf(dsc->text, dsc->text_length, "%.0e", p);
             }
             return;
         }
