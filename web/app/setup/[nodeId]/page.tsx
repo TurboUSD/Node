@@ -93,12 +93,30 @@ const COUNTRIES: [string, string][] = [
   ['GB', '🇬🇧 United Kingdom'], ['US', '🇺🇸 United States'], ['VE', '🇻🇪 Venezuela'],
 ]
 
+// ── ENS resolution ────────────────────────────────────────────────────────────
+// Lets the NFT wallet field accept "tonysoprano.eth" and swap in the 0x
+// address automatically. Uses the public ensideas resolver (CORS-enabled);
+// returns null when the name doesn't resolve.
+const EVM_RE = /^0x[0-9a-fA-F]{40}$/
+async function resolveEns(name: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.ensideas.com/ens/resolve/${encodeURIComponent(name.trim().toLowerCase())}`)
+    if (!res.ok) return null
+    const j = await res.json() as { address?: string | null }
+    return j.address && EVM_RE.test(j.address) ? j.address : null
+  } catch { return null }
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function NodeSetupPage({ params }: { params: { nodeId: string } }) {
   const nodeCode = params.nodeId.toUpperCase()
   const [node,        setNode]        = useState<NodeConfig | null>(null)
   const [stats,       setStats]       = useState<NodeStats | null>(null)
   const [loading,     setLoading]     = useState(true)
+  const [accessDenied, setAccessDenied] = useState(false)
+  // Per-device owner secret from the QR on the device's Settings popup
+  // (…/setup/CODE?t=TOKEN). Read once on mount; kept for save calls.
+  const setupTokenRef = useRef<string>('')
   const [saving,      setSaving]      = useState(false)
   const [saveMsg,     setSaveMsg]     = useState<{ text: string; ok: boolean } | null>(null)
 
@@ -108,6 +126,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
 
   // NFT Gallery: tab selector + manual pinlist
   const [nftTab,   setNftTab]   = useState<'wallet' | 'manual'>('wallet')
+  const [ensMsg,   setEnsMsg]   = useState<string | null>(null)
   const [pinItems, setPinItems] = useState<PinItem[]>([])
   const pinlistInitRef = useRef(false)
 
@@ -115,15 +134,21 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
     // Remember this node code so the network page can show "My Node →" instead of "Setup →"
     localStorage.setItem('turbousd_node_code', nodeCode)
 
-    supabase
-      .from('nodes')
-      .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, is_verified, is_genesis, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume, screen_brightness, screen_always_on, screen_timeout_mins')
-      .eq('node_code', nodeCode)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (!error && data) setNode(data as NodeConfig)
-        setLoading(false)
+    // Owner-gated load: the config comes from the get-node-setup Edge
+    // Function, which requires the per-device setup token (?t=… from the QR
+    // in the device's Settings). This also stops "column … does not exist"
+    // schema drift from masquerading as "no node found" — the function
+    // selects * server-side.
+    setupTokenRef.current = new URLSearchParams(window.location.search).get('t') ?? ''
+    callFunction<{ node: NodeConfig }>('get-node-setup', {
+      node_code:   nodeCode,
+      setup_token: setupTokenRef.current,
+    })
+      .then(({ node }) => setNode(node))
+      .catch((err: Error) => {
+        if (err.message === 'invalid_token') setAccessDenied(true)
       })
+      .finally(() => setLoading(false))
     // Fetch stats from the directory view (includes uptime_pct)
     supabase
       .from('public_node_directory')
@@ -163,8 +188,18 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
     setSaving(true)
     setSaveMsg(null)
     try {
+      // If the NFT wallet is still an unresolved ENS name (e.g. the user hit
+      // Save without leaving the field), resolve it now — the backend only
+      // accepts 0x addresses.
+      if (node.nft_wallet_address && /\.eth$/i.test(node.nft_wallet_address.trim())) {
+        const addr = await resolveEns(node.nft_wallet_address)
+        if (!addr) throw new Error(`Could not resolve ${node.nft_wallet_address}`)
+        node.nft_wallet_address = addr
+        setNode({ ...node })
+      }
       await callFunction('update-node-config', {
         node_code:             nodeCode,
+        setup_token:           setupTokenRef.current,
         display_name:          node.display_name,
         bio:                   node.bio,
         wallet_address:        node.wallet_address,
@@ -217,8 +252,9 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
     }
   }
 
-  if (loading) return <Centered>Loading node {nodeCode}…</Centered>
-  if (!node)   return <NotFound nodeCode={nodeCode} />
+  if (loading)      return <Centered>Loading node {nodeCode}…</Centered>
+  if (accessDenied) return <AccessDenied nodeCode={nodeCode} />
+  if (!node)        return <NotFound nodeCode={nodeCode} />
 
   const isProfileComplete = !!(node.wallet_address && node.display_name && node.country)
 
@@ -388,6 +424,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
                   {([1, 5, 10, 30] as const).map(mins => (
                     <button
                       key={mins}
+                      type="button"
                       onClick={() => setNode({ ...node, screen_timeout_mins: mins })}
                       style={{
                         padding: '4px 10px', borderRadius: 6, fontSize: 13, cursor: 'pointer', border: 'none',
@@ -403,10 +440,13 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               </div>
             )}
 
-            <ToggleRow label="Temperature" value={node.temp_unit}
+{/* Temperature (°C/°F) toggle hidden: the base SenseCAP D1 ships without
+                an ambient sensor, so this setting currently does nothing. Restore when
+                a Grove AHT20 becomes part of the kit.
+                        <ToggleRow label="Temperature" value={node.temp_unit}
               options={[['C', '°C'], ['F', '°F']]}
               onChange={v => setNode({ ...node, temp_unit: v as 'C' | 'F' })}
-            />
+            /> */}
             <ToggleRow label="Date format" value={node.date_format}
               options={[['DD/MM', 'DD/MM'], ['MM/DD', 'MM/DD']]}
               onChange={v => setNode({ ...node, date_format: v as 'DD/MM' | 'MM/DD' })}
@@ -417,18 +457,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
             />
           </Section>
 
-          <button type="submit" disabled={saving} style={s.primaryBtn}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-          {saveMsg && (
-            <p style={{ ...s.msg, color: saveMsg.ok ? C.green : C.red }}>{saveMsg.text}</p>
-          )}
-        </form>
-
-        {/* ── Token screener ── */}
-        <TickerBoard nodeCode={nodeCode} isOwner={true} />
-
-        {/* ── NFT Gallery ── */}
+          {/* ── NFT Gallery ── */}
         <Section title="NFT Gallery" accent={C.blue}>
           <p style={s.bodyText}>
             Your device can auto-detect NFTs from a wallet, or show a hand-picked list of
@@ -458,11 +487,24 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
           </div>
 
           {nftTab === 'wallet' ? (
-            <Field label="NFT wallet address" hint="EVM address (0x…) to auto-detect NFTs from. Can differ from your reward wallet. Spam NFTs (floor price = 0) are filtered automatically.">
-              <input style={s.input} placeholder="0x… (defaults to reward wallet if empty)" maxLength={42}
+            <Field label="NFT wallet address" hint="EVM address (0x…) or ENS name (yourname.eth — resolved automatically). Can differ from your reward wallet. Spam NFTs (floor price = 0) are filtered automatically.">
+              <input style={s.input} placeholder="0x… or yourname.eth (defaults to reward wallet if empty)" maxLength={64}
                 value={node.nft_wallet_address ?? ''}
-                onChange={e => setNode({ ...node, nft_wallet_address: e.target.value || null })}
+                onChange={e => { setEnsMsg(null); setNode({ ...node, nft_wallet_address: e.target.value || null }) }}
+                onBlur={async e => {
+                  const v = e.target.value.trim()
+                  if (!/\.eth$/i.test(v)) return
+                  setEnsMsg(`Resolving ${v}…`)
+                  const addr = await resolveEns(v)
+                  if (addr) {
+                    setNode(n => n ? { ...n, nft_wallet_address: addr } : n)
+                    setEnsMsg(`${v} → ${addr.slice(0, 6)}…${addr.slice(-4)}`)
+                  } else {
+                    setEnsMsg(`Could not resolve ${v} — check the name.`)
+                  }
+                }}
               />
+              {ensMsg && <p style={{ fontSize: 12, color: ensMsg.startsWith('Could not') ? C.red : C.green, marginTop: 6 }}>{ensMsg}</p>}
             </Field>
           ) : (
             <NftPinlistEditor items={pinItems} onChange={setPinItems} />
@@ -503,6 +545,22 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
             onChange={order => setNode({ ...node, screen_order: order })}
           />
         </Section>
+
+          {/* One Save button for EVERYTHING above (profile, alarm, display,
+              NFT gallery, screen order) — the NFT/order sections used to sit
+              outside the form with no way to save them. */}
+          <button type="submit" disabled={saving} style={s.primaryBtn}>
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+          {saveMsg && (
+            <p style={{ ...s.msg, color: saveMsg.ok ? C.green : C.red }}>{saveMsg.text}</p>
+          )}
+        </form>
+
+        {/* ── Token screener — same left-accent treatment as the other sections ── */}
+        <div style={{ ...s.section, borderLeftColor: C.green, marginTop: 36 }}>
+          <TickerBoard nodeCode={nodeCode} isOwner={true} />
+        </div>
 
         {/* ── Verification ── */}
         <Section title="Verified badge" accent={C.green}>
@@ -572,7 +630,7 @@ function Header({ nodeCode, isVerified, isGenesis, stats }: {
         <span style={s.logo}>
           TurboUSD Node {nodeCode}
           {isVerified && <span style={s.badge}>✓</span>}
-          {isGenesis  && <span style={s.genBadge}>🎖</span>}
+          {isGenesis  && <span style={s.genBadge}>⚡</span>}
         </span>
         <a href="/setup" style={s.setupLink}>Flash new device</a>
       </header>
@@ -607,7 +665,8 @@ function NotFound({ nodeCode }: { nodeCode: string }) {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 56px)', padding: 24 }}>
         <p style={{ color: C.muted, fontSize: 15, textAlign: 'center', marginBottom: 24, lineHeight: 1.6 }}>
           No node found with code <strong style={{ color: C.text }}>{nodeCode}</strong>.<br />
-          Check the code shown on your device's home screen.
+          Open <strong style={{ color: C.text }}>Settings</strong> on your device (tap the QR icon in the footer) and
+          scan the QR code — or type the exact URL shown right below it.
         </p>
         <a href="/setup" style={{
           padding: '11px 24px', background: 'transparent', color: C.text,
@@ -615,6 +674,33 @@ function NotFound({ nodeCode }: { nodeCode: string }) {
           fontSize: 14, textDecoration: 'none', cursor: 'pointer',
         }}>
           ← Back to setup
+        </a>
+      </div>
+    </div>
+  )
+}
+
+function AccessDenied({ nodeCode }: { nodeCode: string }) {
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      <header style={s.header}>
+        <a href="/" style={s.back}>← Network</a>
+        <span style={s.logo}>TurboUSD Node {nodeCode}</span>
+        <div style={{ width: 120 }} />
+      </header>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 56px)', padding: 24 }}>
+        <p style={{ color: C.muted, fontSize: 15, textAlign: 'center', marginBottom: 24, lineHeight: 1.6, maxWidth: 420 }}>
+          This setup link is missing its <strong style={{ color: C.text }}>owner access token</strong>, so it can't be opened.<br /><br />
+          Only the person holding the device can edit it: open <strong style={{ color: C.text }}>Settings</strong> on
+          your device (tap the QR icon in the footer) and <strong style={{ color: C.text }}>scan the QR code</strong> —
+          it opens this page with the correct token. You can also type the exact URL shown right below the QR.
+        </p>
+        <a href={`/node/${nodeCode}`} style={{
+          padding: '11px 24px', background: 'transparent', color: C.text,
+          border: '1px solid #3a3a3a', borderRadius: 8, fontWeight: 'bold',
+          fontSize: 14, textDecoration: 'none', cursor: 'pointer',
+        }}>
+          View public profile instead →
         </a>
       </div>
     </div>
@@ -982,13 +1068,13 @@ const s: Record<string, React.CSSProperties> = {
   badge:     { background: C.green, color: C.onGreen, fontSize: 10, fontWeight: 'bold', padding: '2px 6px', borderRadius: 4 },
   genBadge:  { fontSize: 14 },
   setupLink: { color: C.muted, fontSize: 13, textDecoration: 'none', border: `1px solid ${C.border}`, padding: '5px 10px', borderRadius: 6 },
-  statsBar:  { display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 36, padding: '14px 20px 10px', borderBottom: `1px solid ${C.border}`, background: C.card },
+  statsBar:  { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 36, padding: '12px 20px', borderBottom: `1px solid ${C.border}`, background: C.card },
 
   section: {
     borderLeft: `3px solid ${C.green}`, paddingLeft: 16,
     marginBottom: 28,
   },
-  sectionTitle: { fontSize: 11, fontWeight: 'bold', letterSpacing: 1.5, textTransform: 'uppercase', color: C.muted, marginBottom: 16, marginTop: 0 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', letterSpacing: 1.2, textTransform: 'uppercase', color: '#ffffff', marginBottom: 16, marginTop: 0 },
 
   label: { display: 'block', fontSize: 13, color: C.muted, marginBottom: 6, fontWeight: 500 },
   hint:  { fontSize: 12, color: C.muted, marginTop: 5, lineHeight: 1.5, opacity: 0.7 },

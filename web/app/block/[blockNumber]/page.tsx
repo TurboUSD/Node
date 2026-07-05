@@ -128,7 +128,7 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
                         {block.winner_display_name || block.winner_node_code}
                       </a>
                       {block.winner_is_verified && <span style={s.verBadge}>✓ verified</span>}
-                      {block.winner_is_genesis   && <span style={s.genBadge}>🎖 genesis</span>}
+                      {block.winner_is_genesis   && <span style={s.genBadge}>⚡ genesis</span>}
                     </span>
                   ) : '—'
                 }

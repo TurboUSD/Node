@@ -198,7 +198,7 @@ function CandlestickChart({ candles, width = 360, height = 160 }: { candles: Can
         return (
           <g key={i}>
             <line x1={x} y1={toY(c.high)} x2={x} y2={toY(c.low)} stroke={col} strokeWidth={1} />
-            <rect x={x - bW / 2} y={bT} width={bW} height={bH} fill={up ? col : 'transparent'} stroke={col} strokeWidth={1} />
+            <rect x={x - bW / 2} y={bT} width={bW} height={bH} fill={col} stroke={col} strokeWidth={1} />
           </g>
         )
       })}
@@ -365,8 +365,33 @@ function SearchRow({ nodeCode, onAdded }: { nodeCode: string; onAdded: () => voi
     if (query.trim().length < 2) return
     setLoading(true)
     try {
-      const data = await callFunction<{ results: SearchResult[] }>('search-tokens', { query: query.trim() })
-      setResults(data?.results ?? [])
+      // DexScreener's public search API, hit directly from the browser (it's
+      // CORS-enabled — we already fetch pair data from it below). The old
+      // path called the search-tokens Edge Function, which was never deployed,
+      // so searching silently returned nothing. Same source + same liquidity
+      // filter as the device's on-screen search.
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query.trim())}`)
+      if (!res.ok) throw new Error(`DexScreener ${res.status}`)
+      const data = await res.json() as { pairs?: Array<{
+        pairAddress: string; chainId: string; priceUsd?: string
+        liquidity?: { usd?: number }
+        baseToken?: { symbol?: string; name?: string; address?: string }
+        quoteToken?: { symbol?: string }
+      }> }
+      const mapped: SearchResult[] = (data.pairs ?? [])
+        .filter(pr => (pr.liquidity?.usd ?? 0) >= 1000)   // sink dust/scam clones
+        .slice(0, 12)
+        .map(pr => ({
+          pairAddress:  pr.pairAddress,
+          chainId:      pr.chainId,
+          baseSymbol:   pr.baseToken?.symbol ?? '?',
+          baseName:     pr.baseToken?.name ?? '',
+          baseAddress:  pr.baseToken?.address ?? '',
+          quoteSymbol:  pr.quoteToken?.symbol ?? 'USD',
+          priceUsd:     parseFloat(pr.priceUsd ?? '0'),
+          liquidityUsd: pr.liquidity?.usd ?? 0,
+        }))
+      setResults(mapped)
     } catch { setResults([]) }
     setLoading(false)
   }
@@ -560,8 +585,8 @@ const s: Record<string, React.CSSProperties> = {
   root: { marginBottom: 40 },
 
   sectionTitle: {
-    fontSize: 10, fontWeight: 'bold', color: C.muted,
-    textTransform: 'uppercase', letterSpacing: 1.4, margin: 0,
+    fontSize: 16, fontWeight: 'bold', color: '#ffffff',
+    textTransform: 'uppercase', letterSpacing: 1.2, margin: 0,
   },
   count: {
     background: '#141414', border: `1px solid ${C.border}`,

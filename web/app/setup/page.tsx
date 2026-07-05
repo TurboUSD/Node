@@ -68,7 +68,9 @@ export default function SetupPage() {
   function goToNode(e: React.FormEvent) {
     e.preventDefault()
     const code = nodeCode.trim().toUpperCase()
-    if (code.length >= 4) router.push(`/setup/${code}`)
+    // The code alone can't open the owner setup page anymore (it needs the
+    // secret ?t= token from the device's QR) — send it to the public profile.
+    if (code.length >= 4) router.push(`/node/${code}`)
   }
 
   return (
@@ -196,13 +198,12 @@ export default function SetupPage() {
           {/* ── RP2040 sub-chip flash ── */}
           <div style={{ marginTop: 20, padding: '16px', background: 'rgba(255,255,255,0.04)', borderRadius: 10, border: `1px solid ${C.border}` }}>
             <p style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>
-              🔔 Also flash the sensor &amp; buzzer chip (RP2040) — one-time, takes 30 seconds
+              🔔 Also flash the buzzer chip — one-time, takes 30 seconds
             </p>
             <p style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
-              The SenseCAP D1 has a second chip (the RP2040) that drives the alarm buzzer
-              <strong style={{ color: C.text }}> and reads the temperature &amp; humidity sensor</strong>.
-              Until you flash it, the alarm stays silent and the temp/humidity on the Home screen
-              show as <code style={s.code}>--</code>. It can&apos;t be flashed via browser — you
+              The SenseCAP D1 has a second chip (the RP2040) that drives the{' '}
+              <strong style={{ color: C.text }}>alarm buzzer</strong>.
+              Until you flash it, the alarm stays silent. It can&apos;t be flashed via browser — you
               need to drag a file onto it like a USB drive.
             </p>
             <ol style={{ ...s.ol, marginBottom: 12 }}>
@@ -238,11 +239,6 @@ export default function SetupPage() {
             >
               ⬇ Download {latest ? `rp2040-${latest.version}.uf2` : 'latest RP2040 firmware'}
             </a>
-            <p style={{ marginTop: 10, fontSize: 12, color: C.muted, opacity: 0.7 }}>
-              No <code style={s.code}>RPI-RP2</code> drive? It only appears while the pinhole button is held
-              <em> as</em> you plug in — press first, then connect. If it still doesn&apos;t show, try a
-              different USB cable (some are charge-only).
-            </p>
           </div>
         </StepCard>
 
@@ -284,8 +280,13 @@ export default function SetupPage() {
         <div style={s.returnCard}>
           <div style={s.returnLabel}>Already flashed and connected your node to WiFi?</div>
           <p style={s.returnDesc}>
-            Scan the QR code on your device to go directly to your setup page.
-            Or enter your node code manually:
+            Open <strong style={{ color: '#e8e8e8' }}>Settings</strong> on your device (tap the QR icon in the
+            footer) and <strong style={{ color: '#e8e8e8' }}>scan the QR code</strong> — it opens your private
+            setup page directly. Your setup link includes a secret owner token, so only whoever holds the
+            device can edit your node. Can&apos;t scan? Type the exact URL shown right below the QR instead.
+          </p>
+          <p style={s.returnDesc}>
+            Entering just the node code opens the <em>public</em> profile (no editing):
           </p>
           <form onSubmit={goToNode} style={{ display: 'flex', gap: 8 }}>
             <input
@@ -297,7 +298,6 @@ export default function SetupPage() {
             />
             <button type="submit" style={s.codeBtn}>Open →</button>
           </form>
-          <p style={s.returnHint}>Your node code is shown on the device's home screen.</p>
         </div>
 
         {/* Footer */}

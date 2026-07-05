@@ -123,7 +123,7 @@ export default function PublicNodePage() {
           }} />
           <h1 style={{ fontSize: 24, margin: 0 }}>{name}</h1>
           {node.is_verified && <span style={s.badge}>✓</span>}
-          {node.is_genesis  && <span title="Genesis node" style={{ fontSize: 18 }}>🎖</span>}
+          {node.is_genesis  && <span title="Genesis node" style={{ fontSize: 18 }}>⚡</span>}
         </div>
 
         <div style={{ color: C.muted, fontSize: 13, marginBottom: node.bio ? 14 : 18 }}>

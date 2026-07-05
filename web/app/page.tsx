@@ -81,6 +81,14 @@ function timeSince(iso: string): string {
   return d === 1 ? '1 day ago' : `${d} days ago`
 }
 
+// windows_online = number of 60-min mining windows the node was online for →
+// approximate real online time ("14h", "3d 2h").
+function fmtOnlineHours(windows: number): string {
+  if (windows < 24) return `${windows}h`
+  const d = Math.floor(windows / 24), h = windows % 24
+  return h > 0 ? `${d}d ${h}h` : `${d}d`
+}
+
 function memberDuration(iso: string): string {
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
   if (d === 0) return 'today'
@@ -730,21 +738,23 @@ function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void 
       <div style={{ flex: 1, minWidth: 0 }}>
         {/* Row 1: name + badges + code */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const }}>
-          <a href={`/node/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ ...s.nodeName, textDecoration: 'none', color: C.text }}>
+          <span style={{ ...s.nodeName, color: C.text }}>
             {node.display_name || `Node #${node.node_code}`}
-          </a>
+          </span>
           {node.is_verified && (
             <span style={{ fontSize: 11, color: '#1d9bf0', fontWeight: 700 }}>✓</span>
           )}
           {node.is_genesis && (
-            <span style={{ fontSize: 11 }}>🎖</span>
+            <span style={{ fontSize: 11 }}>⚡</span>
           )}
-          <span style={{ ...s.nodeCode, marginLeft: 2 }}>#{node.node_code}</span>
+          {node.display_name && <span style={{ ...s.nodeCode, marginLeft: 2 }}>#{node.node_code}</span>}
         </div>
         {/* Row 2: stats */}
         <div style={{ display: 'flex', gap: 14, marginTop: 5, flexWrap: 'wrap' as const }}>
           <StatChip label="Since" value={firstOnline} />
-          <StatChip label="Online" value={memberDuration(node.created_at)} />
+          {node.windows_online > 0 && (
+            <StatChip label="Online" value={fmtOnlineHours(node.windows_online)} />
+          )}
           <StatChip label="Blocks" value={String(node.blocks_won)} color={node.blocks_won > 0 ? C.green : undefined} />
           <StatChip label="Earned" value={`₸${node.total_tusd_earned.toFixed(1)}`} color={node.total_tusd_earned > 0 ? C.green : undefined} />
           {node.uptime_pct > 0 && (
@@ -762,8 +772,8 @@ function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void 
 function StatChip({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 1 }}>
-      <span style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase' as const, letterSpacing: 0.6 }}>{label}</span>
-      <span style={{ fontSize: 12, fontWeight: 600, color: color ?? C.text }}>{value}</span>
+      <span style={{ fontSize: 10, color: '#9a9aa2', textTransform: 'uppercase' as const, letterSpacing: 0.6 }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: color ?? C.text }}>{value}</span>
     </div>
   )
 }
@@ -791,7 +801,7 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
                 {node.display_name || `Node #${node.node_code}`}
               </a>
               {node.is_verified && <span style={{ fontSize: 10, color: '#1d9bf0', fontWeight: 700, flexShrink: 0 }}>✓</span>}
-              {node.is_genesis  && <span style={{ fontSize: 10, flexShrink: 0 }}>🎖</span>}
+              {node.is_genesis  && <span style={{ fontSize: 10, flexShrink: 0 }}>⚡</span>}
             </div>
           </div>
           {right(node)}
@@ -818,17 +828,19 @@ function NodeRowCard({ node, right, prefix, onClick }: {
       }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={s.nodeName}>
-          <a href={`/node/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ color: C.text, textDecoration: 'none', fontWeight: 600 }}>
+          <span style={{ color: C.text, fontWeight: 600 }}>
             {node.display_name || `Node #${node.node_code}`}
-          </a>
+          </span>
           {node.is_verified && <span style={s.verifiedBadge}>✓</span>}
-          {node.is_genesis  && <span style={s.genesisBadge}>🎖</span>}
-          <span style={s.nodeCode}>#{node.node_code}</span>
+          {node.is_genesis  && <span style={s.genesisBadge}>⚡</span>}
+          {node.display_name && <span style={s.nodeCode}>#{node.node_code}</span>}
         </div>
-        <div style={s.nodeMeta}>
-          {node.bio && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{node.bio}</span>}
-          {node.country && <span style={{ flexShrink: 0, opacity: 0.6 }}>{node.country}{node.city ? ` · ${node.city}` : ''}</span>}
-        </div>
+        {(node.bio || node.country) && (
+          <div style={s.nodeMeta}>
+            {node.bio && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{node.bio}</span>}
+            {node.country && <span style={{ flexShrink: 0, opacity: 0.6 }}>{node.country}{node.city ? ` · ${node.city}` : ''}</span>}
+          </div>
+        )}
       </div>
       {right}
     </div>
@@ -879,7 +891,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 12, color: C.muted }}>#{node.node_code}</span>
               {node.is_verified && <span style={{ fontSize: 12, color: C.blue, fontWeight: 'bold' }}>✓ verified</span>}
-              {node.is_genesis  && <span style={{ fontSize: 12, color: C.yellow, fontWeight: 'bold' }}>🎖 genesis</span>}
+              {node.is_genesis  && <span style={{ fontSize: 12, color: C.yellow, fontWeight: 'bold' }}>⚡ genesis</span>}
               {node.twitter_handle && (
                 <a href={`https://x.com/${node.twitter_handle}`} target="_blank" rel="noreferrer"
                   style={{ fontSize: 12, color: C.green, textDecoration: 'none' }}>
@@ -1020,7 +1032,7 @@ const s: Record<string, React.CSSProperties> = {
   nodeName:     { fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: C.text },
   verifiedBadge:{ color: C.blue, fontSize: 11, marginLeft: 6, fontWeight: 'normal' },
   genesisBadge: { fontSize: 11, marginLeft: 4 },
-  nodeCode:     { color: C.muted, fontSize: 10, marginLeft: 6, fontWeight: 'normal', opacity: 0.4 },
+  nodeCode:     { color: C.muted, fontSize: 10, marginLeft: 6, fontWeight: 'normal', opacity: 0.65 },
   nodeMeta:     { display: 'flex', gap: 8, fontSize: 13, color: C.muted, marginTop: 2, overflow: 'hidden' },
 
   // Leaderboard toggle
