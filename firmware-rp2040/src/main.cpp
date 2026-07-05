@@ -171,33 +171,41 @@ void processCommand(uint8_t cmd) {
 }
 
 void setup() {
-    pinMode(BUZZER_PIN, OUTPUT);
+    // ── Boot sequence mirrors Seeed's FACTORY firmware exactly ──────────────
+    // (examples/indicator_rp2040/indicator_rp2040.ino, the one that audibly
+    // beeps at power-on). Factory order: sensor_power_on() → ... →
+    // beep_init() → delay(500) → beep_on(). The 500 ms settle time after
+    // raising the GP18 power rail matters: beeping immediately after
+    // power-on (as this firmware used to) can fall inside the rail's
+    // stabilisation window and produce no sound.
+    pinMode(GROVE_PWR_PIN, OUTPUT);       // factory sensor_power_on(): GP18 HIGH
+    digitalWrite(GROVE_PWR_PIN, HIGH);
+
+    pinMode(BUZZER_PIN, OUTPUT);          // factory beep_init()
+    delay(500);                           // factory settle delay before first beep
+
+    // Boot self-test: two short beeps, factory drive (plain analogWrite 127,
+    // default 1 kHz PWM). Beeps BEFORE any UART/I2C init so a hung peripheral
+    // can never silence them:
+    //   • Beeps at power-on  → buzzer hardware/pin OK; any "alarm silent"
+    //     issue is upstream (UART link or the ESP32 not sending the command).
+    //   • No beep at power-on → buzzer pin/drive problem.
+    for (int i = 0; i < 2; i++) {
+        analogWrite(BUZZER_PIN, 127);     // EXACTLY factory beep_on()
+        delay(120);
+        analogWrite(BUZZER_PIN, 0);
+        delay(90);
+    }
+
     Serial1.setRX(UART_FROM_S3_RX);
     Serial1.setTX(UART_TO_S3_TX);
     Serial1.begin(UART_BAUD);
-
-    // Grove-1 port power switch is active HIGH — must be driven on or an
-    // external AHT20 on the Grove I2C bus gets no power and never responds.
-    pinMode(GROVE_PWR_PIN, OUTPUT);
-    digitalWrite(GROVE_PWR_PIN, HIGH);
 
     // Grove I2C bus for an optional AHT20 temp/humidity sensor.
     Wire.setSDA(GROVE_I2C_SDA);
     Wire.setSCL(GROVE_I2C_SCL);
     Wire.begin();
     aht.begin();
-
-    // Boot self-test: two short beeps at max drive so it's immediately obvious
-    // the buzzer + BUZZER_PIN are correct, INDEPENDENT of the UART/alarm path.
-    //   • Beeps at power-on  → buzzer hardware/pin OK; any "alarm silent" issue
-    //     is upstream (UART link or the ESP32 not sending the command).
-    //   • No beep at power-on → BUZZER_PIN wrong or buzzer not driven.
-    for (int i = 0; i < 2; i++) {
-        analogWrite(BUZZER_PIN, 127);   // EXACTLY Seeed's reference drive (1 kHz default, 50% duty)
-        delay(120);
-        analogWrite(BUZZER_PIN, 0);
-        delay(90);
-    }
 }
 
 void loop() {

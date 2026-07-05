@@ -83,7 +83,7 @@ public:
         snprintf(buf, sizeof(buf), "%.2f%%", burnedPct);
         lv_label_set_text(burnedValueLabel, buf);
 
-        snprintf(buf, sizeof(buf), "$%d", (int)round(data.treasuryValueUsd));
+        fmtThousands(buf, sizeof(buf), data.treasuryValueUsd);
         lv_label_set_text(treasuryValueLabel, buf);
     }
 
@@ -310,6 +310,10 @@ private:
         lv_obj_set_style_border_width(cell, 1, 0);
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        // Stat cells never scroll — without this, content 1px taller than the
+        // cell (font metrics) shows a pointless vertical scrollbar.
+        lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(cell, LV_SCROLLBAR_MODE_OFF);
 
         lv_obj_t* lbl = lv_label_create(cell);
         lv_label_set_text(lbl, label);
@@ -321,6 +325,22 @@ private:
         lv_obj_set_style_text_color(valueLabel, color, 0);
         lv_obj_set_style_text_font(valueLabel, &lv_font_montserrat_16, 0);
         return valueLabel;
+    }
+
+    // "$12,345,678" — integer USD with thousands separators.
+    static void fmtThousands(char* out, size_t sz, double v) {
+        char digits[24];
+        snprintf(digits, sizeof(digits), "%.0f", v < 0 ? -v : v);
+        int n = strlen(digits);
+        size_t o = 0;
+        if (o < sz - 1 && v < 0) out[o++] = '-';
+        if (o < sz - 1) out[o++] = '$';
+        for (int i = 0; i < n && o < sz - 1; i++) {
+            out[o++] = digits[i];
+            int remaining = n - 1 - i;
+            if (remaining > 0 && remaining % 3 == 0 && o < sz - 1) out[o++] = ',';
+        }
+        out[o] = '\0';
     }
 
     String formatCompact(double n) {

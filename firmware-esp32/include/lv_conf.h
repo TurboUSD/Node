@@ -115,6 +115,12 @@
                                 * (src/extra/libs/qrcode) and renders onto a canvas,
                                 * so LV_USE_CANVAS above must also be 1. */
 
+#define LV_USE_PNG         1   /* compiles LVGL's bundled lodepng; screen_tickers.h
+                                * calls lodepng_decode32() directly to decode token
+                                * logos once (bg task) into 40×40 bitmaps. The LVGL
+                                * png *decoder* is not registered — no per-frame
+                                * decode cost on the RGB panel. */
+
 /*====================
    THEME
  *====================*/

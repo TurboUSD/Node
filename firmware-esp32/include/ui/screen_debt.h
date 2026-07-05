@@ -80,7 +80,12 @@ public:
         lv_obj_set_style_pad_top(chart, 4, 0);
         lv_obj_set_style_pad_bottom(chart, 2, 0);
         lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
-        lv_chart_set_div_line_count(chart, 4, 1);
+        // NOTE: vertical div count must be 0 or >= 2. LVGL 8's draw_div_lines
+        // computes `x = w*i / (vdiv_cnt - 1)`, so vdiv_cnt == 1 causes an
+        // IntegerDivideByZero panic the first time the chart is drawn — this
+        // was the "device reboots when opening the US Debt screen" crash
+        // (confirmed by symbolized backtrace → lv_chart.c draw_div_lines).
+        lv_chart_set_div_line_count(chart, 4, 0);
         lv_chart_set_point_count(chart, 40);
         // Y axis: 4 major ticks WITH labels (intermediate $T values, not just the
         // endpoints). The draw callback below rewrites each tick's text into "$Nt".

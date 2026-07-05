@@ -336,26 +336,66 @@ public:
         http.useHTTP10(true);   // see header note
         http.begin(ENDPOINT_OHLCV_HISTORY);
         http.setTimeout(8000);
+        // Edge Functions are deployed with JWT verification by default — send
+        // the anon key or the request never reaches the function.
+        http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+        http.addHeader("apikey", SUPABASE_ANON_KEY);
 
         int statusCode = http.GET();
-        if (statusCode != 200) {
+        int count = 0;
+        if (statusCode == 200) {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, http.getStream());
+            if (!err) {
+                for (JsonObject row : doc["candles"].as<JsonArray>()) {
+                    if (count >= maxCandles) break;
+                    outCandles[count].open = row["open_usd"] | 0.0;
+                    outCandles[count].high = row["high_usd"] | 0.0;
+                    outCandles[count].low = row["low_usd"] | 0.0;
+                    outCandles[count].close = row["close_usd"] | 0.0;
+                    count++;
+                }
+            }
+        } else {
             Serial.printf("fetchOhlcvHistory failed, HTTP %d\n", statusCode);
-            http.end();
-            return 0;
         }
+        http.end();
+        if (count > 0) return count;
+
+        // Fallback: our Supabase cache is unavailable (function not deployed,
+        // sync never ran → HTTP 500, table empty…). Pull weekly candles for
+        // the TUSD pool straight from GeckoTerminal so the chart still works.
+        // Free tier returns ~6 months of history — same limit the cache has.
+        return _fetchOhlcvGecko(outCandles, maxCandles);
+    }
+
+    // GeckoTerminal weekly OHLCV for the TUSD pool. ohlcv_list rows are
+    // [ts, open, high, low, close, volume], NEWEST first → reverse on copy.
+    int _fetchOhlcvGecko(OhlcvCandle* outCandles, int maxCandles) {
+        HTTPClient http;
+        http.useHTTP10(true);   // see header note
+        http.begin(String(ENDPOINT_GECKOTERMINAL_OHLCV) + TUSD_CHAIN_SLUG +
+                   "/pools/" + TUSD_POOL_ADDR +
+                   "/ohlcv/week?aggregate=1&limit=" + String(maxCandles) + "&currency=usd&token=base");
+        http.setTimeout(9000);
+        http.addHeader("Accept", "application/json");
+        if (http.GET() != 200) { http.end(); return 0; }
 
         JsonDocument doc;
         DeserializationError err = deserializeJson(doc, http.getStream());
         http.end();
         if (err) return 0;
 
+        JsonArray list = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
+        int total = list.size();
+        if (total > maxCandles) total = maxCandles;
         int count = 0;
-        for (JsonObject row : doc["candles"].as<JsonArray>()) {
-            if (count >= maxCandles) break;
-            outCandles[count].open = row["open_usd"] | 0.0;
-            outCandles[count].high = row["high_usd"] | 0.0;
-            outCandles[count].low = row["low_usd"] | 0.0;
-            outCandles[count].close = row["close_usd"] | 0.0;
+        for (int i = total - 1; i >= 0; i--) {          // reverse → oldest first
+            JsonArrayConst row = list[i];
+            outCandles[count].open  = row[1] | 0.0;
+            outCandles[count].high  = row[2] | 0.0;
+            outCandles[count].low   = row[3] | 0.0;
+            outCandles[count].close = row[4] | 0.0;
             count++;
         }
         return count;

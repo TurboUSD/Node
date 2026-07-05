@@ -26,6 +26,15 @@
 #include "config.h"
 #include "storage.h"
 #include "ui/shared_components.h"
+// LVGL bundles lodepng (compiled as C when LV_USE_PNG=1). We use exactly one
+// function from it — declared here directly instead of including lodepng.h,
+// because that header conflicts with extern "C" (it exposes its own C++
+// std::vector overloads when __cplusplus is set). Decodes token logos ONCE in
+// the bg task; the LVGL png decoder itself is not registered (per-frame
+// decoding is too slow for the RGB panel). Output buffer is allocated with
+// lv_mem_alloc → free it with lv_mem_free.
+extern "C" unsigned lodepng_decode32(unsigned char** out, unsigned* w, unsigned* h,
+                                     const unsigned char* in, size_t insize);
 
 // ── Brand colours (match web palette) ─────────────────────────────────────────
 #define CLR_GREEN    0x43e397
@@ -56,11 +65,27 @@ struct TickerEntry {
     float price_usd        = 0.0f;
     float change_24h       = 0.0f;   // percent
     float fdv              = 0.0f;
+    // Full OHLC per hourly bar so the expanded card can draw real candles
+    // (wick = low→high, body = open→close, green/red by direction).
+    float chart_open [CHART_BARS] = {};
+    float chart_high [CHART_BARS] = {};
+    float chart_low  [CHART_BARS] = {};
     float chart_closes[CHART_BARS] = {};
     int   chart_count      = 0;
     bool  live_loaded      = false;
     bool  chart_loaded     = false;
     bool  is_expanded      = false;
+
+    // Token logo (from DexScreener pair info.imageUrl), downloaded + decoded
+    // once in the bg task into a ready-to-blit 40×40 TRUE_COLOR_ALPHA bitmap.
+    // logo_px lives in PSRAM and is intentionally NEVER freed while running
+    // (entries keep it across list reloads by pool matching; freeing from the
+    // bg task could yank a bitmap LVGL is mid-drawing on the other core).
+    char           logo_url[160]  = {};
+    uint8_t*       logo_px       = nullptr;
+    lv_img_dsc_t   logo_dsc      = {};
+    volatile bool  logo_ready    = false;  // bg task → UI: bitmap is complete
+    bool           logo_applied  = false;  // UI: lv_img already created on card
 };
 
 struct SearchResultEntry {
@@ -75,7 +100,7 @@ struct SearchResultEntry {
 };
 
 // ── Async task payloads ────────────────────────────────────────────────────────
-enum TickerTaskType { TT_LOAD_LIST, TT_LOAD_LIVE, TT_LOAD_CHART, TT_SEARCH, TT_ADD, TT_REMOVE };
+enum TickerTaskType { TT_LOAD_LIST, TT_LOAD_LIVE, TT_LOAD_CHART, TT_SEARCH, TT_ADD, TT_REMOVE, TT_REORDER };
 
 struct TickerTaskPayload {
     TickerTaskType type;
@@ -84,6 +109,8 @@ struct TickerTaskPayload {
     char query[64];              // for TT_SEARCH
     SearchResultEntry to_add;    // for TT_ADD
     char pool_to_remove[68];     // for TT_REMOVE
+    char pools_ordered[TICKER_MAX][68]; // for TT_REORDER: pool addresses in new display order
+    int  pools_count = 0;               // for TT_REORDER
 };
 
 // ── Utility ────────────────────────────────────────────────────────────────────
@@ -100,6 +127,15 @@ static void fmtPrice(char* buf, size_t sz, float v) {
     else if (v < 0.1f)     snprintf(buf, sz, "$%.4f",  v);
     else if (v < 10.0f)    snprintf(buf, sz, "$%.3f",  v);
     else                   snprintf(buf, sz, "$%.2f",  v);
+}
+
+// Compact liquidity: "$850k", "$12M", "$1.2B" — no decimals under 1B (the
+// search rows are narrow; this is a magnitude cue, not an exact figure).
+static void fmtLiq(char* buf, size_t sz, float v) {
+    if      (v >= 1e9f) snprintf(buf, sz, "$%.1fB", v / 1e9f);
+    else if (v >= 1e6f) snprintf(buf, sz, "$%.0fM", v / 1e6f);
+    else if (v >= 1e3f) snprintf(buf, sz, "$%.0fk", v / 1e3f);
+    else                snprintf(buf, sz, "$%.0f",  v);
 }
 
 // GeckoTerminal network slug from DexScreener chain ID
@@ -168,6 +204,22 @@ public:
         lv_obj_set_style_text_color(addLbl, lv_color_hex(CLR_GREEN), 0);
         lv_obj_center(addLbl);
 
+        // Gear button → toggles edit mode (reorder ▲▼ + delete on each card).
+        _editBtn = lv_btn_create(_titleRow);
+        lv_obj_set_size(_editBtn, 30, 22);
+        lv_obj_set_style_bg_color(_editBtn, lv_color_hex(CLR_SURFACE), 0);
+        lv_obj_set_style_border_color(_editBtn, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_border_width(_editBtn, 1, 0);
+        lv_obj_set_style_radius(_editBtn, 6, 0);
+        lv_obj_set_style_pad_all(_editBtn, 2, 0);
+        lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, -60, 0);
+        lv_obj_add_event_cb(_editBtn, _onEditBtnTapped, LV_EVENT_CLICKED, this);
+        _editBtnLabel = lv_label_create(_editBtn);
+        lv_label_set_text(_editBtnLabel, LV_SYMBOL_SETTINGS);
+        lv_obj_set_style_text_font(_editBtnLabel, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(_editBtnLabel, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_center(_editBtnLabel);
+
         // Placeholder shown when no tickers are loaded yet
         _emptyLabel = lv_label_create(_body);
         lv_label_set_text(_emptyLabel, "");
@@ -212,10 +264,22 @@ private:
     lv_obj_t*        _body        = nullptr;
     lv_obj_t*        _titleRow    = nullptr;
     lv_obj_t*        _addBtn      = nullptr;
+    lv_obj_t*        _editBtn     = nullptr;
+    lv_obj_t*        _editBtnLabel= nullptr;
     lv_obj_t*        _emptyLabel  = nullptr;
     lv_obj_t*        _spinner     = nullptr;
     void*            _userData    = nullptr;
     char             _nodeCode[8] = {};
+    bool             _editMode    = false;
+
+    // Card mutations (expand/collapse/delete/reorder) must NOT rebuild the
+    // card tree from inside an LVGL event callback — lv_obj_del()'ing the
+    // object that is currently dispatching the event corrupts LVGL's event
+    // list (use-after-free → later crash). Callbacks set these flags instead;
+    // pollPending (an lv_timer, safe context) performs the work.
+    volatile bool    _rebuildRequested = false;
+    volatile int     _chartLoadRequestIdx = -1;
+    volatile bool    _listReloadRequested = false;  // retried until the worker is free
 
     TickerEntry      _tickers[TICKER_MAX];
     int              _tickerCount = 0;
@@ -223,6 +287,8 @@ private:
     // Per-ticker card widgets (rebuilt whenever list changes)
     struct CardWidgets {
         lv_obj_t* container      = nullptr;
+        lv_obj_t* symBg          = nullptr;   // logo circle (letter fallback inside)
+        lv_obj_t* logoImg        = nullptr;   // token logo image (once downloaded)
         lv_obj_t* symbolLabel    = nullptr;   // compact: symbol text block
         lv_obj_t* nameLabel      = nullptr;   // compact
         lv_obj_t* fdvLabel       = nullptr;   // compact
@@ -232,6 +298,8 @@ private:
         lv_obj_t* priceLabel     = nullptr;   // expanded
         lv_obj_t* removeBtn      = nullptr;
         lv_chart_series_t* series = nullptr;
+        float chartMin           = 0.0f;      // candle scaling for the draw cb
+        float chartRange         = 1.0f;
     };
     CardWidgets _cards[TICKER_MAX];
 
@@ -261,12 +329,15 @@ private:
     // ── Card building ─────────────────────────────────────────────────────────
 
     void _rebuildTickerCards() {
-        // Delete all existing ticker card objects
+        // Delete all existing ticker card objects.
+        // NOTE: only ever called from timer/init context (pollPending, onShow),
+        // never from inside a card's own event callback — see _rebuildRequested.
         for (int i = 0; i < TICKER_MAX; i++) {
             if (_cards[i].container) {
                 lv_obj_del(_cards[i].container);
-                _cards[i] = {};
             }
+            _cards[i] = {};
+            _tickers[i].logo_applied = false;   // cards are new → re-attach logos
         }
 
         bool hasAny = (_tickerCount > 0);
@@ -317,44 +388,76 @@ private:
         }
     }
 
-    void _buildCompactCard(int idx) {
+    // Shared: builds the 40×40 round logo holder (letter fallback inside) as a
+    // flex child of `parent`, stores refs in the card, and overlays the real
+    // token logo if it's already downloaded.
+    void _buildSymCircle(int idx, lv_obj_t* parent) {
         TickerEntry& t = _tickers[idx];
         CardWidgets& w = _cards[idx];
-        lv_coord_t innerW = SCREEN_WIDTH - 24 - 20;  // body padding + card padding
 
-        // Symbol circle (colored background pill)
-        lv_obj_t* symBg = lv_obj_create(w.container);
-        lv_obj_set_size(symBg, 40, 40);
-        lv_obj_set_style_bg_color(symBg, lv_color_hex(CLR_SURFACE), 0);
-        lv_obj_set_style_border_color(symBg, lv_color_hex(CLR_BORDER), 0);
-        lv_obj_set_style_border_width(symBg, 1, 0);
-        lv_obj_set_style_radius(symBg, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_pad_all(symBg, 0, 0);
-        lv_obj_align(symBg, LV_ALIGN_LEFT_MID, 0, 0);
-        lv_obj_clear_flag(symBg, LV_OBJ_FLAG_SCROLLABLE);
+        w.symBg = lv_obj_create(parent);
+        lv_obj_set_size(w.symBg, 40, 40);
+        lv_obj_set_style_bg_color(w.symBg, lv_color_hex(CLR_SURFACE), 0);
+        lv_obj_set_style_border_color(w.symBg, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_border_width(w.symBg, 1, 0);
+        lv_obj_set_style_radius(w.symBg, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_clip_corner(w.symBg, true, 0);   // clip the logo round
+        lv_obj_set_style_pad_all(w.symBg, 0, 0);
+        lv_obj_clear_flag(w.symBg, LV_OBJ_FLAG_SCROLLABLE);
 
-        w.symbolLabel = lv_label_create(symBg);
+        w.symbolLabel = lv_label_create(w.symBg);
         lv_label_set_text(w.symbolLabel, t.base_symbol[0] ? t.base_symbol : "?");
         lv_obj_set_style_text_font(w.symbolLabel, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(w.symbolLabel, lv_color_hex(CLR_TEXT), 0);
         lv_obj_center(w.symbolLabel);
 
-        // Name + meta (left, next to symbol)
+        _applyLogoIfReady(idx);
+    }
+
+    // Creates the lv_img for a downloaded logo (40×40 bitmap in te.logo_dsc).
+    void _applyLogoIfReady(int idx) {
+        TickerEntry& t = _tickers[idx];
+        CardWidgets& w = _cards[idx];
+        if (!t.logo_ready || t.logo_applied || !w.symBg) return;
+        w.logoImg = lv_img_create(w.symBg);
+        lv_img_set_src(w.logoImg, &t.logo_dsc);
+        lv_obj_center(w.logoImg);
+        if (w.symbolLabel) lv_obj_add_flag(w.symbolLabel, LV_OBJ_FLAG_HIDDEN);
+        t.logo_applied = true;
+    }
+
+    void _buildCompactCard(int idx) {
+        TickerEntry& t = _tickers[idx];
+        CardWidgets& w = _cards[idx];
+
+        // Flex ROW with cross-axis CENTER: logo circle | name+meta (grows) |
+        // sparkline (or edit-mode buttons). Flex vertically centers every
+        // child against the tallest one — the old manual lv_obj_align_to()
+        // approach computed positions from pre-layout coordinates, which left
+        // the text block off-center and overflowing the card.
+        lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(w.container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(w.container, 8, 0);
+
+        _buildSymCircle(idx, w.container);
+
+        // Name + meta column — flex-grow eats the width between logo & chart.
         lv_obj_t* textCol = lv_obj_create(w.container);
-        lv_obj_set_size(textCol, innerW - 40 - 70 - 16, LV_SIZE_CONTENT);
+        lv_obj_set_height(textCol, LV_SIZE_CONTENT);
+        lv_obj_set_flex_grow(textCol, 1);
         lv_obj_set_style_bg_opa(textCol, LV_OPA_0, 0);
         lv_obj_set_style_border_width(textCol, 0, 0);
         lv_obj_set_style_pad_all(textCol, 0, 0);
         lv_obj_set_flex_flow(textCol, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(textCol, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-        lv_obj_align_to(textCol, symBg, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+        lv_obj_clear_flag(textCol, LV_OBJ_FLAG_SCROLLABLE);
 
         w.nameLabel = lv_label_create(textCol);
         lv_label_set_text(w.nameLabel, t.base_name);
         lv_obj_set_style_text_font(w.nameLabel, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(w.nameLabel, lv_color_hex(CLR_TEXT), 0);
-        lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_width(w.nameLabel, innerW - 40 - 70 - 16);
+        lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(w.nameLabel, LV_PCT(100));
 
         // Symbol · FDV · change% on second line
         lv_obj_t* metaRow = lv_obj_create(textCol);
@@ -385,65 +488,88 @@ private:
         _updateChangeLabel(idx);
         lv_obj_set_style_text_font(w.changeLabel, &lv_font_montserrat_10, 0);
 
-        // Mini sparkline chart (right side, 70px wide)
-        w.chart = lv_chart_create(w.container);
-        lv_obj_set_size(w.chart, 70, 36);
-        lv_obj_align(w.chart, LV_ALIGN_RIGHT_MID, 0, 0);
-        lv_chart_set_type(w.chart, LV_CHART_TYPE_LINE);
-        lv_chart_set_point_count(w.chart, CHART_BARS);
-        lv_obj_set_style_bg_opa(w.chart, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(w.chart, 0, 0);
-        lv_obj_set_style_size(w.chart, 0, LV_PART_INDICATOR);
-        lv_chart_set_div_line_count(w.chart, 0, 0);
+        if (_editMode) {
+            // Edit mode: ▲ / ▼ reorder + red delete, in place of the sparkline.
+            _makeCardActionBtn(w.container, LV_SYMBOL_UP,    CLR_TEXT, idx, _onMoveUpTapped);
+            _makeCardActionBtn(w.container, LV_SYMBOL_DOWN,  CLR_TEXT, idx, _onMoveDownTapped);
+            _makeCardActionBtn(w.container, LV_SYMBOL_TRASH, CLR_RED,  idx, _onDeleteTapped);
+        } else {
+            // Mini sparkline chart (right side, 70px wide)
+            w.chart = lv_chart_create(w.container);
+            lv_obj_set_size(w.chart, 70, 36);
+            lv_chart_set_type(w.chart, LV_CHART_TYPE_LINE);
+            lv_chart_set_point_count(w.chart, CHART_BARS);
+            lv_obj_set_style_bg_opa(w.chart, LV_OPA_0, 0);
+            lv_obj_set_style_border_width(w.chart, 0, 0);
+            lv_obj_set_style_size(w.chart, 0, LV_PART_INDICATOR);
+            lv_chart_set_div_line_count(w.chart, 0, 0);
 
-        bool up = (t.change_24h >= 0);
-        lv_color_t lineCol = lv_color_hex(up ? CLR_GREEN : CLR_RED);
-        w.series = lv_chart_add_series(w.chart, lineCol, LV_CHART_AXIS_PRIMARY_Y);
-        _updateChartData(idx);
+            bool up = (t.change_24h >= 0);
+            lv_color_t lineCol = lv_color_hex(up ? CLR_GREEN : CLR_RED);
+            w.series = lv_chart_add_series(w.chart, lineCol, LV_CHART_AXIS_PRIMARY_Y);
+            _updateChartData(idx);
+        }
+    }
+
+    // Small square icon button used by edit mode (reorder/delete).
+    lv_obj_t* _makeCardActionBtn(lv_obj_t* parent, const char* symbol, uint32_t color,
+                                 int idx, lv_event_cb_t cb) {
+        lv_obj_t* btn = lv_btn_create(parent);
+        lv_obj_set_size(btn, 32, 32);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_SURFACE), 0);
+        lv_obj_set_style_border_color(btn, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_border_width(btn, 1, 0);
+        lv_obj_set_style_radius(btn, 6, 0);
+        lv_obj_set_style_pad_all(btn, 0, 0);
+        lv_obj_set_user_data(btn, (void*)(intptr_t)idx);
+        lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, this);
+        lv_obj_t* lbl = lv_label_create(btn);
+        lv_label_set_text(lbl, symbol);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(color), 0);
+        lv_obj_center(lbl);
+        return btn;
     }
 
     void _buildExpandedCard(int idx) {
         TickerEntry& t = _tickers[idx];
         CardWidgets& w = _cards[idx];
 
-        // ── Row 1: symbol circle + name + chain + remove button ──
+        // Flex COLUMN: topRow / priceRow / candle chart. (Manual align_to on
+        // pre-layout coordinates was what pushed content outside the card.)
+        lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(w.container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_row(w.container, 4, 0);
+
+        // ── Row 1: logo circle + name + pair + collapse button ──
         lv_obj_t* topRow = lv_obj_create(w.container);
         lv_obj_set_size(topRow, LV_PCT(100), 44);
         lv_obj_set_style_bg_opa(topRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(topRow, 0, 0);
         lv_obj_set_style_pad_all(topRow, 0, 0);
-        lv_obj_align(topRow, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_set_style_pad_column(topRow, 8, 0);
+        lv_obj_set_flex_flow(topRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(topRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(topRow, LV_OBJ_FLAG_SCROLLABLE);
 
-        lv_obj_t* symBg = lv_obj_create(topRow);
-        lv_obj_set_size(symBg, 40, 40);
-        lv_obj_set_style_bg_color(symBg, lv_color_hex(CLR_SURFACE), 0);
-        lv_obj_set_style_border_color(symBg, lv_color_hex(CLR_BORDER), 0);
-        lv_obj_set_style_border_width(symBg, 1, 0);
-        lv_obj_set_style_radius(symBg, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_pad_all(symBg, 0, 0);
-        lv_obj_align(symBg, LV_ALIGN_LEFT_MID, 0, 0);
-
-        w.symbolLabel = lv_label_create(symBg);
-        lv_label_set_text(w.symbolLabel, t.base_symbol);
-        lv_obj_set_style_text_font(w.symbolLabel, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(w.symbolLabel, lv_color_hex(CLR_TEXT), 0);
-        lv_obj_center(w.symbolLabel);
+        _buildSymCircle(idx, topRow);
 
         lv_obj_t* nameCol = lv_obj_create(topRow);
-        lv_obj_set_size(nameCol, 280, LV_SIZE_CONTENT);
+        lv_obj_set_height(nameCol, LV_SIZE_CONTENT);
+        lv_obj_set_flex_grow(nameCol, 1);
         lv_obj_set_style_bg_opa(nameCol, LV_OPA_0, 0);
         lv_obj_set_style_border_width(nameCol, 0, 0);
         lv_obj_set_style_pad_all(nameCol, 0, 0);
         lv_obj_set_flex_flow(nameCol, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(nameCol, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-        lv_obj_align_to(nameCol, symBg, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+        lv_obj_clear_flag(nameCol, LV_OBJ_FLAG_SCROLLABLE);
 
         w.nameLabel = lv_label_create(nameCol);
         lv_label_set_text(w.nameLabel, t.base_name);
         lv_obj_set_style_text_font(w.nameLabel, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(w.nameLabel, lv_color_hex(CLR_TEXT), 0);
-        lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(w.nameLabel, 260);
+        lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(w.nameLabel, LV_PCT(100));
 
         lv_obj_t* chainLbl = lv_label_create(nameCol);
         char chainBuf[32];
@@ -452,7 +578,8 @@ private:
         lv_obj_set_style_text_font(chainLbl, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(chainLbl, lv_color_hex(CLR_MUTED), 0);
 
-        // Remove button (top-right)
+        // Collapse button (top-right). Deleting/reordering lives in edit mode
+        // (gear button in the title row) — the X here ONLY collapses the card.
         w.removeBtn = lv_btn_create(topRow);
         lv_obj_set_size(w.removeBtn, 26, 26);
         lv_obj_set_style_bg_color(w.removeBtn, lv_color_hex(CLR_SURFACE), 0);
@@ -460,9 +587,8 @@ private:
         lv_obj_set_style_border_width(w.removeBtn, 1, 0);
         lv_obj_set_style_radius(w.removeBtn, 6, 0);
         lv_obj_set_style_pad_all(w.removeBtn, 0, 0);
-        lv_obj_align(w.removeBtn, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_obj_set_user_data(w.removeBtn, (void*)(intptr_t)idx);
-        lv_obj_add_event_cb(w.removeBtn, _onRemoveTapped, LV_EVENT_CLICKED, this);
+        lv_obj_add_event_cb(w.removeBtn, _onCollapseTapped, LV_EVENT_CLICKED, this);
         lv_obj_t* xLbl = lv_label_create(w.removeBtn);
         lv_label_set_text(xLbl, LV_SYMBOL_CLOSE);
         lv_obj_set_style_text_font(xLbl, &lv_font_montserrat_10, 0);
@@ -471,14 +597,14 @@ private:
 
         // ── Row 2: FDV (big) + price (small) + change ──
         lv_obj_t* priceRow = lv_obj_create(w.container);
-        lv_obj_set_size(priceRow, LV_PCT(100), 38);
+        lv_obj_set_size(priceRow, LV_PCT(100), 30);
         lv_obj_set_style_bg_opa(priceRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(priceRow, 0, 0);
         lv_obj_set_style_pad_all(priceRow, 0, 0);
-        lv_obj_align_to(priceRow, topRow, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 6);
         lv_obj_set_flex_flow(priceRow, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(priceRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
         lv_obj_set_style_pad_column(priceRow, 12, 0);
+        lv_obj_clear_flag(priceRow, LV_OBJ_FLAG_SCROLLABLE);
 
         w.fdvLabel = lv_label_create(priceRow);
         _updateFdvLabel(idx);
@@ -494,20 +620,86 @@ private:
         _updateChangeLabel(idx);
         lv_obj_set_style_text_font(w.changeLabel, &lv_font_montserrat_12, 0);
 
-        // ── OHLCV chart (bar chart for candle feel) ──
+        // ── Real candlestick price chart ──
+        // Same one-series + draw-callback technique as the Turbo screen's
+        // weekly chart: the BAR series carries each candle's HIGH; the
+        // callback reshapes the bar into a thin grey wick (low→high) in
+        // DRAW_PART_BEGIN and paints the open→close body (green/red) on top
+        // in DRAW_PART_END. Plain vertical bars of the close told nothing.
         w.chart = lv_chart_create(w.container);
-        lv_obj_set_size(w.chart, LV_PCT(100), 80);
-        lv_obj_align_to(w.chart, priceRow, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 6);
+        lv_obj_set_size(w.chart, LV_PCT(100), 84);
         lv_chart_set_type(w.chart, LV_CHART_TYPE_BAR);
         lv_chart_set_point_count(w.chart, CHART_BARS);
+        lv_chart_set_range(w.chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
         lv_obj_set_style_bg_opa(w.chart, LV_OPA_0, 0);
         lv_obj_set_style_border_width(w.chart, 0, 0);
-        lv_chart_set_div_line_count(w.chart, 3, 0);
+        lv_chart_set_div_line_count(w.chart, 3, 0);   // vdiv MUST be 0 or >= 2 (LVGL div-by-zero)
         lv_obj_set_style_line_color(w.chart, lv_color_hex(CLR_BORDER), LV_PART_MAIN);
+        lv_obj_set_user_data(w.chart, (void*)(intptr_t)idx);
+        lv_obj_add_event_cb(w.chart, _candleDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
+        lv_obj_add_event_cb(w.chart, _candleDrawCb, LV_EVENT_DRAW_PART_END,   this);
 
-        bool up = (t.change_24h >= 0);
-        w.series = lv_chart_add_series(w.chart, lv_color_hex(up ? CLR_GREEN : CLR_RED), LV_CHART_AXIS_PRIMARY_Y);
+        w.series = lv_chart_add_series(w.chart, lv_color_hex(CLR_GREEN), LV_CHART_AXIS_PRIMARY_Y);
         _updateChartData(idx);
+    }
+
+    // Candlestick renderer for the expanded card chart (see comment above).
+    static void _candleDrawCb(lv_event_t* e) {
+        auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+        lv_obj_t* chart = lv_event_get_current_target(e);
+        if (!self || !chart) return;
+        int idx = (int)(intptr_t)lv_obj_get_user_data(chart);
+        if (idx < 0 || idx >= self->_tickerCount) return;
+        TickerEntry& t = self->_tickers[idx];
+        CardWidgets& w = self->_cards[idx];
+        if (!t.chart_loaded || t.chart_count == 0) return;
+
+        lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
+        if (dsc->part != LV_PART_ITEMS) return;
+        uint32_t i = dsc->id;
+        if (i >= (uint32_t)t.chart_count) return;
+        if (!dsc->draw_area) return;
+
+        lv_area_t ca;
+        lv_obj_get_content_coords(chart, &ca);
+        lv_coord_t chartH = ca.y2 - ca.y1;
+        if (chartH <= 0) return;
+
+        float range = w.chartRange > 1e-12f ? w.chartRange : 1.0f;
+        auto scaleY = [&](float v) -> lv_coord_t {
+            float s = ((v - w.chartMin) / range) * 1000.0f;
+            if (s < 0) s = 0; if (s > 1000) s = 1000;
+            return ca.y2 - (lv_coord_t)((int32_t)s * chartH / 1000);
+        };
+
+        if (lv_event_get_code(e) == LV_EVENT_DRAW_PART_BEGIN) {
+            if (!dsc->rect_dsc) return;
+            // Wick: thin grey bar from low to high.
+            dsc->rect_dsc->bg_color     = lv_color_hex(0x6a6a6e);
+            dsc->rect_dsc->border_width = 0;
+            dsc->rect_dsc->radius       = 0;
+            dsc->draw_area->y2 = scaleY(t.chart_low[i]);
+            lv_coord_t cx = (dsc->draw_area->x1 + dsc->draw_area->x2) / 2;
+            dsc->draw_area->x1 = cx;
+            dsc->draw_area->x2 = cx + 1;
+        } else {
+            // Body: colored open→close rect over the wick.
+            bool isUp = t.chart_closes[i] >= t.chart_open[i];
+            lv_coord_t yO = scaleY(t.chart_open[i]);
+            lv_coord_t yC = scaleY(t.chart_closes[i]);
+            lv_coord_t top = LV_MIN(yO, yC), bot = LV_MAX(yO, yC);
+            if (bot <= top) bot = top + 1;
+            lv_coord_t cx = (dsc->draw_area->x1 + dsc->draw_area->x2) / 2;
+            lv_area_t body = { (lv_coord_t)(cx - 3), top, (lv_coord_t)(cx + 3), bot };
+            if (body.x1 < ca.x1) body.x1 = ca.x1;
+            if (body.x2 > ca.x2) body.x2 = ca.x2;
+            lv_draw_rect_dsc_t d;
+            lv_draw_rect_dsc_init(&d);
+            d.bg_color = lv_color_hex(isUp ? CLR_GREEN : CLR_RED);
+            d.bg_opa   = LV_OPA_COVER;
+            d.radius   = 0;
+            lv_draw_rect(dsc->draw_ctx, &d, &body);
+        }
     }
 
     // ── Live data label helpers ────────────────────────────────────────────────
@@ -556,8 +748,23 @@ private:
             // Fill with sentinel (no data)
             for (int i = 0; i < CHART_BARS; i++)
                 w.series->y_points[i] = LV_CHART_POINT_NONE;
+        } else if (t.is_expanded) {
+            // Candles: scale over the full LOW..HIGH span; the bar carries the
+            // HIGH (wick top) and _candleDrawCb draws wick + body from OHLC.
+            float minV = t.chart_low[0], maxV = t.chart_high[0];
+            for (int i = 1; i < t.chart_count; i++) {
+                if (t.chart_low[i]  < minV) minV = t.chart_low[i];
+                if (t.chart_high[i] > maxV) maxV = t.chart_high[i];
+            }
+            w.chartMin   = minV;
+            w.chartRange = (maxV - minV) < 1e-12f ? 1.0f : (maxV - minV);
+            lv_chart_set_range(w.chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
+            for (int i = 0; i < t.chart_count; i++)
+                w.series->y_points[i] = (lv_coord_t)(((t.chart_high[i] - minV) / w.chartRange) * 1000.0f);
+            for (int i = t.chart_count; i < CHART_BARS; i++)
+                w.series->y_points[i] = LV_CHART_POINT_NONE;
         } else {
-            // Scale to lv_coord_t
+            // Compact sparkline: line of closes.
             float minV = t.chart_closes[0], maxV = t.chart_closes[0];
             for (int i = 1; i < t.chart_count; i++) {
                 if (t.chart_closes[i] < minV) minV = t.chart_closes[i];
@@ -713,6 +920,16 @@ private:
             lv_obj_set_style_text_font(priceLbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(priceLbl, lv_color_hex(CLR_GREEN), 0);
             lv_obj_align(priceLbl, LV_ALIGN_RIGHT_MID, 0, 0);
+
+            // Pair liquidity left of the price ("$850k" / "$12M") — the main
+            // signal for picking the right pool among same-symbol results.
+            lv_obj_t* liqLbl = lv_label_create(row);
+            char liqBuf[16];
+            fmtLiq(liqBuf, sizeof(liqBuf), r.liquidity_usd);
+            lv_label_set_text(liqLbl, liqBuf);
+            lv_obj_set_style_text_font(liqLbl, &lv_font_montserrat_10, 0);
+            lv_obj_set_style_text_color(liqLbl, lv_color_hex(CLR_MUTED), 0);
+            lv_obj_align(liqLbl, LV_ALIGN_RIGHT_MID, -78, 0);
         }
     }
 
@@ -763,6 +980,20 @@ private:
         xTaskCreatePinnedToCore(_bgTaskFn, "ticker_add", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
     }
 
+    // Persists the current on-screen order to the backend (fire-and-forget:
+    // if the worker is busy or the function isn't deployed, the order still
+    // applies locally until the next list reload).
+    void _dispatchReorder() {
+        if (_bgTask) return;   // worker busy — see note in _dispatchTask
+        TickerTaskPayload* payload = new TickerTaskPayload();
+        payload->type = TT_REORDER;
+        strncpy(payload->node_code, _nodeCode, sizeof(payload->node_code) - 1);
+        payload->pools_count = _tickerCount;
+        for (int i = 0; i < _tickerCount && i < TICKER_MAX; i++)
+            strncpy(payload->pools_ordered[i], _tickers[i].pool_address, sizeof(payload->pools_ordered[i]) - 1);
+        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_ord", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
+    }
+
     void _dispatchRemove(int tickerIdx) {
         if (_bgTask) return;   // worker busy — see note in _dispatchTask
         TickerTaskPayload* payload = new TickerTaskPayload();
@@ -800,6 +1031,20 @@ private:
                 http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
                 int code = http.GET();
                 if (code == 200) {
+                    // Snapshot old logo bitmaps by pool address so a list
+                    // reload doesn't re-download (or leak) already-decoded
+                    // logos. (Bitmaps are never freed here — LVGL on the
+                    // other core may be mid-draw with one.)
+                    struct { char pool[68]; uint8_t* px; lv_img_dsc_t dsc; bool ready; } oldLogos[TICKER_MAX];
+                    int oldCount = self->_tickerCount;
+                    for (int i = 0; i < oldCount; i++) {
+                        strncpy(oldLogos[i].pool, self->_tickers[i].pool_address, sizeof(oldLogos[i].pool)-1);
+                        oldLogos[i].pool[sizeof(oldLogos[i].pool)-1] = 0;
+                        oldLogos[i].px    = self->_tickers[i].logo_px;
+                        oldLogos[i].dsc   = self->_tickers[i].logo_dsc;
+                        oldLogos[i].ready = self->_tickers[i].logo_ready;
+                    }
+
                     JsonDocument doc;
                     deserializeJson(doc, http.getStream());
                     JsonArray arr = doc.as<JsonArray>();
@@ -813,6 +1058,16 @@ private:
                         strncpy(te.base_symbol,  obj["base_symbol"]  | "",  sizeof(te.base_symbol)-1);
                         strncpy(te.base_name,    obj["base_name"]    | "",  sizeof(te.base_name)-1);
                         strncpy(te.quote_symbol, obj["quote_symbol"] | "USD", sizeof(te.quote_symbol)-1);
+                        // Re-attach a previously downloaded logo for this pool.
+                        for (int j = 0; j < oldCount; j++) {
+                            if (oldLogos[j].ready && oldLogos[j].px &&
+                                strcasecmp(oldLogos[j].pool, te.pool_address) == 0) {
+                                te.logo_px    = oldLogos[j].px;
+                                te.logo_dsc   = oldLogos[j].dsc;
+                                te.logo_ready = true;
+                                break;
+                            }
+                        }
                         n++;
                     }
                     self->_tickerCount = n;
@@ -847,10 +1102,15 @@ private:
                     deserializeJson(doc, http.getStream());
                     JsonArray ohlcv = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
                     int n = 0;
-                    // ohlcv_list is newest-first; reverse into closes[]
+                    // ohlcv_list rows are [ts, o, h, l, c, v], newest-first →
+                    // reverse into oldest-first OHLC arrays for the candles.
                     int total = min((int)ohlcv.size(), CHART_BARS);
                     for (int i = total - 1; i >= 0 && n < CHART_BARS; i--) {
-                        te.chart_closes[n++] = ohlcv[i][4].as<float>(); // close
+                        te.chart_open  [n] = ohlcv[i][1].as<float>();
+                        te.chart_high  [n] = ohlcv[i][2].as<float>();
+                        te.chart_low   [n] = ohlcv[i][3].as<float>();
+                        te.chart_closes[n] = ohlcv[i][4].as<float>();
+                        n++;
                     }
                     te.chart_count  = n;
                     te.chart_loaded = true;
@@ -1006,6 +1266,22 @@ private:
                 break;
             }
 
+            case TT_REORDER: {
+                HTTPClient http;
+                http.begin(ENDPOINT_REORDER_TICKERS);
+                http.addHeader("Content-Type", "application/json");
+                http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+                JsonDocument req;
+                req["node_code"] = p->node_code;
+                JsonArray pools = req["pool_addresses"].to<JsonArray>();
+                for (int i = 0; i < p->pools_count; i++) pools.add(p->pools_ordered[i]);
+                String body;
+                serializeJson(req, body);
+                http.POST(body);   // best-effort; no UI feedback needed
+                http.end();
+                break;
+            }
+
             case TT_REMOVE: {
                 HTTPClient http;
                 http.begin(ENDPOINT_REMOVE_TICKER);
@@ -1047,12 +1323,89 @@ private:
                 te.price_usd  = atof(pair["priceUsd"] | "0");
                 te.change_24h = pair["priceChange"]["h24"] | 0.0f;
                 te.fdv        = pair["fdv"] | 0.0f;
+                strncpy(te.logo_url, pair["info"]["imageUrl"] | "", sizeof(te.logo_url)-1);
                 te.live_loaded = true;
                 self->_pending.type        = PR_LIVE_LOADED;
                 self->_pending.tickerIndex = idx;
             }
         }
         http.end();
+
+        // Token logo: download + decode once (skipped if already have it).
+        if (te.logo_url[0] && !te.logo_ready) _fetchLogo(self, idx);
+    }
+
+    // Downloads the token logo PNG (DexScreener info.imageUrl), decodes it
+    // with LVGL's bundled lodepng, and downscales to a ready-to-blit 40×40
+    // LV_IMG_CF_TRUE_COLOR_ALPHA bitmap. Doing the decode+scale ONCE here in
+    // the bg task (instead of registering the LVGL PNG decoder) means zero
+    // per-frame decode cost on the RGB panel and a tiny fixed footprint
+    // (40×40×3 B ≈ 4.7 KB per ticker). Runs on core 0; hands the finished
+    // bitmap to the UI via te.logo_ready (applied by pollPending on core 1).
+    static void _fetchLogo(TickerScreen* self, int idx) {
+        TickerEntry& te = self->_tickers[idx];
+
+        HTTPClient http;
+        http.useHTTP10(true);
+        http.begin(String(te.logo_url));
+        http.setTimeout(9000);
+        if (http.GET() != 200) { http.end(); return; }
+
+        // Read the PNG body (Content-Length if present, else until close).
+        const size_t PNG_CAP = 200 * 1024;
+        int declared = http.getSize();
+        if (declared > (int)PNG_CAP) { http.end(); return; }
+        uint8_t* png = (uint8_t*)malloc(declared > 0 ? declared : PNG_CAP);
+        if (!png) { http.end(); return; }
+        size_t pngLen = 0;
+        WiFiClient* s = http.getStreamPtr();
+        uint32_t lastData = millis();
+        while ((http.connected() || s->available()) && millis() - lastData < 5000) {
+            size_t avail = s->available();
+            if (!avail) { delay(5); continue; }
+            size_t cap = (declared > 0 ? (size_t)declared : PNG_CAP) - pngLen;
+            if (!cap) break;
+            int got = s->readBytes(png + pngLen, min(avail, cap));
+            if (got > 0) { pngLen += got; lastData = millis(); }
+            if (declared > 0 && pngLen >= (size_t)declared) break;
+        }
+        http.end();
+        if (pngLen < 8) { free(png); return; }
+
+        unsigned char* rgba = nullptr;
+        unsigned iw = 0, ih = 0;
+        unsigned rc = lodepng_decode32(&rgba, &iw, &ih, png, pngLen);
+        free(png);
+        if (rc != 0 || !rgba || iw == 0 || ih == 0) { if (rgba) lv_mem_free(rgba); return; }
+
+        // Nearest-neighbour downscale to 40×40, RGBA8888 → RGB565+A8 (LVGL
+        // TRUE_COLOR_ALPHA at LV_COLOR_DEPTH 16: [lo, hi, alpha] per pixel).
+        const int W = 40, H = 40;
+        uint8_t* px = (uint8_t*)heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!px) px = (uint8_t*)malloc(W * H * 3);
+        if (!px) { lv_mem_free(rgba); return; }
+        for (int y = 0; y < H; y++) {
+            unsigned sy = (unsigned)((uint64_t)y * ih / H);
+            for (int x = 0; x < W; x++) {
+                unsigned sx = (unsigned)((uint64_t)x * iw / W);
+                const unsigned char* sp = &rgba[(sy * iw + sx) * 4];
+                uint16_t c565 = ((sp[0] & 0xF8) << 8) | ((sp[1] & 0xFC) << 3) | (sp[2] >> 3);
+                uint8_t* dp = &px[(y * W + x) * 3];
+                dp[0] = c565 & 0xFF;
+                dp[1] = c565 >> 8;
+                dp[2] = sp[3];
+            }
+        }
+        lv_mem_free(rgba);
+
+        te.logo_dsc.header.always_zero = 0;
+        te.logo_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
+        te.logo_dsc.header.w  = W;
+        te.logo_dsc.header.h  = H;
+        te.logo_dsc.data_size = W * H * 3;
+        te.logo_dsc.data      = px;
+        te.logo_px            = px;
+        te.logo_ready         = true;   // pollPending picks this up on core 1
     }
 
     // ── Event callbacks (static, forwarded to instance) ───────────────────────
@@ -1062,27 +1415,71 @@ private:
         if (self) self->_openSearchDialog();
     }
 
+    // NOTE for every callback below: NEVER call _rebuildTickerCards() from
+    // here. These run inside the event dispatch of a widget the rebuild would
+    // lv_obj_del() — deleting the object mid-event corrupts LVGL and crashes
+    // later. They set _rebuildRequested instead; pollPending does the work.
+
     static void _onCardTapped(lv_event_t* e) {
         auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
-        lv_obj_t* obj = lv_event_get_target(e);
+        lv_obj_t* obj = lv_event_get_current_target(e);
         int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
         if (!self || idx < 0 || idx >= self->_tickerCount) return;
+        if (self->_editMode) return;   // taps don't expand while editing
 
-        // Toggle expand
         self->_tickers[idx].is_expanded = !self->_tickers[idx].is_expanded;
-        self->_rebuildTickerCards();
-
-        // If expanding and chart not loaded yet, fetch chart data
         if (self->_tickers[idx].is_expanded && !self->_tickers[idx].chart_loaded) {
-            self->_dispatchTask(TT_LOAD_CHART, idx);
+            self->_chartLoadRequestIdx = idx;   // fetched after the rebuild
         }
+        self->_rebuildRequested = true;
     }
 
-    static void _onRemoveTapped(lv_event_t* e) {
-        // Stop tap from bubbling to _onCardTapped
+    static void _onCollapseTapped(lv_event_t* e) {
+        lv_event_stop_bubbling(e);   // don't also toggle via _onCardTapped
+        auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+        lv_obj_t* obj = lv_event_get_current_target(e);
+        int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
+        if (!self || idx < 0 || idx >= self->_tickerCount) return;
+        self->_tickers[idx].is_expanded = false;
+        self->_rebuildRequested = true;
+    }
+
+    static void _onEditBtnTapped(lv_event_t* e) {
+        auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+        if (!self) return;
+        self->_editMode = !self->_editMode;
+        if (self->_editBtnLabel)
+            lv_obj_set_style_text_color(self->_editBtnLabel,
+                lv_color_hex(self->_editMode ? CLR_GREEN : CLR_MUTED), 0);
+        // Collapse everything when entering edit mode — reordering wants the
+        // uniform compact rows.
+        if (self->_editMode)
+            for (int i = 0; i < self->_tickerCount; i++) self->_tickers[i].is_expanded = false;
+        self->_rebuildRequested = true;
+    }
+
+    static void _onMoveUpTapped(lv_event_t* e)   { _moveTicker(e, -1); }
+    static void _onMoveDownTapped(lv_event_t* e) { _moveTicker(e, +1); }
+
+    static void _moveTicker(lv_event_t* e, int dir) {
         lv_event_stop_bubbling(e);
         auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
-        lv_obj_t* obj = lv_event_get_target(e);
+        lv_obj_t* obj = lv_event_get_current_target(e);
+        int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
+        if (!self || idx < 0 || idx >= self->_tickerCount) return;
+        int to = idx + dir;
+        if (to < 0 || to >= self->_tickerCount) return;
+        TickerEntry tmp = self->_tickers[idx];
+        self->_tickers[idx] = self->_tickers[to];
+        self->_tickers[to]  = tmp;
+        self->_rebuildRequested = true;
+        self->_dispatchReorder();   // persist new display_order (best-effort)
+    }
+
+    static void _onDeleteTapped(lv_event_t* e) {
+        lv_event_stop_bubbling(e);
+        auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+        lv_obj_t* obj = lv_event_get_current_target(e);
         int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
         if (!self || idx < 0 || idx >= self->_tickerCount) return;
         self->_dispatchRemove(idx);
@@ -1090,7 +1487,7 @@ private:
         for (int i = idx; i < self->_tickerCount - 1; i++)
             self->_tickers[i] = self->_tickers[i + 1];
         self->_tickerCount--;
-        self->_rebuildTickerCards();
+        self->_rebuildRequested = true;
     }
 
     static void _onSearchClose(lv_event_t* e) {
@@ -1127,7 +1524,34 @@ private:
 public:
     static void pollPending(lv_timer_t* timer) {
         auto* self = static_cast<TickerScreen*>(timer->user_data);
-        if (!self || self->_pending.type == PR_NONE) return;
+        if (!self) return;
+
+        // Deferred card-tree rebuild (requested by event callbacks — doing it
+        // there would delete the widget that was dispatching the event).
+        if (self->_rebuildRequested) {
+            self->_rebuildRequested = false;
+            self->_rebuildTickerCards();
+            int want = self->_chartLoadRequestIdx;
+            self->_chartLoadRequestIdx = -1;
+            if (want >= 0 && want < self->_tickerCount && !self->_tickers[want].chart_loaded)
+                self->_dispatchTask(TT_LOAD_CHART, want);
+        }
+
+        // Attach any freshly downloaded token logos to their cards.
+        for (int i = 0; i < self->_tickerCount; i++) {
+            if (self->_tickers[i].logo_ready && !self->_tickers[i].logo_applied)
+                self->_applyLogoIfReady(i);
+        }
+
+        // A list reload was requested while the worker was busy (e.g. right
+        // after PR_ADD_DONE, when the ADD task might not have exited yet) —
+        // retry every tick until it can actually be dispatched.
+        if (self->_listReloadRequested && !self->_bgTask) {
+            self->_listReloadRequested = false;
+            self->_dispatchTask(TT_LOAD_LIST);
+        }
+
+        if (self->_pending.type == PR_NONE) return;
 
         PendingResultType type = self->_pending.type;
         int               tidx = self->_pending.tickerIndex;
@@ -1156,8 +1580,10 @@ public:
                 self->_populateSearchResults();
                 break;
             case PR_ADD_DONE:
-                // Reload full list from server to reflect the new ticker
-                self->_dispatchTask(TT_LOAD_LIST);
+                // Reload full list from server to reflect the new ticker.
+                // Via the retry flag: the ADD worker may not have exited yet,
+                // in which case a direct dispatch would be silently dropped.
+                self->_listReloadRequested = true;
                 break;
             case PR_REMOVE_DONE:
                 // List was already updated optimistically in _onRemoveTapped

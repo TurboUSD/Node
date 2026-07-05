@@ -48,7 +48,9 @@ public:
         lv_obj_set_style_pad_bottom(chart, 2, 0);
         lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
         lv_chart_set_point_count(chart, 24);
-        lv_chart_set_div_line_count(chart, 4, 1);
+        // vdiv must be 0 or >= 2 — vdiv_cnt == 1 divide-by-zero panics LVGL 8's
+        // draw_div_lines on first draw (same crash as the Debt screen had).
+        lv_chart_set_div_line_count(chart, 4, 0);
         lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 44);
         projectionSeries = lv_chart_add_series(chart, lv_color_hex(0xff4d4d), LV_CHART_AXIS_PRIMARY_Y);
         lv_obj_add_event_cb(chart, _axisDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);

@@ -22,6 +22,7 @@
 #define ENDPOINT_SEARCH_TOKENS      SUPABASE_FUNCTIONS_BASE_URL "/search-tokens"
 #define ENDPOINT_ADD_TICKER         SUPABASE_FUNCTIONS_BASE_URL "/add-node-ticker"
 #define ENDPOINT_REMOVE_TICKER      SUPABASE_FUNCTIONS_BASE_URL "/remove-node-ticker"
+#define ENDPOINT_REORDER_TICKERS    SUPABASE_FUNCTIONS_BASE_URL "/reorder-node-tickers"
 
 // External price sources (public, CORS-free, no key required)
 #define ENDPOINT_DEXSCREENER_PAIRS  "https://api.dexscreener.com/latest/dex/pairs/"
