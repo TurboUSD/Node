@@ -375,6 +375,9 @@ function SearchRow({ nodeCode, onAdded }: { nodeCode: string; onAdded: () => voi
       const data = await res.json() as { pairs?: Array<{
         pairAddress: string; chainId: string; priceUsd?: string
         liquidity?: { usd?: number }
+        volume?: { h24?: number }
+        priceChange?: { h24?: number }
+        fdv?: number; marketCap?: number
         baseToken?: { symbol?: string; name?: string; address?: string }
         quoteToken?: { symbol?: string }
       }> }
@@ -382,14 +385,17 @@ function SearchRow({ nodeCode, onAdded }: { nodeCode: string; onAdded: () => voi
         .filter(pr => (pr.liquidity?.usd ?? 0) >= 1000)   // sink dust/scam clones
         .slice(0, 12)
         .map(pr => ({
-          pairAddress:  pr.pairAddress,
-          chainId:      pr.chainId,
-          baseSymbol:   pr.baseToken?.symbol ?? '?',
-          baseName:     pr.baseToken?.name ?? '',
-          baseAddress:  pr.baseToken?.address ?? '',
-          quoteSymbol:  pr.quoteToken?.symbol ?? 'USD',
-          priceUsd:     parseFloat(pr.priceUsd ?? '0'),
-          liquidityUsd: pr.liquidity?.usd ?? 0,
+          pairAddress:    pr.pairAddress,
+          chainId:        pr.chainId,
+          baseSymbol:     pr.baseToken?.symbol ?? '?',
+          baseName:       pr.baseToken?.name ?? '',
+          baseAddress:    pr.baseToken?.address ?? '',
+          quoteSymbol:    pr.quoteToken?.symbol ?? 'USD',
+          priceUsd:       parseFloat(pr.priceUsd ?? '0'),
+          liquidityUsd:   pr.liquidity?.usd ?? 0,
+          volume24h:      pr.volume?.h24 ?? 0,
+          priceChange24h: pr.priceChange?.h24 ?? 0,
+          fdv:            pr.marketCap ?? pr.fdv ?? null,
         }))
       setResults(mapped)
     } catch { setResults([]) }
