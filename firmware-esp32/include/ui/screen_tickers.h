@@ -659,7 +659,7 @@ private:
         lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
-        lv_obj_set_style_pad_left(chartWrap, 48, 0);   // ← Y tick labels live here
+        lv_obj_set_style_pad_left(chartWrap, 56, 0);   // ← Y tick labels live here (56: micro-cap prices are wide)
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_CLICKABLE);
 
@@ -672,7 +672,7 @@ private:
         lv_obj_set_style_border_width(w.chart, 0, 0);
         lv_obj_clear_flag(w.chart, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
         lv_chart_set_div_line_count(w.chart, 3, 0);   // vdiv MUST be 0 or >= 2 (LVGL div-by-zero)
-        lv_chart_set_axis_tick(w.chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 46);
+        lv_chart_set_axis_tick(w.chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 52);
         lv_obj_set_style_line_color(w.chart, lv_color_hex(CLR_BORDER), LV_PART_MAIN);
         lv_obj_set_user_data(w.chart, (void*)(intptr_t)idx);
         lv_obj_add_event_cb(w.chart, _candleDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
@@ -692,10 +692,17 @@ private:
         lv_obj_set_flex_align(xRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(xRow, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_clear_flag(xRow, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
-        static const char* XT[3] = { "-24d", "-12d", "now" };
+        // Real calendar dates ("Jun 12", "Jun 24", "Jul 5") instead of the old
+        // relative "-24d/-12d/now" — 24 daily bars, newest on the right.
+        time_t nowT = time(nullptr);
         for (int i = 0; i < 3; i++) {
+            time_t ts = nowT - (time_t)(CHART_BARS - 1 - i * (CHART_BARS - 1) / 2) * 86400;
+            struct tm tmv;
+            localtime_r(&ts, &tmv);
+            char dbuf[12];
+            strftime(dbuf, sizeof(dbuf), "%b %d", &tmv);
             lv_obj_t* l = lv_label_create(xRow);
-            lv_label_set_text(l, XT[i]);
+            lv_label_set_text(l, dbuf);
             lv_obj_set_style_text_color(l, lv_color_hex(CLR_MUTED), 0);
             lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
         }
@@ -717,11 +724,12 @@ private:
         // Y-axis tick labels → real USD prices (values are scaled 0–1000).
         if (lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) {
             if (dsc->text && dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
+                // Compact price labels so they never overflow the 56 px gutter.
                 float p = w.chartMin + ((float)dsc->value / 1000.0f) * w.chartRange;
-                if      (p >= 1.0f)    snprintf(dsc->text, dsc->text_length, "$%.2f", p);
-                else if (p >= 0.01f)   snprintf(dsc->text, dsc->text_length, "$%.3f", p);
-                else if (p >= 0.0001f) snprintf(dsc->text, dsc->text_length, "$%.5f", p);
-                else                   snprintf(dsc->text, dsc->text_length, "$%.1e", p);
+                if      (p >= 100.0f)  snprintf(dsc->text, dsc->text_length, "$%.0f", p);
+                else if (p >= 1.0f)    snprintf(dsc->text, dsc->text_length, "$%.2f", p);
+                else if (p >= 0.001f)  snprintf(dsc->text, dsc->text_length, "$%.4f", p);
+                else                   snprintf(dsc->text, dsc->text_length, "%.0e", p);   // "4e-06"
             }
             return;
         }

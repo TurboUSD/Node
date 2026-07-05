@@ -373,15 +373,18 @@ public:
         return _fetchOhlcvGecko(outCandles, maxCandles);
     }
 
-    // GeckoTerminal weekly OHLCV for the TUSD pool. ohlcv_list rows are
-    // [ts, open, high, low, close, volume], NEWEST first → reverse on copy.
+    // GeckoTerminal weekly OHLCV for the TUSD pool. GT's OHLCV endpoint only
+    // accepts day/hour/minute timeframes (NOT week — it returns HTTP 400,
+    // which is why this fallback used to yield an empty chart), so we fetch
+    // DAILY candles and aggregate 7 days per weekly candle here. ohlcv_list
+    // rows are [ts, open, high, low, close, volume], NEWEST first.
     int _fetchOhlcvGecko(OhlcvCandle* outCandles, int maxCandles) {
         HTTPClient http;
         http.useHTTP10(true);   // see header note
         http.begin(String(ENDPOINT_GECKOTERMINAL_OHLCV) + TUSD_CHAIN_SLUG +
                    "/pools/" + TUSD_POOL_ADDR +
-                   "/ohlcv/week?aggregate=1&limit=" + String(maxCandles) + "&currency=usd&token=base");
-        http.setTimeout(9000);
+                   "/ohlcv/day?aggregate=1&limit=" + String(maxCandles * 7) + "&currency=usd&token=base");
+        http.setTimeout(12000);
         http.addHeader("Accept", "application/json");
         if (http.GET() != 200) { http.end(); return 0; }
 
@@ -391,16 +394,28 @@ public:
         if (err) return 0;
 
         JsonArray list = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
-        int total = list.size();
-        if (total > maxCandles) total = maxCandles;
+        int totalDays = list.size();
+        if (totalDays == 0) return 0;
+
+        // Group newest-first days into weeks of 7, then emit oldest-first.
+        int weeks = (totalDays + 6) / 7;
+        if (weeks > maxCandles) weeks = maxCandles;
         int count = 0;
-        for (int i = total - 1; i >= 0; i--) {          // reverse → oldest first
-            JsonArrayConst row = list[i];
-            outCandles[count].open  = row[1] | 0.0;
-            outCandles[count].high  = row[2] | 0.0;
-            outCandles[count].low   = row[3] | 0.0;
-            outCandles[count].close = row[4] | 0.0;
-            count++;
+        for (int wk = weeks - 1; wk >= 0; wk--) {       // oldest week first
+            int from = wk * 7;                          // newest day of this week group
+            int to   = min(from + 7, totalDays);        // exclusive
+            if (from >= totalDays) continue;
+            OhlcvCandle c;
+            // Within the group, index `from` is the NEWEST day, `to-1` the oldest.
+            c.open  = list[to - 1][1] | 0.0;            // oldest day's open
+            c.close = list[from][4]   | 0.0;            // newest day's close
+            c.high  = 0.0; c.low = 0.0;
+            for (int d = from; d < to; d++) {
+                double hi = list[d][2] | 0.0, lo = list[d][3] | 0.0;
+                if (hi > c.high) c.high = hi;
+                if (c.low == 0.0 || (lo > 0.0 && lo < c.low)) c.low = lo;
+            }
+            outCandles[count++] = c;
         }
         return count;
     }

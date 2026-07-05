@@ -279,10 +279,10 @@ private:
         if (lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) {
             if (dsc->text && dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
                 double p = _minPrice + ((double)dsc->value / 1000.0) * _priceRange;
-                if      (p >= 1.0)    snprintf(dsc->text, dsc->text_length, "$%.2f", p);
-                else if (p >= 0.01)   snprintf(dsc->text, dsc->text_length, "$%.3f", p);
-                else if (p >= 0.0001) snprintf(dsc->text, dsc->text_length, "$%.5f", p);
-                else                  snprintf(dsc->text, dsc->text_length, "$%.1e", p);
+                if      (p >= 100.0)  snprintf(dsc->text, dsc->text_length, "$%.0f", p);
+                else if (p >= 1.0)    snprintf(dsc->text, dsc->text_length, "$%.2f", p);
+                else if (p >= 0.001)  snprintf(dsc->text, dsc->text_length, "$%.4f", p);
+                else                  snprintf(dsc->text, dsc->text_length, "%.0e", p);   // "4e-06" fits the gutter
             }
             return;
         }

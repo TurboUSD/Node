@@ -862,8 +862,16 @@ private:
 
         int code = http.GET();
         if (code != 200) {
-            snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
-                     "OpenSea HTTP %d", code);
+            if (code == 401 || code == 403) {
+                // OpenSea now requires an API key for the account-NFTs
+                // endpoint. The key is baked in at build time (see the
+                // OPENSEA_API_KEY secret in the release workflow).
+                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
+                         "OpenSea requires an API key (HTTP %d).\nRebuild with OPENSEA_API_KEY set.", code);
+            } else {
+                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
+                         "OpenSea HTTP %d", code);
+            }
             _pendingResult.error = true;
             _pendingResult.ready = true;
             http.end();
