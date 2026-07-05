@@ -1370,21 +1370,20 @@ private:
     }
 
     void openVerifyTooltip() {
+        // No bottom button: the modal's corner X closes it, and the freed
+        // space goes to the instructions text.
         lv_obj_t* card = openModal(lv_scr_act());
         lv_obj_t* label = lv_label_create(card);
         lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(label, 280);
+        lv_obj_set_width(label, 290);
         lv_label_set_text(label,
             "Verification pending.\n\n"
             "To get verified:\n"
-            "1. Post a video on X tagging @turbousd\n"
+            "1. Post a video on X showing this node running, tagging @turbousd\n"
             "2. Write your node name on paper, show it matches your screen\n"
             "3. Include the wallet holding your TUSD\n"
             "4. We manually review and whitelist your node");
         lv_obj_set_style_text_color(label, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_t* closeBtn = addModalButton(card, "GOT IT", false);
-        static lv_obj_t* sCard; sCard = card;
-        lv_obj_add_event_cb(closeBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
     }
 
     void openDebtRangePicker() {
@@ -1631,16 +1630,20 @@ private:
             lv_chart_set_next_value(c, s, scaled);
         }
 
-        // Y window = the expected 2-minute fall. While the line is still
-        // FILLING left→right, anchor the window to the STARTING value so the
-        // line begins at the top of the plot and visibly sinks toward the
-        // bottom (anchoring to the current value kept it stuck at the bottom
-        // edge). Once scrolling, slide the window with the data.
+        // Adaptive Y window: top = where this window's line STARTS (the
+        // first point during the fill phase; the oldest visible point once
+        // scrolling), bottom = current value MINUS 25% headroom. The line
+        // always has fresh room to keep falling into — if the value plunged
+        // while ticks were missed (screen off, blocking fetches), the span
+        // simply grows and the whole curve stays in frame.
         lv_coord_t fallWin = (lv_coord_t)(perSec * 10000.0 * GAME_RT_POINTS) + 6;
-        lv_coord_t hiTop   = (_gameRtCount < GAME_RT_POINTS)
-                             ? (lv_coord_t)3                    // fill phase: top = first point
-                             : (lv_coord_t)(scaled + fallWin);  // scroll: follow the fall
-        lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, hiTop - fallWin - 6, hiTop);
+        lv_coord_t hi = (_gameRtCount < GAME_RT_POINTS)
+                        ? (lv_coord_t)3                    // fill phase: top = first point
+                        : (lv_coord_t)(scaled + fallWin);  // scroll: oldest visible point
+        lv_coord_t span = hi - scaled;
+        if (span < 12) span = 12;
+        lv_coord_t lo = scaled - (span / 4 + 2);           // 25% of the span free below
+        lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, lo, hi);
 
         int dayCount = (int)(millis() / 86400000UL);
         gameScreen.updateRealtime(dayCount, v, perSec);

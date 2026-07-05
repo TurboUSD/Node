@@ -112,6 +112,10 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
             rgba[i * 4 + 1] = ctx.rgb[i * 3 + 1];
             rgba[i * 4 + 2] = ctx.rgb[i * 3 + 2];
             rgba[i * 4 + 3] = 255;
+            // Breathe every 64k px: this loop hammers the PSRAM bus the RGB
+            // panel also streams the framebuffer from — unthrottled it starves
+            // the panel DMA and the screen visibly shimmers.
+            if ((i & 0xFFFF) == 0xFFFF) delay(1);
         }
         free(ctx.rgb);
     } else {
@@ -129,6 +133,7 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
     uint8_t* px = _alloc((size_t)outW * outH * 2);
     if (!px) { if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return nullptr; }
     for (int y = 0; y < outH; y++) {
+        if ((y & 31) == 31) delay(1);   // PSRAM-bus breather (see above)
         unsigned sy = (unsigned)((uint64_t)y * ih / outH);
         for (int x = 0; x < outW; x++) {
             unsigned sx = (unsigned)((uint64_t)x * iw / outW);

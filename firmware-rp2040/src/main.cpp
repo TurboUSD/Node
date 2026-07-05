@@ -184,17 +184,18 @@ void setup() {
     pinMode(BUZZER_PIN, OUTPUT);          // factory beep_init()
     delay(500);                           // factory settle delay before first beep
 
-    // Boot self-test: THREE short beeps, factory drive (plain analogWrite 127,
+    // Boot self-test: FOUR slow beeps, factory drive (plain analogWrite 127,
     // default 1 kHz PWM). Beeps BEFORE any UART/I2C init so a hung peripheral
     // can never silence them.
-    //   • THREE beeps = THIS firmware generation (with the RX-blip
-    //     diagnostic). TWO beeps = an older UF2 is still flashed.
+    //   • FOUR well-separated beeps = THIS firmware generation (UART hello
+    //     sender + RX-blip diagnostic). Fewer = an older UF2 is still
+    //     flashed. The old 3×120 ms marker blurred into "two" by ear.
     //   • No beep at power-on → buzzer pin/drive problem.
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         analogWrite(BUZZER_PIN, 127);     // EXACTLY factory beep_on()
-        delay(120);
+        delay(150);
         analogWrite(BUZZER_PIN, 0);
-        delay(90);
+        delay(250);
     }
 
     Serial1.setRX(UART_FROM_S3_RX);
@@ -209,6 +210,17 @@ void setup() {
 }
 
 void loop() {
+    // Link beacon: for the first 2 minutes, tell the ESP32 we exist — a
+    // [0x7E][0xEE][checksum] hello every 5 s. The ESP32 logs it ("RP2040
+    // heartbeat RECEIVED"), which proves the RP→ESP wire and that THIS
+    // firmware is running, without opening the RP2040's USB port.
+    static uint32_t lastHelloAt = 0;
+    if (millis() < 120000 && millis() - lastHelloAt > 5000) {
+        lastHelloAt = millis();
+        uint8_t f[3] = { 0x7E, 0xEE, (uint8_t)(0x7E ^ 0xEE) };
+        Serial1.write(f, sizeof(f));
+    }
+
     // Frame parser: [0x7E][cmd][checksum]. Reads byte-by-byte rather than
     // blocking on Serial1.readBytes() so handleAlarmPattern() keeps running
     // (and the buzzer keeps alternating tones) even if bytes arrive slowly.

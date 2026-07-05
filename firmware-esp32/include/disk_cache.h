@@ -48,6 +48,10 @@ inline uint8_t* loadAlloc(const char* ns, const char* key, size_t* outLen) {
     *outLen = 0;
     if (!s_ok) return nullptr;
     String path = _pathFor(ns, key);
+    // exists() first: opening a missing file makes the Arduino VFS layer log
+    // an ERROR line over serial ("no permits for creation") — besides the
+    // noise, each line blocks ~40 ms and visibly stuttered UI animations.
+    if (!LittleFS.exists(path)) return nullptr;
     File f = LittleFS.open(path, "r");
     if (!f) return nullptr;
     size_t len = f.size();

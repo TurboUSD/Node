@@ -245,6 +245,7 @@ void loop() {
     // Poll the user button first so screen-toggle / sleep work in every state
     // (including before WiFi is connected or while the provisioning portal is up).
     handleUserButton();
+    rp2040Link.pollRx();   // raw RX monitor — see rp2040_link.h
 
     // Service LVGL on EVERY iteration, before any network early-return. Otherwise,
     // while provisioning or before WiFi connects, lv_timer_handler() never runs and

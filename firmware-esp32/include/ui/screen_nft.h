@@ -865,9 +865,14 @@ private:
         lv_obj_set_style_text_opa(_carouselSwitch, on ? LV_OPA_COVER : LV_OPA_70, 0);
     }
 
-    void _applyCarouselSetting(bool on) {
-        // Rebuilding the grid respects getNftCarousel() and getNftSlideshowSecs()
-        if (!_nftCache.empty()) _rebuildGrid();
+    void _applyCarouselSetting(bool /*on*/) {
+        // The carousel flag only gates the slideshow tick (reads storage
+        // directly) and the position dots — refresh the existing cells in
+        // place. The old full _rebuildGrid() from inside the toggle's event
+        // callback tore down and rebuilt every cell for nothing (and was
+        // reported as "grid goes blank when toggling carousel off").
+        for (int i = 0; i < _cellCount; i++) _refreshCell(i);
+        _slideshowCount = storage.getNftSlideshowSecs();
     }
 
     // ── Size selector buttons ─────────────────────────────────────────────────

@@ -36,6 +36,9 @@ public:
         // anything rejects the pins (19/20 double as the S3's USB pads) it
         // shows up in the serial monitor as "RP-link: ..." lines.
         REG_CLR_BIT(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+        REG_CLR_BIT(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_DP_PULLUP);   // GPIO20's 1.3k USB pull-up off
+        gpio_hold_dis((gpio_num_t)RP2040_UART_TX_PIN);    // release any sleep/hold latch
+        gpio_hold_dis((gpio_num_t)RP2040_UART_RX_PIN);
         gpio_reset_pin((gpio_num_t)RP2040_UART_TX_PIN);   // detach any previous owner
         gpio_reset_pin((gpio_num_t)RP2040_UART_RX_PIN);   // (USB PHY, other muxes)
 
@@ -83,6 +86,37 @@ public:
     }
     void stopAlarm()  { sendCommand(Rp2040Command::STOP_ALARM); }
     void playChime()  { sendCommand(Rp2040Command::PLAY_CHIME); }
+
+    // Call every main-loop pass. Drains and HEX-logs anything the RP2040
+    // sends spontaneously (its new firmware emits a 0x7E 0xEE hello every 5 s
+    // for the first 2 minutes). This splits the dead-link mystery in half
+    // from the ESP32's serial log alone:
+    //   "RP2040 heartbeat RECEIVED"  → RP→ESP wire OK + new RP firmware ✓
+    //   garbage bytes logged         → wire OK but baud/framing mismatch
+    //   nothing ever                 → RP→ESP wire dead OR old RP firmware
+    void pollRx() {
+        if (!_ok) return;
+        uint8_t buf[16];
+        int n = uart_read_bytes(LINK_UART, buf, sizeof(buf), 0);
+        if (n <= 0) return;
+        bool hello = false;
+        for (int i = 0; i + 1 < n; i++)
+            if (buf[i] == 0x7E && buf[i + 1] == 0xEE) hello = true;
+        static uint32_t lastLogAt = 0;
+        if (hello) {
+            if (millis() - lastLogAt > 4000) {
+                lastLogAt = millis();
+                Serial.println("RP-link: RP2040 heartbeat RECEIVED — RP->ESP direction ALIVE, new RP firmware confirmed");
+            }
+            return;
+        }
+        if (millis() - lastLogAt > 2000) {
+            lastLogAt = millis();
+            char hex[3 * sizeof(buf) + 1] = {};
+            for (int i = 0; i < n; i++) snprintf(hex + i * 3, 4, "%02X ", buf[i]);
+            Serial.printf("RP-link: RX %d bytes: %s\n", n, hex);
+        }
+    }
 
     // Call periodically (e.g. once a minute) so a firmware update or crash
     // on the RP2040 side gets noticed instead of silently never buzzing.
