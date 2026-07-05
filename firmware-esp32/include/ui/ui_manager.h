@@ -171,13 +171,29 @@ public:
         return true;
     }
 
+    // A failed feed fetch shouldn't cost the whole refresh window — pull the
+    // next attempt in to ~3 s so a transient TLS/memory hiccup self-heals fast.
+    void retryMiningFeedSoon() {
+        lastMiningFeedFetch = millis() - MINING_FEED_REFRESH_MS + 3000;
+    }
+
     void updateTreasuryData(const TreasuryData& data) {
         latestTreasury = data;
         turboScreen.updateData(data);
     }
 
     void loadOhlcvChart(OhlcvCandle* candles, int count) {
-        turboScreen.loadRealCandles(candles, count);
+        turboScreen.loadRealCandles(candles, count, turboGroupDays());
+    }
+
+    // Turbo chart timeframe (1D/1W/1M dropdown) → candle grouping for
+    // fetchOhlcvHistory(). 12 monthly bars keep the GT daily fetch at 360 rows.
+    int turboGroupDays() { return turboScreen.timeframeSel == 0 ? 1 : (turboScreen.timeframeSel == 1 ? 7 : 30); }
+    int turboBars()      { return turboScreen.timeframeSel == 2 ? 12 : 26; }
+    bool turboTfConsumeDirty() {
+        if (!turboScreen.tfDirty) return false;
+        turboScreen.tfDirty = false;
+        return true;
     }
 
     // Live TUSD price from DexScreener/GeckoTerminal (independent of the
@@ -194,6 +210,15 @@ public:
             static const int yearValues[] = {5, 10, 20, 30, 50, 75};
             reloadDebtHistory(yearValues[debtYearsRangeIndex % 6]);
         }
+    }
+
+    void updateLeaderboard(LeaderboardEntry* entries, int count) {
+        nodeScreen.updateLeaderboard(entries, count);
+        // The footers' "| N NODES" counter feeds off the same directory data
+        // (it used to sit at 0 forever — nothing ever set it).
+        int online = 0;
+        for (int i = 0; i < count; i++) if (entries[i].online) online++;
+        _onlineNodeCount = online;
     }
 
     void updateMiningFeed(MiningFeedEntry* entries, int count) {

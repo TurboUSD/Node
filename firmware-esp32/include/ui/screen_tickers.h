@@ -57,7 +57,7 @@ extern "C" unsigned lodepng_decode32(unsigned char** out, unsigned* w, unsigned*
 // ── Constants ──────────────────────────────────────────────────────────────────
 #define TICKER_MAX          10
 #define COMPACT_H           62      // px height of collapsed ticker card
-#define EXPANDED_H          196     // px height of expanded ticker card
+#define EXPANDED_H          250     // px height of expanded ticker card (chart got taller)
 #define CHART_BARS          24      // hourly OHLCV bars shown in expanded view
 #define BODY_H              (SCREEN_HEIGHT - 38 - 38)  // 404 px
 
@@ -294,6 +294,13 @@ private:
     // pollPending (an lv_timer, safe context) performs the work.
     volatile bool    _rebuildRequested = false;
     volatile int     _chartLoadRequestIdx = -1;
+
+    // Chart timeframe (applies to every card): 0 = 1D (24 daily candles),
+    // 1 = 1W (24 weekly), 2 = 1M (12 monthly). GT's OHLCV endpoint only does
+    // day/hour/minute, so 1W/1M are aggregated client-side from daily bars.
+    uint8_t _chartTf = 0;
+    int _tfGroup() const { return _chartTf == 0 ? 1 : (_chartTf == 1 ? 7 : 30); }
+    int _tfBars()  const { return _chartTf == 2 ? 12 : CHART_BARS; }
     volatile bool    _listReloadRequested = false;  // retried until the worker is free
     volatile bool    _searchRequested     = false;  // ditto, for the search dialog
 
@@ -609,6 +616,26 @@ private:
         lv_obj_set_style_text_font(chainLbl, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(chainLbl, lv_color_hex(CLR_MUTED), 0);
 
+        // Timeframe selector (1D / 1W / 1M), top-right next to the collapse
+        // button — mirrors the web board. One shared setting for all cards.
+        lv_obj_t* tfDd = lv_dropdown_create(topRow);
+        lv_dropdown_set_options_static(tfDd, "1D\n1W\n1M");
+        lv_dropdown_set_selected(tfDd, _chartTf);
+        lv_obj_set_size(tfDd, 62, 36);
+        lv_obj_set_style_bg_color(tfDd, lv_color_hex(CLR_SURFACE), 0);
+        lv_obj_set_style_border_color(tfDd, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_border_width(tfDd, 1, 0);
+        lv_obj_set_style_radius(tfDd, 6, 0);
+        lv_obj_set_style_pad_all(tfDd, 8, 0);
+        lv_obj_set_style_text_font(tfDd, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(tfDd, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_t* tfList = lv_dropdown_get_list(tfDd);
+        lv_obj_set_style_bg_color(tfList, lv_color_hex(CLR_SURFACE), 0);
+        lv_obj_set_style_text_color(tfList, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_set_style_text_font(tfList, &lv_font_montserrat_12, 0);
+        lv_obj_set_user_data(tfDd, (void*)(intptr_t)idx);
+        lv_obj_add_event_cb(tfDd, _onTfChanged, LV_EVENT_VALUE_CHANGED, this);
+
         // Collapse button (top-right). Deleting/reordering lives in edit mode
         // (gear button in the title row) — this button ONLY collapses the
         // card. Chevron-up icon: an X read as "delete" (and the web's ⤡
@@ -666,7 +693,7 @@ private:
         // Wrapper with pad_left: LVGL 8 draws Y tick labels OUTSIDE the chart's
         // left edge, so they need reserved space in the parent (see screen_debt).
         lv_obj_t* chartWrap = lv_obj_create(w.container);
-        lv_obj_set_size(chartWrap, LV_PCT(100), 72);
+        lv_obj_set_size(chartWrap, LV_PCT(100), 118);
         lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
@@ -679,7 +706,7 @@ private:
         w.chart = lv_chart_create(chartWrap);
         lv_obj_set_size(w.chart, LV_PCT(100), LV_PCT(100));
         lv_chart_set_type(w.chart, LV_CHART_TYPE_BAR);
-        lv_chart_set_point_count(w.chart, CHART_BARS);
+        lv_chart_set_point_count(w.chart, _tfBars());   // 12 monthly / 24 daily-weekly
         lv_chart_set_range(w.chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
         lv_obj_set_style_bg_opa(w.chart, LV_OPA_0, 0);
         lv_obj_set_style_border_width(w.chart, 0, 0);
@@ -708,8 +735,9 @@ private:
         // Real calendar dates ("Jun 12", "Jun 24", "Jul 5") instead of the old
         // relative "-24d/-12d/now" — 24 daily bars, newest on the right.
         time_t nowT = time(nullptr);
+        int tfG = _tfGroup(), tfB = _tfBars();
         for (int i = 0; i < 3; i++) {
-            time_t ts = nowT - (time_t)(CHART_BARS - 1 - i * (CHART_BARS - 1) / 2) * 86400;
+            time_t ts = nowT - (time_t)((tfB - 1) - i * (tfB - 1) / 2) * tfG * 86400;
             struct tm tmv;
             localtime_r(&ts, &tmv);
             char dbuf[12];
@@ -844,9 +872,11 @@ private:
         TickerEntry&  t = _tickers[idx];
         if (!w.chart || !w.series) return;
 
+        int pc = (int)lv_chart_get_point_count(w.chart);
+        int nPts = min((int)t.chart_count, pc);
         if (!t.chart_loaded || t.chart_count == 0) {
             // Fill with sentinel (no data)
-            for (int i = 0; i < CHART_BARS; i++)
+            for (int i = 0; i < pc; i++)
                 w.series->y_points[i] = LV_CHART_POINT_NONE;
         } else if (t.is_expanded) {
             // Candles: scale over the full LOW..HIGH span; the bar carries the
@@ -859,9 +889,9 @@ private:
             w.chartMin   = minV;
             w.chartRange = (maxV - minV) < 1e-12f ? 1.0f : (maxV - minV);
             lv_chart_set_range(w.chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
-            for (int i = 0; i < t.chart_count; i++)
+            for (int i = 0; i < nPts; i++)
                 w.series->y_points[i] = (lv_coord_t)(((t.chart_high[i] - minV) / w.chartRange) * 1000.0f);
-            for (int i = t.chart_count; i < CHART_BARS; i++)
+            for (int i = nPts; i < pc; i++)
                 w.series->y_points[i] = LV_CHART_POINT_NONE;
         } else {
             // Compact sparkline: line of closes.
@@ -872,9 +902,9 @@ private:
             }
             float range = (maxV - minV) < 1e-10f ? 1.0f : (maxV - minV);
             lv_chart_set_range(w.chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
-            for (int i = 0; i < t.chart_count; i++)
+            for (int i = 0; i < nPts; i++)
                 w.series->y_points[i] = (lv_coord_t)(((t.chart_closes[i] - minV) / range) * 1000.0f);
-            for (int i = t.chart_count; i < CHART_BARS; i++)
+            for (int i = nPts; i < pc; i++)
                 w.series->y_points[i] = LV_CHART_POINT_NONE;
         }
         lv_chart_refresh(w.chart);
@@ -1404,9 +1434,13 @@ private:
     static void _fetchChart(TickerScreen* self, int idx) {
         TickerEntry& te = self->_tickers[idx];
         const char* net = chainToGT(te.chain_id);
+        // GT only serves day/hour/minute → 1W/1M candles are aggregated here
+        // from daily bars (group = 7 or 30 days per candle).
+        int g = self->_tfGroup(), bars = self->_tfBars();
+        int want = bars * g;   // 24 / 168 / 360 daily rows
         String url = String(ENDPOINT_GECKOTERMINAL_OHLCV) + net +
                      "/pools/" + te.pool_address +
-                     "/ohlcv/day?aggregate=1&limit=" + CHART_BARS + "&currency=usd&token=base";
+                     "/ohlcv/day?aggregate=1&limit=" + want + "&currency=usd&token=base";
         HTTPClient http;
         http.useHTTP10(true);   // avoid chunked encoding — parsed from getStream()
         http.begin(url);
@@ -1416,18 +1450,28 @@ private:
             JsonDocument doc;
             deserializeJson(doc, http.getStream());
             JsonArray ohlcv = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
-            int n = 0;
-            // ohlcv_list rows are [ts, o, h, l, c, v], newest-first →
-            // reverse into oldest-first OHLC arrays for the candles.
-            int total = min((int)ohlcv.size(), CHART_BARS);
-            for (int i = total - 1; i >= 0 && n < CHART_BARS; i--) {
-                te.chart_open  [n] = ohlcv[i][1].as<float>();
-                te.chart_high  [n] = ohlcv[i][2].as<float>();
-                te.chart_low   [n] = ohlcv[i][3].as<float>();
-                te.chart_closes[n] = ohlcv[i][4].as<float>();
-                n++;
+            // ohlcv_list rows are [ts, o, h, l, c, v], NEWEST first. Group g
+            // consecutive days into one candle, emit oldest-first.
+            int total = min((int)ohlcv.size(), want);
+            int buckets = (total + g - 1) / g;
+            if (buckets > bars) buckets = bars;
+            if (buckets > CHART_BARS) buckets = CHART_BARS;
+            for (int j = 0; j < buckets; j++) {
+                int lo = j * g;                        // newest day of this group
+                int hi = min(total, (j + 1) * g) - 1;  // oldest day of this group
+                int n2 = buckets - 1 - j;              // oldest-first output slot
+                te.chart_closes[n2] = ohlcv[lo][4].as<float>();
+                te.chart_open  [n2] = ohlcv[hi][1].as<float>();
+                float hh = 0.0f, ll = 0.0f;
+                for (int k = lo; k <= hi; k++) {
+                    float h2 = ohlcv[k][2].as<float>(), l2 = ohlcv[k][3].as<float>();
+                    if (h2 > hh) hh = h2;
+                    if (ll == 0.0f || (l2 > 0.0f && l2 < ll)) ll = l2;
+                }
+                te.chart_high[n2] = hh;
+                te.chart_low [n2] = ll;
             }
-            te.chart_count  = n;
+            te.chart_count  = buckets;
             te.chart_loaded = true;
             te.chart_at     = millis();
             te.chart_dirty  = true;   // pollPending redraws on core 1
@@ -1790,6 +1834,22 @@ private:
             self->_chartLoadRequestIdx = idx;   // fetched after the rebuild
         }
         self->_rebuildRequested = true;
+    }
+
+    // Timeframe dropdown changed. All cached chart data is the OLD timeframe
+    // now, so invalidate everything; the deferred rebuild recreates the cards
+    // (X labels + point count) and the bg task refetches with the new grouping.
+    static void _onTfChanged(lv_event_t* e) {
+        auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+        lv_obj_t* dd = lv_event_get_current_target(e);
+        if (!self || !dd) return;
+        uint8_t sel = (uint8_t)lv_dropdown_get_selected(dd);
+        if (sel == self->_chartTf) return;
+        self->_chartTf = sel;
+        for (int i = 0; i < self->_tickerCount; i++)
+            self->_tickers[i].chart_loaded = false;
+        self->_chartLoadRequestIdx = (int)(intptr_t)lv_obj_get_user_data(dd);
+        self->_rebuildRequested = true;   // pollPending rebuilds outside this callback
     }
 
     static void _onCollapseTapped(lv_event_t* e) {

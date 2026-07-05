@@ -57,10 +57,15 @@ public:
     }
 
     // Re-printable at any time — serial monitors usually attach AFTER boot,
-    // so the one-shot init line kept getting missed.
+    // so the one-shot init line kept getting missed. Includes heap health:
+    // `heap` = free internal RAM, `maxblk` = largest contiguous block (a TLS
+    // handshake needs ~45 KB contiguous — if maxblk sits below that, that's
+    // the whole "-32512 SSL memory" story in one number).
     void printStatus() {
-        Serial.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d)\n",
-                      (int)_e1, (int)_e2, (int)_e3, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN, (int)LINK_UART);
+        Serial.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d) | heap=%u maxblk=%u\n",
+                      (int)_e1, (int)_e2, (int)_e3, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN, (int)LINK_UART,
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     }
 
     // volume: 1 (whisper) – 5 (max). Default 2 matches the soft-default in

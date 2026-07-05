@@ -91,6 +91,33 @@ public:
         lv_obj_add_event_cb(chart, chartCb, LV_EVENT_DRAW_PART_BEGIN, this);
         lv_obj_add_event_cb(chart, chartCb, LV_EVENT_DRAW_PART_END,   this);
 
+        // Timeframe selector (1D / 1W / 1M) floating at the chart's top-right.
+        // Selection is picked up by the main loop (tfDirty) which refetches
+        // with the matching candle grouping — see fetchOhlcvHistory().
+        lv_obj_t* tfDd = lv_dropdown_create(chartWrap);
+        lv_dropdown_set_options_static(tfDd, "1D\n1W\n1M");
+        lv_dropdown_set_selected(tfDd, timeframeSel);
+        lv_obj_set_size(tfDd, 62, 32);
+        lv_obj_align(tfDd, LV_ALIGN_TOP_RIGHT, -4, 0);
+        lv_obj_set_style_bg_color(tfDd, lv_color_hex(0x1a1a1e), 0);
+        lv_obj_set_style_border_color(tfDd, lv_color_hex(0x3a3a42), 0);
+        lv_obj_set_style_border_width(tfDd, 1, 0);
+        lv_obj_set_style_radius(tfDd, 6, 0);
+        lv_obj_set_style_pad_all(tfDd, 7, 0);
+        lv_obj_set_style_text_font(tfDd, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(tfDd, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_t* tfList = lv_dropdown_get_list(tfDd);
+        lv_obj_set_style_bg_color(tfList, lv_color_hex(0x1a1a1e), 0);
+        lv_obj_set_style_text_color(tfList, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_set_style_text_font(tfList, &lv_font_montserrat_12, 0);
+        lv_obj_add_event_cb(tfDd, [](lv_event_t* e) {
+            TurboScreen* self = (TurboScreen*)lv_event_get_user_data(e);
+            uint8_t sel = (uint8_t)lv_dropdown_get_selected(lv_event_get_current_target(e));
+            if (sel == self->timeframeSel) return;
+            self->timeframeSel = sel;
+            self->tfDirty = true;   // main loop refetches inside the net lock
+        }, LV_EVENT_VALUE_CHANGED, this);
+
         // X-axis time legend — real dates ("Apr 12 · May 24 · Jul 05"), filled
         // by loadRealCandles() once data arrives (NTP time isn't synced yet
         // when this build() runs at boot, so they start empty).
@@ -145,8 +172,9 @@ public:
     // Loads real OHLCV candles fetched via api_client.h's
     // fetchOhlcvHistory() into the chart. `count` may be less than 26 if
     // GeckoTerminal's cache doesn't have that much history yet.
-    void loadRealCandles(OhlcvCandle* candles, int count) {
+    void loadRealCandles(OhlcvCandle* candles, int count, int groupDays = 7) {
         if (count == 0) return;
+        _groupDays = groupDays;
 
         _minPrice = candles[0].low;
         double maxPrice = candles[0].high;
@@ -181,11 +209,11 @@ public:
         }
         lv_chart_refresh(chart);
 
-        // Fill the X-axis date legend (weekly candles, newest = today).
+        // Fill the X-axis date legend (candle width = _groupDays, newest = today).
         if (_xDateLabels[2]) {
             time_t nowT = time(nullptr);
             for (int i = 0; i < 3; i++) {
-                time_t ts = nowT - (time_t)((count - 1) - i * (count - 1) / 2) * 7 * 86400;
+                time_t ts = nowT - (time_t)((count - 1) - i * (count - 1) / 2) * _groupDays * 86400;
                 struct tm tmv;
                 localtime_r(&ts, &tmv);
                 char dbuf[12];
@@ -196,6 +224,10 @@ public:
     }
 
 public:
+    // Chart timeframe: 0 = 1D, 1 = 1W (default, matches the cache), 2 = 1M.
+    uint8_t timeframeSel = 1;
+    bool    tfDirty      = false;   // set by the dropdown, consumed by main loop
+
     SharedHeaderRefs header;   // accessed by UIManager::refreshSharedAlarmIcon
     SharedFooterRefs footer;
 
@@ -213,6 +245,7 @@ private:
     double _priceRange = 1.0;
     double _circSupply = 0.0;  // circulating supply → Y ticks as market cap
     lv_obj_t* _xDateLabels[3] = { nullptr };
+    int _groupDays = 7;   // days per candle, set by loadRealCandles
 
     // "$26M" / "$850k" / "$1.2B" — compact, no decimals below a billion.
     static void _fmtMcap(char* out, size_t sz, double v) {

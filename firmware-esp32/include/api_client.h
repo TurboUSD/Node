@@ -70,6 +70,13 @@ static time_t parseIso8601Utc(const char* s) {
     return (time_t)days * 86400 + h * 3600 + m * 60 + sec;
 }
 
+struct LeaderboardEntry {
+    char   name[24]   = {};   // display name, or "#CODE" fallback
+    double earned     = 0;
+    int    uptimePct  = 0;
+    bool   online     = false;
+};
+
 struct GeoLocale {
     bool    valid = false;
     char    countryCode[3] = {0, 0, 0};  // ISO 3166-1 alpha-2, uppercase
@@ -363,7 +370,11 @@ public:
     // sync-ohlcv-history), NOT GeckoTerminal directly -- same rationale as
     // fetchDebtHistory(). See that table's comment for the free-tier
     // 6-month history limitation this inherits.
-    int fetchOhlcvHistory(OhlcvCandle* outCandles, int maxCandles) {
+    // groupDays: 1 = daily, 7 = weekly (default; served by our Supabase
+    // cache), 30 = monthly. Non-weekly goes straight to GeckoTerminal with
+    // client-side aggregation — the cache only stores weekly candles.
+    int fetchOhlcvHistory(OhlcvCandle* outCandles, int maxCandles, int groupDays = 7) {
+        if (groupDays != 7) return _fetchOhlcvGecko(outCandles, maxCandles, groupDays);
         HTTPClient http;
         http.useHTTP10(true);   // see header note
         http.begin(ENDPOINT_OHLCV_HISTORY);
@@ -398,7 +409,7 @@ public:
         // sync never ran → HTTP 500, table empty…). Pull weekly candles for
         // the TUSD pool straight from GeckoTerminal so the chart still works.
         // Free tier returns ~6 months of history — same limit the cache has.
-        return _fetchOhlcvGecko(outCandles, maxCandles);
+        return _fetchOhlcvGecko(outCandles, maxCandles, 7);
     }
 
     // GeckoTerminal weekly OHLCV for the TUSD pool. GT's OHLCV endpoint only
@@ -406,12 +417,12 @@ public:
     // which is why this fallback used to yield an empty chart), so we fetch
     // DAILY candles and aggregate 7 days per weekly candle here. ohlcv_list
     // rows are [ts, open, high, low, close, volume], NEWEST first.
-    int _fetchOhlcvGecko(OhlcvCandle* outCandles, int maxCandles) {
+    int _fetchOhlcvGecko(OhlcvCandle* outCandles, int maxCandles, int groupDays) {
         HTTPClient http;
         http.useHTTP10(true);   // see header note
         http.begin(String(ENDPOINT_GECKOTERMINAL_OHLCV) + TUSD_CHAIN_SLUG +
                    "/pools/" + TUSD_POOL_ADDR +
-                   "/ohlcv/day?aggregate=1&limit=" + String(maxCandles * 7) + "&currency=usd&token=base");
+                   "/ohlcv/day?aggregate=1&limit=" + String(maxCandles * groupDays) + "&currency=usd&token=base");
         http.setTimeout(12000);
         http.addHeader("Accept", "application/json");
         if (http.GET() != 200) { http.end(); return 0; }
@@ -425,13 +436,13 @@ public:
         int totalDays = list.size();
         if (totalDays == 0) return 0;
 
-        // Group newest-first days into weeks of 7, then emit oldest-first.
-        int weeks = (totalDays + 6) / 7;
+        // Group newest-first days into candles of `groupDays`, emit oldest-first.
+        int weeks = (totalDays + groupDays - 1) / groupDays;
         if (weeks > maxCandles) weeks = maxCandles;
         int count = 0;
-        for (int wk = weeks - 1; wk >= 0; wk--) {       // oldest week first
-            int from = wk * 7;                          // newest day of this week group
-            int to   = min(from + 7, totalDays);        // exclusive
+        for (int wk = weeks - 1; wk >= 0; wk--) {       // oldest group first
+            int from = wk * groupDays;                  // newest day of this group
+            int to   = min(from + groupDays, totalDays); // exclusive
             if (from >= totalDays) continue;
             OhlcvCandle c;
             // Within the group, index `from` is the NEWEST day, `to-1` the oldest.
@@ -444,6 +455,38 @@ public:
                 if (c.low == 0.0 || (lo > 0.0 && lo < c.low)) c.low = lo;
             }
             outCandles[count++] = c;
+        }
+        return count;
+    }
+
+    // Public node directory (name, earnings, uptime) for the on-device
+    // leaderboard — mirrors the two-column board on the web's network page.
+    int fetchNodeDirectory(LeaderboardEntry* out, int maxEntries) {
+        HTTPClient http;
+        http.useHTTP10(true);   // see header note
+        http.begin(String(SUPABASE_REST_BASE_URL) +
+                   "/public_node_directory?select=display_name,node_code,total_tusd_earned,uptime_pct,is_online&limit=24");
+        http.setTimeout(8000);
+        http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+        http.addHeader("apikey", SUPABASE_ANON_KEY);
+        if (http.GET() != 200) { http.end(); return 0; }
+
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, http.getStream());
+        http.end();
+        if (err) return 0;
+
+        int count = 0;
+        for (JsonObject row : doc.as<JsonArray>()) {
+            if (count >= maxEntries) break;
+            LeaderboardEntry& e = out[count];
+            const char* dn = row["display_name"] | "";
+            if (dn[0]) snprintf(e.name, sizeof(e.name), "%s", dn);
+            else       snprintf(e.name, sizeof(e.name), "#%s", row["node_code"] | "????");
+            e.earned    = row["total_tusd_earned"] | 0.0;
+            e.uptimePct = row["uptime_pct"] | 0;
+            e.online    = row["is_online"] | false;
+            count++;
         }
         return count;
     }
@@ -487,6 +530,13 @@ public:
             outEntries[count].minedAtUtc   = parseIso8601Utc(row["mined_at"]   | "");
             count++;
         }
+        // Decisive trace: if the Node screen is empty, this line tells us
+        // whether the data arrived (parse side) or the fetch failed (above).
+        Serial.printf("miningFeed: %d entries, first block #%ld created=%ld mined=%ld\n",
+                      count,
+                      count ? (long)outEntries[0].blockNumber : 0L,
+                      count ? (long)outEntries[0].createdAtUtc : 0L,
+                      count ? (long)outEntries[0].minedAtUtc : 0L);
         return count;
     }
 

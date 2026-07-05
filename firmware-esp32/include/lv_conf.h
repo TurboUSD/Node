@@ -19,13 +19,15 @@
 /*====================
    MEMORY SETTINGS
  *====================*/
-/* Use stdlib malloc/free. With CONFIG_SPIRAM_USE_MALLOC this automatically
- * uses PSRAM on the ESP32-S3 — plenty of room for LVGL's draw buffers. */
+/* PSRAM-backed allocators (lv_psram_mem.h). Plain malloc only spilled to
+ * PSRAM above ~16 KB, so LVGL's thousands of small widget allocations filled
+ * and FRAGMENTED internal RAM until TLS handshakes (needing ~45 KB
+ * contiguous) failed everywhere with -32512. LVGL now lives in PSRAM. */
 #define LV_MEM_CUSTOM      1
-#define LV_MEM_CUSTOM_INCLUDE  <stdlib.h>
-#define LV_MEM_CUSTOM_ALLOC    malloc
-#define LV_MEM_CUSTOM_FREE     free
-#define LV_MEM_CUSTOM_REALLOC  realloc
+#define LV_MEM_CUSTOM_INCLUDE  "lv_psram_mem.h"
+#define LV_MEM_CUSTOM_ALLOC    lv_psram_alloc
+#define LV_MEM_CUSTOM_FREE     lv_psram_free
+#define LV_MEM_CUSTOM_REALLOC  lv_psram_realloc
 
 /*====================
    HAL / TICK

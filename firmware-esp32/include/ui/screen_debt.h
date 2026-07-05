@@ -161,17 +161,32 @@ public:
     }
 
     void updateSinceValue(double valueUsd) {
-        char buf[20];
-        snprintf(buf, sizeof(buf), "+$%.3fB", valueUsd / 1e9);
+        char buf[24];
+        // "+$142.56M" reads far more impressive than "+$0.14B".
+        if (valueUsd >= 1e9) snprintf(buf, sizeof(buf), "+$%.2fB", valueUsd / 1e9);
+        else                 snprintf(buf, sizeof(buf), "+$%.2fM", valueUsd / 1e6);
         lv_label_set_text(sinceValueLabel, buf);
     }
 
     void updateRateValue(double valueUsd) {
-        char buf[20];
-        if (valueUsd >= 1e9) snprintf(buf, sizeof(buf), "+$%.0fB", valueUsd / 1e9);
-        else if (valueUsd >= 1e6) snprintf(buf, sizeof(buf), "+$%.0fM", valueUsd / 1e6);
-        else if (valueUsd >= 1e3) snprintf(buf, sizeof(buf), "+$%.0fK", valueUsd / 1e3);
-        else snprintf(buf, sizeof(buf), "+$%.0f", valueUsd);
+        char buf[28];
+        if (valueUsd >= 1e9) {
+            snprintf(buf, sizeof(buf), "+$%.2fB", valueUsd / 1e9);
+        } else {
+            // Full figure with thousands separators — "+$69,000" hits harder
+            // than "+$69K", and there's room for it.
+            char digits[16];
+            snprintf(digits, sizeof(digits), "%.0f", valueUsd);
+            int n = strlen(digits);
+            size_t o = 0;
+            buf[o++] = '+'; buf[o++] = '$';
+            for (int i = 0; i < n && o < sizeof(buf) - 1; i++) {
+                buf[o++] = digits[i];
+                int rem = n - 1 - i;
+                if (rem > 0 && rem % 3 == 0 && o < sizeof(buf) - 1) buf[o++] = ',';
+            }
+            buf[o] = '\0';
+        }
         lv_label_set_text(rateValueLabel, buf);
     }
 
@@ -272,13 +287,18 @@ private:
         lv_obj_set_style_text_color(titleLabel, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_10, 0);
 
+        // Plain tappable text (white, with the dropdown glyph) — the boxed
+        // button chrome pulled too much attention for what is a tiny selector.
         *btnOut = lv_btn_create(row);
-        lv_obj_set_style_bg_color(*btnOut, lv_color_hex(0x262626), 0);
-        lv_obj_set_style_border_color(*btnOut, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_border_width(*btnOut, 1, 0);
+        lv_obj_set_style_bg_opa(*btnOut, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(*btnOut, 0, 0);
+        lv_obj_set_style_shadow_width(*btnOut, 0, 0);
+        lv_obj_set_style_pad_all(*btnOut, 2, 0);
+        lv_obj_set_ext_click_area(*btnOut, 8);
         lv_obj_add_event_cb(*btnOut, onTap, LV_EVENT_CLICKED, userData);
         *btnLabelOut = lv_label_create(*btnOut);
-        lv_obj_set_style_text_font(*btnLabelOut, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(*btnLabelOut, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(*btnLabelOut, lv_color_hex(0xe8e8e8), 0);
 
         *valueOut = lv_label_create(col);
         lv_obj_set_style_text_color(*valueOut, lv_color_hex(0xff4d4d), 0);

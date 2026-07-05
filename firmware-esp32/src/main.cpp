@@ -342,9 +342,11 @@ void loop() {
         lastDebtRefreshAt = now;
     }
 
-    if (lastOhlcvRefreshAt == 0 || now - lastOhlcvRefreshAt > OHLCV_CHART_REFRESH_MS) {
+    if (lastOhlcvRefreshAt == 0 || now - lastOhlcvRefreshAt > OHLCV_CHART_REFRESH_MS
+        || uiManager.turboTfConsumeDirty()) {   // 1D/1W/1M dropdown changed
         OhlcvCandle candles[26];
-        int count = apiClient.fetchOhlcvHistory(candles, 26);
+        int count = apiClient.fetchOhlcvHistory(candles, uiManager.turboBars(),
+                                                uiManager.turboGroupDays());
         if (count > 0) uiManager.loadOhlcvChart(candles, count);
         lastOhlcvRefreshAt = now;
     }
@@ -352,7 +354,19 @@ void loop() {
     if (uiManager.isOnNodeScreen() && uiManager.miningFeedNeedsRefresh()) {
         MiningFeedEntry entries[4];
         int count = apiClient.fetchMiningFeed(entries, 4);
-        uiManager.updateMiningFeed(entries, count);
+        if (count > 0) uiManager.updateMiningFeed(entries, count);
+        else           uiManager.retryMiningFeedSoon();   // keep old data, retry in ~3 s
+    }
+
+    // Leaderboard (₸ rewards | uptime) under the mining track — refreshed
+    // every 60 s while the Node screen is visible.
+    static uint32_t lastLeaderboardAt = 0;
+    if ((lastLeaderboardAt == 0) ||                     // once at boot → footer node count
+        (uiManager.isOnNodeScreen() && now - lastLeaderboardAt > 60000)) {
+        lastLeaderboardAt = now;
+        LeaderboardEntry lb[24];
+        int n = apiClient.fetchNodeDirectory(lb, 24);
+        if (n > 0) uiManager.updateLeaderboard(lb, n);
     }
 
     // OTA: check silently during the overnight window, once per OTA_CHECK_INTERVAL_MS.

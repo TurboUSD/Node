@@ -162,7 +162,7 @@ public:
 
         miningTrack = lv_obj_create(body);
         lv_obj_set_width(miningTrack, LV_PCT(100));
-        lv_obj_set_flex_grow(miningTrack, 1);
+        lv_obj_set_height(miningTrack, NODE_BLOCK_H + 34);   // fixed: the leaderboard below takes the rest
         lv_obj_set_style_bg_opa(miningTrack, LV_OPA_0, 0);
         lv_obj_set_style_border_width(miningTrack, 0, 0);
         lv_obj_set_style_pad_all(miningTrack, 0, 0);
@@ -216,6 +216,24 @@ public:
         });
         lv_anim_start(&ringAnim);
 
+        // ── Leaderboard: two columns (₸ rewards | uptime), like the web ──────
+        lv_obj_t* lbRow = lv_obj_create(body);
+        lv_obj_set_width(lbRow, LV_PCT(100));
+        lv_obj_set_flex_grow(lbRow, 1);
+        lv_obj_set_style_bg_opa(lbRow, LV_OPA_0, 0);
+        lv_obj_set_style_border_side(lbRow, LV_BORDER_SIDE_TOP, 0);
+        lv_obj_set_style_border_color(lbRow, lv_color_hex(0x2e2e34), 0);
+        lv_obj_set_style_border_width(lbRow, 1, 0);
+        lv_obj_set_style_pad_all(lbRow, 0, 0);
+        lv_obj_set_style_pad_top(lbRow, 8, 0);
+        lv_obj_set_style_pad_column(lbRow, 14, 0);
+        lv_obj_set_flex_flow(lbRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(lbRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_clear_flag(lbRow, LV_OBJ_FLAG_SCROLLABLE);
+
+        _buildLeaderColumn(lbRow, "T REWARDS", lbRewardNames, lbRewardValues);
+        _buildLeaderColumn(lbRow, "UPTIME",    lbUptimeNames, lbUptimeValues);
+
         // Soft pulse on the "LIVE MINING" label so there's a heartbeat even before
         // any blocks have been mined into the track.
         lv_anim_t pulse;
@@ -268,6 +286,42 @@ public:
         }
     }
 
+    // Fill both leaderboard columns from the public node directory.
+    void updateLeaderboard(LeaderboardEntry* entries, int count) {
+        // Top 3 by earnings.
+        static LeaderboardEntry tmp[24];
+        int n = count > 24 ? 24 : count;
+        memcpy(tmp, entries, n * sizeof(LeaderboardEntry));
+        for (int i = 0; i < n; i++)
+            for (int j = i + 1; j < n; j++)
+                if (tmp[j].earned > tmp[i].earned) { LeaderboardEntry t = tmp[i]; tmp[i] = tmp[j]; tmp[j] = t; }
+        char buf[20];
+        for (int i = 0; i < LB_ROWS; i++) {
+            if (i < n) {
+                lv_label_set_text(lbRewardNames[i], tmp[i].name);
+                snprintf(buf, sizeof(buf), "T%.2f", tmp[i].earned);
+                lv_label_set_text(lbRewardValues[i], buf);
+            } else {
+                lv_label_set_text(lbRewardNames[i], "");
+                lv_label_set_text(lbRewardValues[i], "");
+            }
+        }
+        // Top 3 by uptime.
+        for (int i = 0; i < n; i++)
+            for (int j = i + 1; j < n; j++)
+                if (tmp[j].uptimePct > tmp[i].uptimePct) { LeaderboardEntry t = tmp[i]; tmp[i] = tmp[j]; tmp[j] = t; }
+        for (int i = 0; i < LB_ROWS; i++) {
+            if (i < n) {
+                lv_label_set_text(lbUptimeNames[i], tmp[i].name);
+                snprintf(buf, sizeof(buf), "%d%%", tmp[i].uptimePct);
+                lv_label_set_text(lbUptimeValues[i], buf);
+            } else {
+                lv_label_set_text(lbUptimeNames[i], "");
+                lv_label_set_text(lbUptimeValues[i], "");
+            }
+        }
+    }
+
     // Real countdown from the backend feed (pending block's created_at + 1 h).
     // Takes over from the fake looping animation the first time it's called.
     void updateCountdown(long secondsLeft, double rewardTusd) {
@@ -304,6 +358,56 @@ private:
     lv_obj_t* countdownLabel = nullptr;
     lv_obj_t* countdownRewardLabel = nullptr;
     bool _realCountdownActive = false;
+
+    static const int LB_ROWS = 3;
+    lv_obj_t* lbRewardNames [LB_ROWS] = { nullptr };
+    lv_obj_t* lbRewardValues[LB_ROWS] = { nullptr };
+    lv_obj_t* lbUptimeNames [LB_ROWS] = { nullptr };
+    lv_obj_t* lbUptimeValues[LB_ROWS] = { nullptr };
+
+    // One leaderboard column: muted title + LB_ROWS rows of "name .... value".
+    void _buildLeaderColumn(lv_obj_t* parent, const char* title,
+                            lv_obj_t** nameSlots, lv_obj_t** valueSlots) {
+        lv_obj_t* col = lv_obj_create(parent);
+        lv_obj_set_height(col, LV_SIZE_CONTENT);
+        lv_obj_set_flex_grow(col, 1);
+        lv_obj_set_style_bg_opa(col, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(col, 0, 0);
+        lv_obj_set_style_pad_all(col, 0, 0);
+        lv_obj_set_style_pad_row(col, 4, 0);
+        lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+        lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
+
+        lv_obj_t* titleLbl = lv_label_create(col);
+        lv_label_set_text(titleLbl, title);
+        lv_obj_set_style_text_color(titleLbl, lv_color_hex(0x9a9a9e), 0);
+        lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_10, 0);
+
+        for (int i = 0; i < LB_ROWS; i++) {
+            lv_obj_t* row = lv_obj_create(col);
+            lv_obj_set_size(row, LV_PCT(100), 18);
+            lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
+            lv_obj_set_style_border_width(row, 0, 0);
+            lv_obj_set_style_pad_all(row, 0, 0);
+            lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+
+            nameSlots[i] = lv_label_create(row);
+            lv_label_set_text(nameSlots[i], "");
+            lv_obj_set_style_text_font(nameSlots[i], &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(nameSlots[i], lv_color_hex(0xe8e8e8), 0);
+            lv_label_set_long_mode(nameSlots[i], LV_LABEL_LONG_DOT);
+            lv_obj_set_style_max_width(nameSlots[i], 130, 0);
+
+            valueSlots[i] = lv_label_create(row);
+            lv_label_set_text(valueSlots[i], "");
+            lv_obj_set_style_text_font(valueSlots[i], &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(valueSlots[i], lv_color_hex(0x3aff7a), 0);
+        }
+    }
 
     struct BlockWidget {
         lv_obj_t* container = nullptr;
