@@ -60,7 +60,7 @@ public:
         lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
-        lv_obj_set_style_pad_left(chartWrap, 48, 0);   // ← Y tick labels live here
+        lv_obj_set_style_pad_left(chartWrap, 56, 0);   // ← Y tick labels live here ("$10.0k" was nicked on the left at 48)
         lv_obj_set_style_pad_top(chartWrap, 7, 0);     // top/bottom tick labels are centered on the
         lv_obj_set_style_pad_bottom(chartWrap, 7, 0);  // edge ticks — without this they clip in half
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);

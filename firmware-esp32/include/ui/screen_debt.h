@@ -82,7 +82,11 @@ public:
         // pad_left reserves real in-parent space for the labels.
         lv_obj_t* chartWrap = lv_obj_create(body);
         lv_obj_set_width(chartWrap, LV_PCT(100));
-        lv_obj_set_flex_grow(chartWrap, 1);   // takes exactly the leftover space — can't overlap SINCE/RATE
+        // FIXED height (not flex-grow): the chart was eating every leftover
+        // pixel and left SINCE/RATE crammed at the bottom. The leftover space
+        // now goes to bottomRow instead (it has flex_grow), so the two
+        // metric columns get real breathing room.
+        lv_obj_set_height(chartWrap, 168);
         lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
@@ -134,7 +138,8 @@ public:
         // columns' real content, so the value labels spilled out of the row and
         // the two sides looked vertically misaligned.
         lv_obj_t* bottomRow = lv_obj_create(body);
-        lv_obj_set_size(bottomRow, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_width(bottomRow, LV_PCT(100));
+        lv_obj_set_flex_grow(bottomRow, 1);   // absorbs the space freed from the chart
         lv_obj_set_style_bg_opa(bottomRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(bottomRow, 0, 0);
         lv_obj_set_style_pad_all(bottomRow, 0, 0);

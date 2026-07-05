@@ -51,8 +51,23 @@ struct MiningFeedEntry {
     long blockNumber = 0;
     double rewardTusd = 0;
     String winnerDisplayName = "";
-    bool mined = false; // false = this is the currently-pending block
+    bool mined = false;         // false = this is the currently-pending block
+    time_t createdAtUtc = 0;    // when the block was opened (drives the countdown ring)
 };
+
+// Parses "2026-07-05T12:34:56[.frac][+00:00|Z]" (UTC) → epoch seconds.
+// Days-from-civil algorithm — mktime() would apply the local TZ offset.
+static time_t parseIso8601Utc(const char* s) {
+    int Y, M, D, h, m, sec;
+    if (!s || sscanf(s, "%d-%d-%dT%d:%d:%d", &Y, &M, &D, &h, &m, &sec) != 6) return 0;
+    int y = Y - (M <= 2);
+    int era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (unsigned)((153 * (M + (M > 2 ? -3 : 9)) + 2) / 5 + D - 1);
+    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    long days = (long)era * 146097 + (long)doe - 719468;
+    return (time_t)days * 86400 + h * 3600 + m * 60 + sec;
+}
 
 struct GeoLocale {
     bool    valid = false;
@@ -457,8 +472,15 @@ public:
             if (count >= maxEntries) break;
             outEntries[count].blockNumber = row["block_number"] | 0;
             outEntries[count].rewardTusd = row["reward_tusd"] | 0.0;
-            outEntries[count].winnerDisplayName = row["winner_display_name"].as<String>();
+            // Winner: display name, else "#CODE", else empty.
+            if (!row["winner_display_name"].isNull())
+                outEntries[count].winnerDisplayName = row["winner_display_name"].as<String>();
+            else if (!row["winner_node_code"].isNull())
+                outEntries[count].winnerDisplayName = String("#") + row["winner_node_code"].as<String>();
+            else
+                outEntries[count].winnerDisplayName = "";
             outEntries[count].mined = !row["mined_at"].isNull();
+            outEntries[count].createdAtUtc = parseIso8601Utc(row["created_at"] | "");
             count++;
         }
         return count;

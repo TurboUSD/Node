@@ -373,7 +373,7 @@ private:
             http.begin(url);
             if (strlen(OPENSEA_API_KEY) > 0) http.addHeader("X-API-KEY", OPENSEA_API_KEY);
             http.addHeader("Accept", "application/json");
-            http.setTimeout(10000);
+            http.setTimeout(20000);
 
             int code = http.GET();
             if (code != 200) { http.end(); delay(NFT_RATELIMIT_DELAY_MS); continue; }
@@ -869,7 +869,7 @@ private:
         String nftsUrl = String(ENDPOINT_OPENSEA_BASE) +
                          "/chain/" + NFT_OPENSEA_CHAIN +
                          "/account/" + wallet +
-                         "/nfts?limit=50";
+                         "/nfts?limit=24";
 
         HTTPClient http;
         http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
@@ -877,7 +877,7 @@ private:
         if (strlen(OPENSEA_API_KEY) > 0)
             http.addHeader("X-API-KEY", OPENSEA_API_KEY);
         http.addHeader("Accept", "application/json");
-        http.setTimeout(10000);
+        http.setTimeout(20000);
 
         int code = http.GET();
         if (code != 200) {

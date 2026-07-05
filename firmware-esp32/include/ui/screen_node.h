@@ -42,6 +42,32 @@ public:
         lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
 
+        // ── Countdown strip (mirrors the web header): NEXT BLOCK IN 48:12 → ₸100 ──
+        lv_obj_t* cdRow = lv_obj_create(body);
+        lv_obj_set_size(cdRow, LV_PCT(100), 24);
+        lv_obj_set_style_bg_opa(cdRow, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(cdRow, 0, 0);
+        lv_obj_set_style_pad_all(cdRow, 0, 0);
+        lv_obj_set_style_pad_column(cdRow, 8, 0);
+        lv_obj_set_flex_flow(cdRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(cdRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(cdRow, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t* cdCaption = lv_label_create(cdRow);
+        lv_label_set_text(cdCaption, "NEXT BLOCK IN");
+        lv_obj_set_style_text_color(cdCaption, lv_color_hex(0x9a9a9e), 0);
+        lv_obj_set_style_text_font(cdCaption, &lv_font_montserrat_10, 0);
+
+        countdownLabel = lv_label_create(cdRow);
+        lv_label_set_text(countdownLabel, "--:--");
+        lv_obj_set_style_text_color(countdownLabel, lv_color_hex(0xe8b339), 0);
+        lv_obj_set_style_text_font(countdownLabel, &lv_font_montserrat_20, 0);
+
+        countdownRewardLabel = lv_label_create(cdRow);
+        lv_label_set_text(countdownRewardLabel, "");
+        lv_obj_set_style_text_color(countdownRewardLabel, lv_color_hex(0x3aff7a), 0);
+        lv_obj_set_style_text_font(countdownRewardLabel, &lv_font_montserrat_12, 0);
+
         lv_obj_t* topRow = lv_obj_create(body);
         lv_obj_set_size(topRow, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_style_bg_opa(topRow, LV_OPA_0, 0);
@@ -242,11 +268,26 @@ public:
         }
     }
 
-    void updatePendingProgress(float progress01, int simulatedMinutesLeft) {
-        lv_arc_set_value(pendingBlock.ring, (int16_t)(progress01 * 100));
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%d", simulatedMinutesLeft);
-        lv_label_set_text(pendingBlock.centerLabel, buf);
+    // Real countdown from the backend feed (pending block's created_at + 1 h).
+    // Takes over from the fake looping animation the first time it's called.
+    void updateCountdown(long secondsLeft, double rewardTusd) {
+        if (!_realCountdownActive) {
+            _realCountdownActive = true;
+            lv_anim_del(pendingBlock.ring, nullptr);   // stop the visual-only loop
+        }
+        if (secondsLeft < 0) secondsLeft = 0;
+        // Ring drains as the hour elapses (full → empty), minutes in the middle.
+        lv_arc_set_value(pendingBlock.ring, (int16_t)((secondsLeft * 100) / 3600));
+        char mbuf[8];
+        snprintf(mbuf, sizeof(mbuf), "%ld", (secondsLeft + 59) / 60);
+        lv_label_set_text(pendingBlock.centerLabel, mbuf);
+
+        char tbuf[12];
+        snprintf(tbuf, sizeof(tbuf), "%02ld:%02ld", secondsLeft / 60, secondsLeft % 60);
+        lv_label_set_text(countdownLabel, tbuf);
+        char rbuf[24];
+        snprintf(rbuf, sizeof(rbuf), "-> %d TUSD", (int)rewardTusd);
+        lv_label_set_text(countdownRewardLabel, rbuf);
     }
 
 public:
@@ -260,6 +301,9 @@ private:
     lv_obj_t* rewardsLabel = nullptr;
     lv_obj_t* miningTrack = nullptr;
     lv_obj_t* dividerLine = nullptr;
+    lv_obj_t* countdownLabel = nullptr;
+    lv_obj_t* countdownRewardLabel = nullptr;
+    bool _realCountdownActive = false;
 
     struct BlockWidget {
         lv_obj_t* container = nullptr;
@@ -292,17 +336,22 @@ private:
         styleBlock(w, false);
 
         if (isMinedSlot) {
+            // Every label gets an explicit initial text — LVGL labels default
+            // to the literal string "Text", which leaked onto the screen.
             w.numberLabel = lv_label_create(w.container);
+            lv_label_set_text(w.numberLabel, "");
             lv_obj_set_style_text_font(w.numberLabel, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(w.numberLabel, lv_color_hex(0xd8ffe6), 0);
             lv_obj_align(w.numberLabel, LV_ALIGN_TOP_MID, 0, 6);
 
             w.rewardLabel = lv_label_create(w.container);
+            lv_label_set_text(w.rewardLabel, "");
             lv_obj_set_style_text_font(w.rewardLabel, &lv_font_montserrat_20, 0);
             lv_obj_set_style_text_color(w.rewardLabel, lv_color_white(), 0);
             lv_obj_align(w.rewardLabel, LV_ALIGN_CENTER, 0, -2);
 
             w.minerNameLabel = lv_label_create(w.container);
+            lv_label_set_text(w.minerNameLabel, "");
             lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 14);
             lv_label_set_long_mode(w.minerNameLabel, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_10, 0);
@@ -311,6 +360,7 @@ private:
             lv_obj_align(w.minerNameLabel, LV_ALIGN_BOTTOM_MID, 0, -5);
         } else {
             w.numberLabel = lv_label_create(w.container);
+            lv_label_set_text(w.numberLabel, "");
             lv_obj_set_style_text_font(w.numberLabel, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(w.numberLabel, lv_color_hex(0xffe9b8), 0);
             lv_obj_align(w.numberLabel, LV_ALIGN_TOP_MID, 0, 6);
@@ -331,6 +381,7 @@ private:
             lv_obj_align(w.ring, LV_ALIGN_CENTER, 0, 8);
 
             w.centerLabel = lv_label_create(w.ring);
+            lv_label_set_text(w.centerLabel, "--");   // no default "Text"
             lv_obj_set_style_text_font(w.centerLabel, &lv_font_montserrat_14, 0);
             lv_obj_set_style_text_color(w.centerLabel, lv_color_white(), 0);
             lv_obj_center(w.centerLabel);

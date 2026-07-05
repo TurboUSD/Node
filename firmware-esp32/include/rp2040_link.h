@@ -5,8 +5,10 @@
 // keep both sides in sync if you change the framing here.
 
 #pragma once
-#include <HardwareSerial.h>
+#include <Arduino.h>
 #include "config.h"
+#include "driver/uart.h"               // raw IDF driver — see begin()
+#include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h"   // USB pad release — see begin()
 
 enum class Rp2040Command : uint8_t {
@@ -26,19 +28,33 @@ enum class Rp2040Command : uint8_t {
 class Rp2040Link {
 public:
     void begin() {
-        // CRITICAL: GPIO19/20 on the ESP32-S3 are the native USB D-/D+ pads,
-        // and the USB-Serial-JTAG peripheral holds them at boot. With the USB
-        // pad still enabled, a UART routed onto these pins doesn't toggle the
-        // physical lines — commands to the RP2040 never leave the chip, which
-        // is why the buzzer self-tested fine at power-on (its own firmware)
-        // but never sounded for the alarm (sent over this link). Seeed routes
-        // the D1's inter-chip UART on exactly these pins, so the USB pad must
-        // be released first. (Flashing/serial still work: they go through the
-        // RP2040's USB bridge to UART0, not through 19/20.)
+        // The link kept coming up dead through Arduino's HardwareSerial (the
+        // RP2040's byte-activity diagnostic showed ZERO bytes ever arriving),
+        // so this now mirrors Seeed's own esp32_rp2040_comm example 1:1 at
+        // the IDF level — uart_driver_install + uart_param_config +
+        // uart_set_pin on UART2, TX 19 / RX 20 — and LOGS every step, so if
+        // anything rejects the pins (19/20 double as the S3's USB pads) it
+        // shows up in the serial monitor as "RP-link: ..." lines.
         REG_CLR_BIT(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+        gpio_reset_pin((gpio_num_t)RP2040_UART_TX_PIN);   // detach any previous owner
+        gpio_reset_pin((gpio_num_t)RP2040_UART_RX_PIN);   // (USB PHY, other muxes)
 
-        // Using HardwareSerial1, separate from the USB/debug Serial (Serial0).
-        link.begin(RP2040_UART_BAUD, SERIAL_8N1, RP2040_UART_RX_PIN, RP2040_UART_TX_PIN);
+        uart_config_t cfg = {};
+        cfg.baud_rate  = RP2040_UART_BAUD;
+        cfg.data_bits  = UART_DATA_8_BITS;
+        cfg.parity     = UART_PARITY_DISABLE;
+        cfg.stop_bits  = UART_STOP_BITS_1;
+        cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
+        cfg.source_clk = UART_SCLK_APB;   // IDF 4.4 (Arduino 2.0.x) has no UART_SCLK_DEFAULT
+
+        esp_err_t e1 = uart_driver_install(LINK_UART, 512, 512, 0, nullptr, 0);
+        esp_err_t e2 = uart_param_config(LINK_UART, &cfg);
+        esp_err_t e3 = uart_set_pin(LINK_UART, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN,
+                                    UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        Serial.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d)\n",
+                      (int)e1, (int)e2, (int)e3, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN, (int)LINK_UART);
+        _ok = (e1 == ESP_OK && e2 == ESP_OK && e3 == ESP_OK);
+        if (!_ok) Serial.println("RP-link: INIT FAILED — alarm commands cannot reach the RP2040");
     }
 
     // volume: 1 (whisper) – 5 (max). Default 2 matches the soft-default in
@@ -63,7 +79,8 @@ public:
         sendCommand(Rp2040Command::PING);
         uint32_t start = millis();
         while (millis() - start < timeoutMs) {
-            if (link.available() && link.read() == 0xAA) return true; // 0xAA = ack byte
+            int b = _readByte();
+            if (b == 0xAA) return true; // 0xAA = ack byte
         }
         return false;
     }
@@ -74,15 +91,16 @@ public:
     // should keep showing the previous value (or "--") when this returns false.
     // See PROTOCOL.md → "Sensor response" for the 7-byte frame layout.
     bool readTempHumidity(float& tempC, int& humidityPct, uint32_t timeoutMs = 250) {
-        while (link.available()) link.read();   // drain stale bytes so we don't desync
+        if (_ok) uart_flush_input(LINK_UART);   // drain stale bytes so we don't desync
         sendCommand(Rp2040Command::READ_TH);
 
         uint8_t frame[7];
         uint8_t idx = 0;
         uint32_t start = millis();
         while (millis() - start < timeoutMs) {
-            if (!link.available()) continue;
-            uint8_t b = (uint8_t)link.read();
+            int rb = _readByte();
+            if (rb < 0) continue;
+            uint8_t b = (uint8_t)rb;
             if (idx == 0 && b != 0x7E) continue;            // wait for start byte
             frame[idx++] = b;
             if (idx < sizeof(frame)) continue;
@@ -105,21 +123,28 @@ public:
 
 private:
     // UART port 2 — matches Seeed's own esp32_rp2040_comm example exactly
-    // (ESP32_COMM_PORT_NUM = 2, TXD 19, RXD 20). Any port can map to any pin
-    // via the GPIO matrix, but after the alarm link stayed dead we align every
-    // parameter with the reference that's known to work on this hardware.
-    HardwareSerial link{2};
+    // (ESP32_COMM_PORT_NUM = 2, TXD 19, RXD 20).
+    static const uart_port_t LINK_UART = UART_NUM_2;
+    bool _ok = false;
+
+    // Non-blocking single-byte read; -1 when nothing is waiting.
+    int _readByte() {
+        if (!_ok) return -1;
+        uint8_t b;
+        int n = uart_read_bytes(LINK_UART, &b, 1, 0);
+        return n == 1 ? (int)b : -1;
+    }
 
     void sendCommand(Rp2040Command cmd) {
         // Frame: [0x7E][cmd][checksum]. Checksum is a trivial XOR -- this
         // link is a few centimeters of trace on the same PCB, not a noisy
         // long-range channel, so we're guarding against framing bugs more
         // than line noise.
-        uint8_t cmdByte = static_cast<uint8_t>(cmd);
-        uint8_t checksum = 0x7E ^ cmdByte;
-        link.write(0x7E);
-        link.write(cmdByte);
-        link.write(checksum);
+        if (!_ok) { Serial.println("RP-link: send skipped (uart init failed)"); return; }
+        uint8_t f[3] = { 0x7E, static_cast<uint8_t>(cmd),
+                         (uint8_t)(0x7E ^ static_cast<uint8_t>(cmd)) };
+        uart_write_bytes(LINK_UART, (const char*)f, sizeof(f));
+        uart_wait_tx_done(LINK_UART, pdMS_TO_TICKS(50));   // actually push it onto the wire
     }
 };
 

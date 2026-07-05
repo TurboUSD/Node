@@ -198,6 +198,15 @@ public:
 
     void updateMiningFeed(MiningFeedEntry* entries, int count) {
         nodeScreen.updateMiningFeed(entries, count);
+        // Remember the pending block's opening time + reward: the per-second
+        // clock tick drives the real countdown (ring + header strip) from it.
+        for (int i = 0; i < count; i++) {
+            if (!entries[i].mined && entries[i].createdAtUtc > 0) {
+                _pendingBlockCreatedAt = entries[i].createdAtUtc;
+                _pendingBlockReward    = entries[i].rewardTusd > 0 ? entries[i].rewardTusd : 100.0;
+                break;
+            }
+        }
     }
 
     // Called from the main loop after a successful RP2040 sensor poll. The new
@@ -241,6 +250,10 @@ public:
     // tapped STOP yet). main.cpp uses this to periodically re-send PLAY_ALARM
     // to the RP2040, so one lost UART frame can't result in a silent alarm.
     bool isAlarmOverlayActive() const { return alarmOverlay != nullptr; }
+
+    // Public entry point for the physical top button: stop the ringing alarm
+    // exactly like tapping the on-screen STOP.
+    void stopRingingAlarm() { dismissAlarmOverlay(); }
 
     // Called from the touch input driver whenever the screen is physically touched.
     // Resets the inactivity timer and wakes the backlight if it was off.
@@ -312,6 +325,8 @@ private:
     double _debtPerSecond = 0.0;   // US-debt-clock rate, derived from history
     bool   _debtHistLoaded = false;
     bool   _debtRangeDirty = false; // range picker changed → refetch history (debounced)
+    time_t _pendingBlockCreatedAt = 0;   // pending mining block opened at (UTC)
+    double _pendingBlockReward    = 100.0;
     double _annualDebasementRate = 0.08;  // yearly $ debasement for the inflation game,
                                           // derived from real debt growth (fallback 8%)
 
@@ -880,6 +895,15 @@ private:
             _debtRangeDirty = false;
             static const int yearValues[] = {5, 10, 20, 30, 50, 75};
             reloadDebtHistory(yearValues[debtYearsRangeIndex % 6]);
+        }
+
+        // Real mining countdown (pending block opened_at + 1 h), once per tick.
+        if (_pendingBlockCreatedAt > 0) {
+            time_t nowUtc = time(nullptr);
+            if (nowUtc > 1600000000) {   // only once NTP has synced
+                long secsLeft = (long)(_pendingBlockCreatedAt + 3600 - nowUtc);
+                nodeScreen.updateCountdown(secsLeft, _pendingBlockReward);
+            }
         }
 
         // Node & Network headline (name, badge, rewards hint, uptime) — the

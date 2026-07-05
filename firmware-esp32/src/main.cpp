@@ -128,7 +128,14 @@ void handleUserButton() {
     if (!down && prevDown) {                                          // released
         uint32_t held = now - pressStart;
         if (!longFired && held >= 40 && held < 3000) {                // short press
-            uiManager.toggleScreen();
+            // While the alarm is ringing, the top button STOPS it (same as
+            // tapping the on-screen STOP) — much more natural half-asleep
+            // than aiming at a touch target. Otherwise: normal screen toggle.
+            if (uiManager.isAlarmOverlayActive()) {
+                uiManager.stopRingingAlarm();      // stops the buzzer + closes overlay
+            } else {
+                uiManager.toggleScreen();
+            }
         }
     }
     prevDown = down;
