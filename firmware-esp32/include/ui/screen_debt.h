@@ -16,12 +16,19 @@ public:
         header = buildSharedHeader(parentScreen, onLogoTapped, onDateTapped, userData);
         footer = buildSharedFooter(parentScreen, onQrTapped, userData);
 
+        // Flex COLUMN body: topRow / chart title / chart (grows) / X-year row /
+        // SINCE-RATE row. The old absolute align_to() layout computed one-shot
+        // positions from pre-layout coordinates, which is why the chart sat
+        // off-center and overlapped the two bottom sections.
         lv_obj_t* body = lv_obj_create(parentScreen);
         lv_obj_set_size(body, LV_PCT(100), 480 - 38 - 38);
         lv_obj_align(body, LV_ALIGN_TOP_MID, 0, 38);
         lv_obj_set_style_bg_color(body, lv_color_black(), 0);
         lv_obj_set_style_border_width(body, 0, 0);
         lv_obj_set_style_pad_all(body, 14, 0);
+        lv_obj_set_style_pad_row(body, 4, 0);
+        lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t* topRow = lv_obj_create(body);
@@ -29,7 +36,6 @@ public:
         lv_obj_set_style_bg_opa(topRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(topRow, 0, 0);
         lv_obj_set_style_pad_all(topRow, 0, 0);
-        lv_obj_align(topRow, LV_ALIGN_TOP_MID, 0, 0);
         lv_obj_clear_flag(topRow, LV_OBJ_FLAG_SCROLLABLE);
 
         totalDebtLabel = lv_label_create(topRow);
@@ -66,16 +72,16 @@ public:
         lv_label_set_text(chartTitle, "US TOTAL DEBT (USD)");
         lv_obj_set_style_text_color(chartTitle, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(chartTitle, &lv_font_montserrat_10, 0);
-        lv_obj_align_to(chartTitle, topRow, LV_ALIGN_OUT_BOTTOM_LEFT, 30, 4);
+        lv_obj_set_style_pad_left(chartTitle, 46, 0);   // over the plot, not the Y labels
 
         chart = lv_chart_create(body);
-        lv_obj_set_size(chart, LV_PCT(100), 128);
-        lv_obj_align_to(chart, chartTitle, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
+        lv_obj_set_width(chart, LV_PCT(100));
+        lv_obj_set_flex_grow(chart, 1);   // takes exactly the leftover space — can't overlap SINCE/RATE
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
         // Left padding holds the Y-axis $T tick labels; a little bottom padding
         // keeps the line off the very edge. The series still uses the full plot.
-        lv_obj_set_style_pad_left(chart, 40, 0);
+        lv_obj_set_style_pad_left(chart, 46, 0);
         lv_obj_set_style_pad_right(chart, 4, 0);
         lv_obj_set_style_pad_top(chart, 4, 0);
         lv_obj_set_style_pad_bottom(chart, 2, 0);
@@ -87,30 +93,34 @@ public:
         // (confirmed by symbolized backtrace → lv_chart.c draw_div_lines).
         lv_chart_set_div_line_count(chart, 4, 0);
         lv_chart_set_point_count(chart, 40);
-        // Y axis: 4 major ticks WITH labels (intermediate $T values, not just the
-        // endpoints). The draw callback below rewrites each tick's text into "$Nt".
-        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 40);
+        // Y axis: 5 major ticks WITH labels (intermediate $T values, not just the
+        // endpoints). The draw callback below rewrites each tick's text into "$NT".
+        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 5, 1, true, 46);
         debtSeries = lv_chart_add_series(chart, lv_color_hex(0xff4d4d), LV_CHART_AXIS_PRIMARY_Y);
         lv_obj_add_flag(chart, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(chart, _axisDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
 
-        // X-axis year labels (start / middle / end) under the chart — filled by
+        // X-axis year labels (5, evenly spread) under the chart — filled by
         // updateAxisLegend() once the history loads.
-        xYearLeft  = _axisLabel(body); lv_obj_align_to(xYearLeft,  chart, LV_ALIGN_OUT_BOTTOM_LEFT,  40, 1);
-        xYearMid   = _axisLabel(body); lv_obj_align_to(xYearMid,   chart, LV_ALIGN_OUT_BOTTOM_MID,   18, 1);
-        xYearRight = _axisLabel(body); lv_obj_align_to(xYearRight, chart, LV_ALIGN_OUT_BOTTOM_RIGHT, -2, 1);
+        lv_obj_t* xRow = lv_obj_create(body);
+        lv_obj_set_size(xRow, LV_PCT(100), 14);
+        lv_obj_set_style_bg_opa(xRow, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(xRow, 0, 0);
+        lv_obj_set_style_pad_all(xRow, 0, 0);
+        lv_obj_set_style_pad_left(xRow, 46, 0);   // line up with the plot
+        lv_obj_set_flex_flow(xRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(xRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(xRow, LV_OBJ_FLAG_SCROLLABLE);
+        for (int i = 0; i < X_LABELS; i++) xYear[i] = _axisLabel(xRow);
 
         // SINCE (left) and RATE (right) on one flex row, pushed to the edges and
-        // vertically centred. Using flex space-between (instead of absolute
-        // LEFT/RIGHT aligns on fixed-width 150px columns) keeps the RATE column
-        // from being clipped at the right edge, and centres both vertically.
+        // vertically centred.
         lv_obj_t* bottomRow = lv_obj_create(body);
         lv_obj_set_size(bottomRow, LV_PCT(100), 58);
         lv_obj_set_style_bg_opa(bottomRow, LV_OPA_0, 0);
         lv_obj_set_style_border_width(bottomRow, 0, 0);
         lv_obj_set_style_pad_all(bottomRow, 0, 0);
         lv_obj_set_style_pad_hor(bottomRow, 2, 0);
-        lv_obj_align(bottomRow, LV_ALIGN_BOTTOM_MID, 0, 0);
         lv_obj_set_flex_flow(bottomRow, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(bottomRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(bottomRow, LV_OBJ_FLAG_SCROLLABLE);
@@ -153,14 +163,18 @@ public:
     SharedHeaderRefs header;   // accessed by UIManager::refreshSharedAlarmIcon
     SharedFooterRefs footer;
 
-    // Set the axis legends from the loaded history: X = first→last year,
-    // Y = min→max total in $T. Called from UiManager::reloadDebtHistory.
+    // Set the axis legends from the loaded history: X = 5 years evenly spread
+    // first→last. Y values render as $T axis ticks (see _axisDrawCb). Called
+    // from UiManager::reloadDebtHistory.
     void updateAxisLegend(int startYear, int endYear, double minUsd, double maxUsd) {
-        (void)minUsd; (void)maxUsd;   // Y values now render as $T axis ticks (see _axisDrawCb)
+        (void)minUsd; (void)maxUsd;
         char buf[12];
-        if (xYearLeft)  { snprintf(buf, sizeof(buf), "%d", startYear);              lv_label_set_text(xYearLeft, buf); }
-        if (xYearMid)   { snprintf(buf, sizeof(buf), "%d", (startYear + endYear) / 2); lv_label_set_text(xYearMid, buf); }
-        if (xYearRight) { snprintf(buf, sizeof(buf), "%d", endYear);               lv_label_set_text(xYearRight, buf); }
+        for (int i = 0; i < X_LABELS; i++) {
+            if (!xYear[i]) continue;
+            int yr = startYear + (int)lroundf((float)(endYear - startYear) * i / (X_LABELS - 1));
+            snprintf(buf, sizeof(buf), "%d", yr);
+            lv_label_set_text(xYear[i], buf);
+        }
     }
 
     // Rewrites each Y-axis tick label into "$Nt". Chart values are scaled to
@@ -175,12 +189,12 @@ public:
     }
 
 private:
+    static const int X_LABELS = 5;
+
     lv_obj_t* totalDebtLabel = nullptr;
     lv_obj_t* chart = nullptr;
     lv_obj_t* chartTitle = nullptr;
-    lv_obj_t* xYearLeft = nullptr;
-    lv_obj_t* xYearMid = nullptr;
-    lv_obj_t* xYearRight = nullptr;
+    lv_obj_t* xYear[X_LABELS] = { nullptr };
     lv_chart_series_t* debtSeries = nullptr;
 
     // Small grey axis-legend label helper.

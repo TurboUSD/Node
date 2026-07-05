@@ -7,6 +7,7 @@
 #pragma once
 #include <HardwareSerial.h>
 #include "config.h"
+#include "soc/usb_serial_jtag_reg.h"   // USB pad release — see begin()
 
 enum class Rp2040Command : uint8_t {
     PLAY_ALARM    = 0x01,  // legacy: plays at volume 2 (soft default)
@@ -25,6 +26,17 @@ enum class Rp2040Command : uint8_t {
 class Rp2040Link {
 public:
     void begin() {
+        // CRITICAL: GPIO19/20 on the ESP32-S3 are the native USB D-/D+ pads,
+        // and the USB-Serial-JTAG peripheral holds them at boot. With the USB
+        // pad still enabled, a UART routed onto these pins doesn't toggle the
+        // physical lines — commands to the RP2040 never leave the chip, which
+        // is why the buzzer self-tested fine at power-on (its own firmware)
+        // but never sounded for the alarm (sent over this link). Seeed routes
+        // the D1's inter-chip UART on exactly these pins, so the USB pad must
+        // be released first. (Flashing/serial still work: they go through the
+        // RP2040's USB bridge to UART0, not through 19/20.)
+        REG_CLR_BIT(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+
         // Using HardwareSerial1, separate from the USB/debug Serial (Serial0).
         link.begin(RP2040_UART_BAUD, SERIAL_8N1, RP2040_UART_RX_PIN, RP2040_UART_TX_PIN);
     }

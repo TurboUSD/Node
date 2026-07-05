@@ -139,6 +139,7 @@ public:
         JsonDocument doc;
         doc["mac_address"] = getMacAddress();
         doc["firmware_version"] = FIRMWARE_VERSION;
+        doc["setup_token"] = storage.getSetupToken();   // owner-only web setup — see storage.h
         String payload;
         serializeJson(doc, payload);
 
@@ -174,6 +175,9 @@ public:
         reqDoc["uptime_seconds"] = uptimeSeconds;
         reqDoc["wifi_rssi"] = WiFi.RSSI();
         reqDoc["free_heap_bytes"] = ESP.getFreeHeap();
+        // Keeps the server-side copy of the owner token fresh — this is how
+        // EXISTING nodes (registered before tokens existed) get one stored.
+        reqDoc["setup_token"] = storage.getSetupToken();
         String payload;
         serializeJson(reqDoc, payload);
 

@@ -35,6 +35,11 @@
 // lv_mem_alloc → free it with lv_mem_free.
 extern "C" unsigned lodepng_decode32(unsigned char** out, unsigned* w, unsigned* h,
                                      const unsigned char* in, size_t insize);
+// LVGL also bundles ChaN's tjpgd (compiled as C when LV_USE_SJPG=1) — needed
+// because DexScreener's CDN serves token logos as BASELINE JPEG no matter
+// what format is requested (verified: format=png still returns image/jpeg).
+// tjpgd.h has its own extern "C" guards, so a plain include works.
+#include <src/extra/libs/sjpg/tjpgd.h>
 
 // ── Brand colours (match web palette) ─────────────────────────────────────────
 #define CLR_GREEN    0x43e397
@@ -74,6 +79,7 @@ struct TickerEntry {
     int   chart_count      = 0;
     bool  live_loaded      = false;
     bool  chart_loaded     = false;
+    volatile bool chart_dirty = false;  // bg task → UI: fresh chart data to draw
     bool  is_expanded      = false;
 
     // Token logo (from DexScreener pair info.imageUrl), downloaded + decoded
@@ -366,11 +372,12 @@ private:
         bool exp = t.is_expanded;
         lv_coord_t cardH = exp ? EXPANDED_H : COMPACT_H;
 
-        // Card container
+        // Card container. Border deliberately LIGHTER than CLR_BORDER so the
+        // card outline reads clearly against the black background.
         w.container = lv_obj_create(_body);
         lv_obj_set_size(w.container, LV_PCT(100), cardH);
         lv_obj_set_style_bg_color(w.container, lv_color_hex(CLR_CARD), 0);
-        lv_obj_set_style_border_color(w.container, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_border_color(w.container, lv_color_hex(0x3a3a42), 0);
         lv_obj_set_style_border_width(w.container, 1, 0);
         lv_obj_set_style_radius(w.container, 8, 0);
         lv_obj_set_style_pad_all(w.container, 10, 0);
@@ -469,24 +476,26 @@ private:
         lv_obj_set_flex_flow(metaRow, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(metaRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+        // Ticker · MCAP · 24h% — 12pt and clearly readable (10pt muted-grey
+        // was too small and too dark to read at arm's length).
         lv_obj_t* symTxt = lv_label_create(metaRow);
         lv_label_set_text(symTxt, t.base_symbol);
-        lv_obj_set_style_text_font(symTxt, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(symTxt, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_style_text_font(symTxt, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(symTxt, lv_color_hex(0xc4c4cc), 0);
 
         lv_obj_t* dot = lv_label_create(metaRow);
         lv_label_set_text(dot, "\xE2\x80\xA2");
-        lv_obj_set_style_text_font(dot, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(dot, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_style_text_font(dot, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(dot, lv_color_hex(0x8a8a92), 0);
 
         w.fdvLabel = lv_label_create(metaRow);
         _updateFdvLabel(idx);
-        lv_obj_set_style_text_font(w.fdvLabel, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(w.fdvLabel, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_style_text_font(w.fdvLabel, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(w.fdvLabel, lv_color_hex(0xc4c4cc), 0);
 
         w.changeLabel = lv_label_create(metaRow);
         _updateChangeLabel(idx);
-        lv_obj_set_style_text_font(w.changeLabel, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(w.changeLabel, &lv_font_montserrat_12, 0);
 
         if (_editMode) {
             // Edit mode: ▲ / ▼ reorder + red delete, in place of the sparkline.
@@ -579,7 +588,10 @@ private:
         lv_obj_set_style_text_color(chainLbl, lv_color_hex(CLR_MUTED), 0);
 
         // Collapse button (top-right). Deleting/reordering lives in edit mode
-        // (gear button in the title row) — the X here ONLY collapses the card.
+        // (gear button in the title row) — this button ONLY collapses the
+        // card. Chevron-up icon: an X read as "delete" (and the web's ⤡
+        // collapse glyph doesn't exist in LVGL's built-in symbol font, so the
+        // collapse chevron is the closest equivalent).
         w.removeBtn = lv_btn_create(topRow);
         lv_obj_set_size(w.removeBtn, 26, 26);
         lv_obj_set_style_bg_color(w.removeBtn, lv_color_hex(CLR_SURFACE), 0);
@@ -590,7 +602,7 @@ private:
         lv_obj_set_user_data(w.removeBtn, (void*)(intptr_t)idx);
         lv_obj_add_event_cb(w.removeBtn, _onCollapseTapped, LV_EVENT_CLICKED, this);
         lv_obj_t* xLbl = lv_label_create(w.removeBtn);
-        lv_label_set_text(xLbl, LV_SYMBOL_CLOSE);
+        lv_label_set_text(xLbl, LV_SYMBOL_UP);
         lv_obj_set_style_text_font(xLbl, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(xLbl, lv_color_hex(CLR_MUTED), 0);
         lv_obj_center(xLbl);
@@ -613,27 +625,30 @@ private:
 
         w.priceLabel = lv_label_create(priceRow);
         _updatePriceLabel(idx);
-        lv_obj_set_style_text_font(w.priceLabel, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(w.priceLabel, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_style_text_font(w.priceLabel, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(w.priceLabel, lv_color_hex(0xc4c4cc), 0);
 
         w.changeLabel = lv_label_create(priceRow);
         _updateChangeLabel(idx);
         lv_obj_set_style_text_font(w.changeLabel, &lv_font_montserrat_12, 0);
 
-        // ── Real candlestick price chart ──
+        // ── Real candlestick price chart (DAILY bars) ──
         // Same one-series + draw-callback technique as the Turbo screen's
         // weekly chart: the BAR series carries each candle's HIGH; the
         // callback reshapes the bar into a thin grey wick (low→high) in
         // DRAW_PART_BEGIN and paints the open→close body (green/red) on top
-        // in DRAW_PART_END. Plain vertical bars of the close told nothing.
+        // in DRAW_PART_END. It also rewrites the Y-axis ticks into real USD
+        // prices so the chart is actually readable.
         w.chart = lv_chart_create(w.container);
-        lv_obj_set_size(w.chart, LV_PCT(100), 84);
+        lv_obj_set_size(w.chart, LV_PCT(100), 72);
         lv_chart_set_type(w.chart, LV_CHART_TYPE_BAR);
         lv_chart_set_point_count(w.chart, CHART_BARS);
         lv_chart_set_range(w.chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
         lv_obj_set_style_bg_opa(w.chart, LV_OPA_0, 0);
         lv_obj_set_style_border_width(w.chart, 0, 0);
+        lv_obj_set_style_pad_left(w.chart, 46, 0);   // room for the Y-axis price labels
         lv_chart_set_div_line_count(w.chart, 3, 0);   // vdiv MUST be 0 or >= 2 (LVGL div-by-zero)
+        lv_chart_set_axis_tick(w.chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 46);
         lv_obj_set_style_line_color(w.chart, lv_color_hex(CLR_BORDER), LV_PART_MAIN);
         lv_obj_set_user_data(w.chart, (void*)(intptr_t)idx);
         lv_obj_add_event_cb(w.chart, _candleDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
@@ -641,6 +656,24 @@ private:
 
         w.series = lv_chart_add_series(w.chart, lv_color_hex(CLR_GREEN), LV_CHART_AXIS_PRIMARY_Y);
         _updateChartData(idx);
+
+        // X-axis time legend (24 daily bars, newest on the right).
+        lv_obj_t* xRow = lv_obj_create(w.container);
+        lv_obj_set_size(xRow, LV_PCT(100), 12);
+        lv_obj_set_style_bg_opa(xRow, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(xRow, 0, 0);
+        lv_obj_set_style_pad_all(xRow, 0, 0);
+        lv_obj_set_style_pad_left(xRow, 46, 0);
+        lv_obj_set_flex_flow(xRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(xRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(xRow, LV_OBJ_FLAG_SCROLLABLE);
+        static const char* XT[3] = { "-24d", "-12d", "now" };
+        for (int i = 0; i < 3; i++) {
+            lv_obj_t* l = lv_label_create(xRow);
+            lv_label_set_text(l, XT[i]);
+            lv_obj_set_style_text_color(l, lv_color_hex(CLR_MUTED), 0);
+            lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
+        }
     }
 
     // Candlestick renderer for the expanded card chart (see comment above).
@@ -655,6 +688,19 @@ private:
         if (!t.chart_loaded || t.chart_count == 0) return;
 
         lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
+
+        // Y-axis tick labels → real USD prices (values are scaled 0–1000).
+        if (lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) {
+            if (dsc->text && dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
+                float p = w.chartMin + ((float)dsc->value / 1000.0f) * w.chartRange;
+                if      (p >= 1.0f)    snprintf(dsc->text, dsc->text_length, "$%.2f", p);
+                else if (p >= 0.01f)   snprintf(dsc->text, dsc->text_length, "$%.3f", p);
+                else if (p >= 0.0001f) snprintf(dsc->text, dsc->text_length, "$%.5f", p);
+                else                   snprintf(dsc->text, dsc->text_length, "$%.1e", p);
+            }
+            return;
+        }
+
         if (dsc->part != LV_PART_ITEMS) return;
         uint32_t i = dsc->id;
         if (i >= (uint32_t)t.chart_count) return;
@@ -1074,9 +1120,14 @@ private:
                     self->_pending.type = PR_LIST_LOADED;
                 }
                 http.end();
-                // After loading list, kick off live price fetches for each ticker
+                // After loading the list, fetch live prices AND chart data for
+                // every ticker, so the compact cards' sparklines appear right
+                // away (they used to stay empty until the first expand).
                 for (int i = 0; i < self->_tickerCount; i++) {
                     TickerScreen::_fetchLive(self, i);
+                }
+                for (int i = 0; i < self->_tickerCount; i++) {
+                    TickerScreen::_fetchChart(self, i);
                 }
                 break;
             }
@@ -1087,37 +1138,7 @@ private:
             }
 
             case TT_LOAD_CHART: {
-                TickerEntry& te = self->_tickers[p->ticker_index];
-                const char* net = chainToGT(te.chain_id);
-                String url = String(ENDPOINT_GECKOTERMINAL_OHLCV) + net +
-                             "/pools/" + te.pool_address +
-                             "/ohlcv/hour?aggregate=1&limit=" + CHART_BARS + "&currency=usd&token=base";
-                HTTPClient http;
-                http.useHTTP10(true);   // avoid chunked encoding — parsed from getStream()
-                http.begin(url);
-                http.addHeader("Accept", "application/json");
-                int code = http.GET();
-                if (code == 200) {
-                    JsonDocument doc;
-                    deserializeJson(doc, http.getStream());
-                    JsonArray ohlcv = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
-                    int n = 0;
-                    // ohlcv_list rows are [ts, o, h, l, c, v], newest-first →
-                    // reverse into oldest-first OHLC arrays for the candles.
-                    int total = min((int)ohlcv.size(), CHART_BARS);
-                    for (int i = total - 1; i >= 0 && n < CHART_BARS; i--) {
-                        te.chart_open  [n] = ohlcv[i][1].as<float>();
-                        te.chart_high  [n] = ohlcv[i][2].as<float>();
-                        te.chart_low   [n] = ohlcv[i][3].as<float>();
-                        te.chart_closes[n] = ohlcv[i][4].as<float>();
-                        n++;
-                    }
-                    te.chart_count  = n;
-                    te.chart_loaded = true;
-                    self->_pending.type         = PR_CHART_LOADED;
-                    self->_pending.tickerIndex  = p->ticker_index;
-                }
-                http.end();
+                _fetchChart(self, p->ticker_index);
                 break;
             }
 
@@ -1306,6 +1327,42 @@ private:
         vTaskDelete(nullptr);
     }
 
+    // Fetches DAILY OHLC candles from GeckoTerminal for one ticker's chart
+    // (called from the bg task). Sets te.chart_dirty; pollPending applies the
+    // data to whichever card widget exists on the UI thread.
+    static void _fetchChart(TickerScreen* self, int idx) {
+        TickerEntry& te = self->_tickers[idx];
+        const char* net = chainToGT(te.chain_id);
+        String url = String(ENDPOINT_GECKOTERMINAL_OHLCV) + net +
+                     "/pools/" + te.pool_address +
+                     "/ohlcv/day?aggregate=1&limit=" + CHART_BARS + "&currency=usd&token=base";
+        HTTPClient http;
+        http.useHTTP10(true);   // avoid chunked encoding — parsed from getStream()
+        http.begin(url);
+        http.addHeader("Accept", "application/json");
+        int code = http.GET();
+        if (code == 200) {
+            JsonDocument doc;
+            deserializeJson(doc, http.getStream());
+            JsonArray ohlcv = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
+            int n = 0;
+            // ohlcv_list rows are [ts, o, h, l, c, v], newest-first →
+            // reverse into oldest-first OHLC arrays for the candles.
+            int total = min((int)ohlcv.size(), CHART_BARS);
+            for (int i = total - 1; i >= 0 && n < CHART_BARS; i--) {
+                te.chart_open  [n] = ohlcv[i][1].as<float>();
+                te.chart_high  [n] = ohlcv[i][2].as<float>();
+                te.chart_low   [n] = ohlcv[i][3].as<float>();
+                te.chart_closes[n] = ohlcv[i][4].as<float>();
+                n++;
+            }
+            te.chart_count  = n;
+            te.chart_loaded = true;
+            te.chart_dirty  = true;   // pollPending redraws on core 1
+        }
+        http.end();
+    }
+
     // Fetches live price/FDV from DexScreener for one ticker (called from bg task)
     static void _fetchLive(TickerScreen* self, int idx) {
         TickerEntry& te = self->_tickers[idx];
@@ -1322,7 +1379,9 @@ private:
             if (!pair.isNull()) {
                 te.price_usd  = atof(pair["priceUsd"] | "0");
                 te.change_24h = pair["priceChange"]["h24"] | 0.0f;
-                te.fdv        = pair["fdv"] | 0.0f;
+                // Market cap preferred; FDV only as fallback when DexScreener
+                // doesn't report a circulating-supply-based cap for the token.
+                te.fdv        = pair["marketCap"] | (pair["fdv"] | 0.0f);
                 strncpy(te.logo_url, pair["info"]["imageUrl"] | "", sizeof(te.logo_url)-1);
                 te.live_loaded = true;
                 self->_pending.type        = PR_LIVE_LOADED;
@@ -1335,19 +1394,55 @@ private:
         if (te.logo_url[0] && !te.logo_ready) _fetchLogo(self, idx);
     }
 
-    // Downloads the token logo PNG (DexScreener info.imageUrl), decodes it
-    // with LVGL's bundled lodepng, and downscales to a ready-to-blit 40×40
+    // ── tjpgd glue: decode a baseline JPEG from RAM into an RGB888 buffer ──
+    struct JpegCtx {
+        const uint8_t* in;      // compressed JPEG
+        size_t   inSize;
+        size_t   inPos;
+        uint8_t* rgb;           // decoded RGB888, w*h*3 (allocated by caller)
+        uint16_t w, h;
+    };
+    static size_t _jpegIn(JDEC* jd, uint8_t* buf, size_t len) {
+        JpegCtx* c = (JpegCtx*)jd->device;
+        if (len > c->inSize - c->inPos) len = c->inSize - c->inPos;
+        if (buf) memcpy(buf, c->in + c->inPos, len);
+        c->inPos += len;
+        return len;
+    }
+    static int _jpegOut(JDEC* jd, void* bitmap, JRECT* rect) {
+        JpegCtx* c = (JpegCtx*)jd->device;
+        const uint8_t* src = (const uint8_t*)bitmap;   // RGB888 (JD_FORMAT 0)
+        for (int y = rect->top; y <= rect->bottom; y++) {
+            for (int x = rect->left; x <= rect->right; x++) {
+                if (x < c->w && y < c->h)
+                    memcpy(&c->rgb[(y * c->w + x) * 3], src, 3);
+                src += 3;
+            }
+        }
+        return 1;   // continue decompression
+    }
+
+    // Downloads the token logo (DexScreener info.imageUrl), decodes it (PNG
+    // via lodepng or baseline JPEG via tjpgd — the CDN serves JPEG even when
+    // asked for PNG), and downscales to a ready-to-blit 40×40
     // LV_IMG_CF_TRUE_COLOR_ALPHA bitmap. Doing the decode+scale ONCE here in
-    // the bg task (instead of registering the LVGL PNG decoder) means zero
+    // the bg task (instead of registering LVGL image decoders) means zero
     // per-frame decode cost on the RGB panel and a tiny fixed footprint
     // (40×40×3 B ≈ 4.7 KB per ticker). Runs on core 0; hands the finished
     // bitmap to the UI via te.logo_ready (applied by pollPending on core 1).
     static void _fetchLogo(TickerScreen* self, int idx) {
         TickerEntry& te = self->_tickers[idx];
 
+        // Ask the CDN for a small variant: strip the original query (which
+        // requests 800×800) and use 64×64 (a size the CDN accepts — 96 isn't).
+        String url = te.logo_url;
+        int q = url.indexOf('?');
+        if (q >= 0) url = url.substring(0, q);
+        url += "?width=64&height=64&quality=80";
+
         HTTPClient http;
         http.useHTTP10(true);
-        http.begin(String(te.logo_url));
+        http.begin(url);
         http.setTimeout(9000);
         if (http.GET() != 200) { http.end(); return; }
 
@@ -1372,18 +1467,57 @@ private:
         http.end();
         if (pngLen < 8) { free(png); return; }
 
+        // Decode to RGBA8888 (rgba, iw×ih) — format picked by magic bytes.
         unsigned char* rgba = nullptr;
         unsigned iw = 0, ih = 0;
-        unsigned rc = lodepng_decode32(&rgba, &iw, &ih, png, pngLen);
-        free(png);
-        if (rc != 0 || !rgba || iw == 0 || ih == 0) { if (rgba) lv_mem_free(rgba); return; }
+        bool rgbaFromLvMem = false;   // lodepng allocates via lv_mem_alloc
+
+        if (png[0] == 0x89 && png[1] == 0x50) {
+            // PNG
+            unsigned rc = lodepng_decode32(&rgba, &iw, &ih, png, pngLen);
+            free(png);
+            if (rc != 0 || !rgba || iw == 0 || ih == 0) { if (rgba) lv_mem_free(rgba); return; }
+            rgbaFromLvMem = true;
+        } else if (png[0] == 0xFF && png[1] == 0xD8) {
+            // Baseline JPEG via tjpgd (what DexScreener's CDN actually sends).
+            uint8_t* work = (uint8_t*)malloc(4096);   // tjpgd workspace (needs ~3.1 KB)
+            if (!work) { free(png); return; }
+            JDEC jd;
+            JpegCtx ctx{ png, pngLen, 0, nullptr, 0, 0 };
+            if (jd_prepare(&jd, _jpegIn, work, 4096, &ctx) != JDR_OK) { free(work); free(png); return; }
+            ctx.w = jd.width; ctx.h = jd.height;
+            if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 512u * 512u) { free(work); free(png); return; }
+            ctx.rgb = (uint8_t*)heap_caps_malloc((uint32_t)ctx.w * ctx.h * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!ctx.rgb) ctx.rgb = (uint8_t*)malloc((uint32_t)ctx.w * ctx.h * 3);
+            if (!ctx.rgb) { free(work); free(png); return; }
+            JRESULT dr = jd_decomp(&jd, _jpegOut, 0);
+            free(work);
+            free(png);
+            if (dr != JDR_OK) { free(ctx.rgb); return; }
+            // Expand RGB888 → RGBA8888 (alpha 255) so the scaler below is shared.
+            iw = ctx.w; ih = ctx.h;
+            rgba = (unsigned char*)heap_caps_malloc((uint32_t)iw * ih * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!rgba) rgba = (unsigned char*)malloc((uint32_t)iw * ih * 4);
+            if (!rgba) { free(ctx.rgb); return; }
+            for (uint32_t i = 0; i < (uint32_t)iw * ih; i++) {
+                rgba[i * 4 + 0] = ctx.rgb[i * 3 + 0];
+                rgba[i * 4 + 1] = ctx.rgb[i * 3 + 1];
+                rgba[i * 4 + 2] = ctx.rgb[i * 3 + 2];
+                rgba[i * 4 + 3] = 255;
+            }
+            free(ctx.rgb);
+        } else {
+            // webp/unknown — no decoder on-device; keep the letter fallback.
+            free(png);
+            return;
+        }
 
         // Nearest-neighbour downscale to 40×40, RGBA8888 → RGB565+A8 (LVGL
         // TRUE_COLOR_ALPHA at LV_COLOR_DEPTH 16: [lo, hi, alpha] per pixel).
         const int W = 40, H = 40;
         uint8_t* px = (uint8_t*)heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!px) px = (uint8_t*)malloc(W * H * 3);
-        if (!px) { lv_mem_free(rgba); return; }
+        if (!px) { if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return; }
         for (int y = 0; y < H; y++) {
             unsigned sy = (unsigned)((uint64_t)y * ih / H);
             for (int x = 0; x < W; x++) {
@@ -1396,7 +1530,7 @@ private:
                 dp[2] = sp[3];
             }
         }
-        lv_mem_free(rgba);
+        if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba);
 
         te.logo_dsc.header.always_zero = 0;
         te.logo_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
@@ -1541,6 +1675,15 @@ public:
         for (int i = 0; i < self->_tickerCount; i++) {
             if (self->_tickers[i].logo_ready && !self->_tickers[i].logo_applied)
                 self->_applyLogoIfReady(i);
+        }
+
+        // Apply freshly fetched chart data (compact sparklines now load right
+        // after the list does — they used to stay empty until first expand).
+        for (int i = 0; i < self->_tickerCount; i++) {
+            if (self->_tickers[i].chart_dirty) {
+                self->_tickers[i].chart_dirty = false;
+                self->_updateChartData(i);
+            }
         }
 
         // A list reload was requested while the worker was busy (e.g. right

@@ -121,6 +121,12 @@
                                 * png *decoder* is not registered — no per-frame
                                 * decode cost on the RGB panel. */
 
+#define LV_USE_SJPG        1   /* compiles LVGL's bundled tjpgd; screen_tickers.h
+                                * calls jd_prepare/jd_decomp directly for token
+                                * logos — DexScreener's CDN serves baseline JPEG
+                                * even when asked for PNG. Decoder not registered
+                                * with LVGL for the same per-frame-cost reason. */
+
 /*====================
    THEME
  *====================*/

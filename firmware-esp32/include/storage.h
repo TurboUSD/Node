@@ -36,6 +36,25 @@ public:
     String getNodeCode() { return prefs.getString(NVS_KEY_NODE_CODE, ""); }
     void setNodeCode(const String& code) { prefs.putString(NVS_KEY_NODE_CODE, code); }
 
+    // --- Setup token (owner-only web setup) ---
+    // Random per-device secret, generated ONCE on first use and persisted.
+    // It is embedded in the Settings QR (/setup/CODE?t=TOKEN) and reported to
+    // the backend via register/heartbeat; the web setup page must present it
+    // to read or change this node's config. Whoever physically holds the
+    // device can see the QR → they are the owner. 64 bits of esp_random()
+    // (hardware RNG) is plenty for a low-value, rate-limited endpoint.
+    String getSetupToken() {
+        String t = prefs.getString(NVS_KEY_SETUP_TOKEN, "");
+        if (t.length() == 0) {
+            char buf[17];
+            snprintf(buf, sizeof(buf), "%08lx%08lx",
+                     (unsigned long)esp_random(), (unsigned long)esp_random());
+            t = String(buf);
+            prefs.putString(NVS_KEY_SETUP_TOKEN, t);
+        }
+        return t;
+    }
+
     // --- Alarm ---
     uint8_t getAlarmHour() { return prefs.getUChar(NVS_KEY_ALARM_HOUR, 7); }
     uint8_t getAlarmMinute() { return prefs.getUChar(NVS_KEY_ALARM_MIN, 30); }

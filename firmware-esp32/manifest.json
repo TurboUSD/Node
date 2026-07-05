@@ -2,14 +2,15 @@
   "name": "TurboUSD Node",
   "version": "0.1.0",
   "new_install_prompt_erase": true,
+  "_comment": "DISCRETE parts, deliberately NOT one merged blob at 0x0: a merged image spans the NVS partition at 0x9000 and fills it with 0xFF, wiping saved WiFi credentials on EVERY web re-flash (even without 'erase'). Flashing the parts at their real offsets leaves the NVS region untouched, so updates keep WiFi + settings. Offsets match firmware-esp32/partitions.csv: bootloader 0x0, partition table 0x8000 (32768), boot_app0 0xe000 (57344), app 0x10000 (65536). All four files are published by the CI release workflow and served same-origin via web/app/firmware/[file]/route.ts (GitHub asset URLs lack CORS headers).",
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
-        {
-          "path": "https://network.turbousd.com/firmware/firmware-esp32s3.bin",
-          "offset": 0
-        }
+        { "path": "https://network.turbousd.com/firmware/bootloader.bin", "offset": 0 },
+        { "path": "https://network.turbousd.com/firmware/partitions.bin", "offset": 32768 },
+        { "path": "https://network.turbousd.com/firmware/boot_app0.bin", "offset": 57344 },
+        { "path": "https://network.turbousd.com/firmware/app.bin", "offset": 65536 }
       ]
     }
   ]

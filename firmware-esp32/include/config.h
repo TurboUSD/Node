@@ -96,6 +96,7 @@
 #define NVS_KEY_WIFI_PASS     "wifi_pass"
 #define NVS_KEY_MAC_ADDRESS   "mac_addr"
 #define NVS_KEY_NODE_CODE     "node_code"
+#define NVS_KEY_SETUP_TOKEN   "setup_tok"   // per-device secret for owner-only web setup
 #define NVS_KEY_ALARM_HOUR    "alarm_h"
 #define NVS_KEY_ALARM_MIN     "alarm_m"
 #define NVS_KEY_ALARM_ON      "alarm_on"

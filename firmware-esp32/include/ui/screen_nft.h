@@ -222,7 +222,7 @@ public:
             // node's web setup page, or by tapping the grid to open the dialog.
             _rebuildGrid();
             lv_label_set_text(_loadingLabel,
-                "No NFT wallet set.\nTap here to enter one,\nor add it on your node's setup page.");
+                "No NFT wallet set.\nTap the + WALLET button at the top\nto enter one, or add it on your\nnode's setup page.");
         } else if (_cacheExpired()) {
             _startFetch();
         } else {
@@ -742,7 +742,7 @@ private:
         lv_obj_set_style_text_color(title, lv_color_hex(NFT_CLR_MUTED), 0);
 
         lv_obj_t* hint = lv_label_create(card);
-        lv_label_set_text(hint, "Enter your EVM wallet address to view your NFTs.");
+        lv_label_set_text(hint, "Enter your EVM wallet address (0x...)\nor ENS name (yourname.eth) to view your NFTs.");
         lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(hint, 280);
         lv_obj_set_style_text_font(hint, &lv_font_montserrat_10, 0);
@@ -755,7 +755,7 @@ private:
         lv_obj_set_style_text_font(ta, &lv_font_montserrat_10, 0);
         lv_obj_set_style_bg_color(ta, lv_color_hex(0x141414), 0);
         lv_obj_set_style_border_color(ta, lv_color_hex(NFT_CLR_GREEN), LV_STATE_FOCUSED);
-        lv_textarea_set_max_length(ta, 42);
+        lv_textarea_set_max_length(ta, 64);   // fits an ENS name, not just 0x addresses
 
         // Pre-fill saved wallet if any
         String saved = storage.getNftWallet();
@@ -781,7 +781,13 @@ private:
 
         lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
             const char* w = lv_textarea_get_text(sTa);
-            if (!w || strlen(w) < 42) return;
+            if (!w) return;
+            size_t len = strlen(w);
+            // Accept a full 0x address (42 chars) OR an ENS name ("x.eth",
+            // min 5 chars) — the fetch task resolves ENS to the address.
+            bool isAddr = (len == 42 && strncmp(w, "0x", 2) == 0);
+            bool isEns  = (len >= 5 && strcasecmp(w + len - 4, ".eth") == 0);
+            if (!isAddr && !isEns) return;
             storage.setNftWallet(String(w));
             closeModal(sCard);
             if (sSelf) sSelf->_startFetch();
@@ -801,6 +807,36 @@ private:
         if (!self) { vTaskDelete(nullptr); return; }
 
         String wallet = storage.getNftWallet();
+
+        // ENS support: "tonysoprano.eth" → resolve to the 0x address via the
+        // public ensideas resolver. The ENS name stays in NVS (it's what the
+        // user typed and recognises); resolution happens per fetch, which the
+        // daily NFT cache already rate-limits.
+        if (wallet.length() >= 5 && wallet.endsWith(".eth")) {
+            HTTPClient ens;
+            ens.useHTTP10(true);   // body parsed from getStream()
+            String lower = wallet; lower.toLowerCase();
+            ens.begin("https://api.ensideas.com/ens/resolve/" + lower);
+            ens.setTimeout(8000);
+            String resolved;
+            if (ens.GET() == 200) {
+                JsonDocument doc;
+                if (deserializeJson(doc, ens.getStream()) == DeserializationError::Ok)
+                    resolved = doc["address"] | "";
+            }
+            ens.end();
+            if (resolved.length() == 42 && resolved.startsWith("0x")) {
+                wallet = resolved;
+            } else {
+                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
+                         "Could not resolve %s", wallet.c_str());
+                _pendingResult.error = true;
+                _pendingResult.ready = true;
+                vTaskDelete(nullptr);
+                return;
+            }
+        }
+
         if (wallet.length() < 42) {
             snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "No wallet configured.");
             _pendingResult.error = true;

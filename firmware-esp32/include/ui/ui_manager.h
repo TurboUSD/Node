@@ -28,6 +28,7 @@
 #include "esp_sleep.h"          // light sleep for the user-button "power off"
 #include "board_pins.h"
 #include "api_client.h"
+#include "rp2040_link.h"   // confirmation chime on alarm save (link self-test)
 #include "storage.h"
 
 // Large clock font (Montserrat 72px, digits + ":" + AM/PM) — assets/montserrat_clock.c
@@ -1105,6 +1106,11 @@ private:
             uint8_t m = lv_roller_get_selected(sMinRoller);
             storage.setAlarm(h, m, sAlarmEnabled);
             storage.setAlarmDays(sDayMask);
+            // Short confirmation beep — doubles as an end-to-end test of the
+            // ESP32→RP2040 buzzer link: if saving the alarm chirps, the alarm
+            // itself will sound; if it doesn't, the UART link is the problem
+            // (not the alarm logic or the buzzer).
+            rp2040Link.playChime();
             closeModal(sCard);
         }, LV_EVENT_CLICKED, nullptr);
 
@@ -1211,18 +1217,23 @@ private:
 
         // The DEVICE's config QR is the OWNER's entry point: whoever physically
         // holds the device (and sees this screen) is treated as the owner, so it
-        // points at the private /setup/ page. The PUBLIC profile (/node/<code>)
-        // is what the network map / ranking links use instead — see web/app/node/.
-        // ("No node found" here means the backend simply has no record for this
-        // code yet, i.e. Supabase isn't deployed / the node never registered —
-        // it is not a wrong-URL problem.)
-        String setupUrl = "https://network.turbousd.com/setup/" + storage.getNodeCode();
+        // points at the private /setup/ page WITH the per-device secret token
+        // (?t=...) — without it the web page refuses to show or save anything,
+        // so merely knowing the public 4-char code is no longer enough to edit
+        // someone else's node. The PUBLIC profile (/node/<code>) is what the
+        // network map / ranking links use instead — see web/app/node/.
+        String setupUrl = "https://network.turbousd.com/setup/" + storage.getNodeCode()
+                        + "?t=" + storage.getSetupToken();
         addQrCode(card, setupUrl.c_str(), 120);
 
+        // Full URL (incl. token) under the QR, so it can also be typed by hand.
         lv_obj_t* urlHint = lv_label_create(card);
         lv_label_set_text(urlHint, setupUrl.c_str());
         lv_obj_set_style_text_color(urlHint, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(urlHint, &lv_font_montserrat_10, 0);
+        lv_label_set_long_mode(urlHint, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(urlHint, LV_PCT(100));
+        lv_obj_set_style_text_align(urlHint, LV_TEXT_ALIGN_CENTER, 0);
 
         lv_obj_t* prefsTitle = lv_label_create(card);
         lv_label_set_text(prefsTitle, "DISPLAY PREFERENCES");

@@ -37,18 +37,27 @@ public:
         lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
         lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
 
+        // 2×2 stat grid drawn with SINGLE separator lines: cells have no full
+        // borders of their own (adjacent borders doubled up into ugly twin
+        // lines) — instead the right-column cells draw only their LEFT edge
+        // (one shared vertical line) and the second-row cells only their TOP
+        // edge (one shared horizontal line).
         lv_obj_t* row1 = makeStatRow(body);
-        supplyValueLabel = makeStatCell(row1, "SUPPLY", lv_color_hex(0x3a8ade));
+        supplyValueLabel = makeStatCell(row1, "SUPPLY", lv_color_hex(0x3a8ade), LV_BORDER_SIDE_NONE);
         makePriceCell(row1);  // price needs a multi-label value for the subscript
 
         lv_obj_t* row2 = makeStatRow(body);
-        burnedValueLabel = makeStatCell(row2, "TOTAL BURNED", lv_color_hex(0xff4d4d));
-        treasuryValueLabel = makeStatCell(row2, "TREASURY", lv_color_hex(0xe8b339));
+        burnedValueLabel = makeStatCell(row2, "TOTAL BURNED", lv_color_hex(0xff4d4d), LV_BORDER_SIDE_TOP);
+        treasuryValueLabel = makeStatCell(row2, "TREASURY", lv_color_hex(0xe8b339),
+                                          (lv_border_side_t)(LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT));
 
         chart = lv_chart_create(body);
-        lv_obj_set_size(chart, LV_PCT(96), LV_PCT(55));
+        lv_obj_set_size(chart, LV_PCT(100), LV_PCT(50));
         lv_obj_set_style_bg_color(chart, lv_color_black(), 0);
         lv_obj_set_style_border_width(chart, 0, 0);
+        lv_obj_set_style_pad_left(chart, 46, 0);   // room for the Y-axis price labels
+        lv_obj_set_style_pad_right(chart, 6, 0);
+        lv_obj_set_style_pad_top(chart, 6, 0);
         lv_chart_set_type(chart, LV_CHART_TYPE_BAR);
         lv_chart_set_point_count(chart, 26);
         // ONE series whose bar height = the candle's HIGH (= full wick height).
@@ -59,6 +68,9 @@ public:
         openCloseSeries = lv_chart_add_series(chart, lv_color_hex(0x3aff7a), LV_CHART_AXIS_PRIMARY_Y);
         lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
         lv_chart_set_div_line_count(chart, 3, 0);
+        // Y axis: 5 price ticks; the draw callback maps the 0–1000 scaled
+        // values back to real USD prices (see onChartDrawPart).
+        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 5, 1, true, 46);
 
         auto chartCb = [](lv_event_t* e) {
             TurboScreen* self = (TurboScreen*)lv_event_get_user_data(e);
@@ -66,6 +78,25 @@ public:
         };
         lv_obj_add_event_cb(chart, chartCb, LV_EVENT_DRAW_PART_BEGIN, this);
         lv_obj_add_event_cb(chart, chartCb, LV_EVENT_DRAW_PART_END,   this);
+
+        // X-axis time legend (weekly candles, newest on the right).
+        lv_obj_t* xRow = lv_obj_create(body);
+        lv_obj_set_size(xRow, LV_PCT(100), 14);
+        lv_obj_set_style_bg_opa(xRow, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(xRow, 0, 0);
+        lv_obj_set_style_pad_all(xRow, 0, 0);
+        lv_obj_set_style_pad_left(xRow, 46, 0);
+        lv_obj_set_style_pad_right(xRow, 6, 0);
+        lv_obj_set_flex_flow(xRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(xRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(xRow, LV_OBJ_FLAG_SCROLLABLE);
+        static const char* XT[3] = { "-6m", "-3m", "now" };
+        for (int i = 0; i < 3; i++) {
+            lv_obj_t* l = lv_label_create(xRow);
+            lv_label_set_text(l, XT[i]);
+            lv_obj_set_style_text_color(l, lv_color_hex(0x6e7280), 0);
+            lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
+        }
 
         return body;
     }
@@ -160,10 +191,11 @@ private:
     // with several labels, so the zero-run count can render as a real subscript.
     void makePriceCell(lv_obj_t* row) {
         lv_obj_t* cell = lv_obj_create(row);
-        lv_obj_set_size(cell, LV_PCT(49), LV_PCT(100));
+        lv_obj_set_size(cell, LV_PCT(50), LV_PCT(100));
         lv_obj_set_style_bg_opa(cell, LV_OPA_0, 0);
-        lv_obj_set_style_border_color(cell, lv_color_hex(0x262626), 0);
+        lv_obj_set_style_border_color(cell, lv_color_hex(0x2e2e34), 0);
         lv_obj_set_style_border_width(cell, 1, 0);
+        lv_obj_set_style_border_side(cell, LV_BORDER_SIDE_LEFT, 0);  // single shared vertical line of the 2×2 grid
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
@@ -231,6 +263,20 @@ private:
     // is exact without needing lv_chart_get_y_range_max().
     void onChartDrawPart(lv_event_t* e) {
         lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
+
+        // Y-axis tick labels: chart values are scaled to 0–1000, so map each
+        // tick back to the real USD price for display.
+        if (lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) {
+            if (dsc->text && dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
+                double p = _minPrice + ((double)dsc->value / 1000.0) * _priceRange;
+                if      (p >= 1.0)    snprintf(dsc->text, dsc->text_length, "$%.2f", p);
+                else if (p >= 0.01)   snprintf(dsc->text, dsc->text_length, "$%.3f", p);
+                else if (p >= 0.0001) snprintf(dsc->text, dsc->text_length, "$%.5f", p);
+                else                  snprintf(dsc->text, dsc->text_length, "$%.1e", p);
+            }
+            return;
+        }
+
         if (dsc->part != LV_PART_ITEMS) return;
         uint32_t idx = dsc->id;
         if (idx >= (uint32_t)candleData.size()) return;
@@ -299,15 +345,19 @@ private:
         lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
         lv_obj_set_style_border_width(row, 0, 0);
         lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_set_style_pad_column(row, 0, 0);   // cells must touch so the grid lines are continuous
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
         return row;
     }
 
-    lv_obj_t* makeStatCell(lv_obj_t* row, const char* label, lv_color_t color) {
+    lv_obj_t* makeStatCell(lv_obj_t* row, const char* label, lv_color_t color,
+                           lv_border_side_t side) {
         lv_obj_t* cell = lv_obj_create(row);
-        lv_obj_set_size(cell, LV_PCT(49), LV_PCT(100));
+        lv_obj_set_size(cell, LV_PCT(50), LV_PCT(100));
         lv_obj_set_style_bg_opa(cell, LV_OPA_0, 0);
-        lv_obj_set_style_border_color(cell, lv_color_hex(0x262626), 0);
-        lv_obj_set_style_border_width(cell, 1, 0);
+        lv_obj_set_style_border_color(cell, lv_color_hex(0x2e2e34), 0);
+        lv_obj_set_style_border_width(cell, side == LV_BORDER_SIDE_NONE ? 0 : 1, 0);
+        lv_obj_set_style_border_side(cell, side, 0);  // only the shared grid lines — no doubled edges
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         // Stat cells never scroll — without this, content 1px taller than the

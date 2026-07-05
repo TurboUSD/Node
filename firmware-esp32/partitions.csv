@@ -1,16 +1,29 @@
 # TurboUSD Node — partition table for ESP32-S3 with 8 MB flash
-# Layout: NVS + OTA metadata + two equal app slots + SPIFFS for assets
+# Layout: OTA metadata + two equal app slots + SPIFFS + NVS at the very END.
+#
+# WHY NVS LIVES AT THE TOP OF FLASH (0x7FB000), not the usual 0x9000:
+# every full/factory image (esptool merge_bin, or any flash that writes the
+# bootloader+partitions+app region) spans 0x0 → end-of-app and PADS THE GAPS
+# WITH 0xFF — with NVS at 0x9000 that wiped the saved WiFi credentials on
+# EVERY re-flash, even with "erase" unchecked. Placed above the app slots,
+# no bootloader/partition-table/app image can ever touch it: WiFi + settings
+# now survive web re-flashes, factory images and OTA alike. (Only an explicit
+# full-chip erase clears it.)
+#
+# The old 0x9000–0xDFFF region is left unused (padding) on purpose.
+# NOTE: the first flash of THIS table relocates NVS, so WiFi is asked once
+# more on that boot — every flash after that keeps it.
 #
 # Offsets / sizes must stay within 0x800000 (8 MB total):
-#   nvs      0x9000  →  0xDFFF   (20 KB)
 #   otadata  0xE000  →  0xFFFF   (8 KB)
 #   app0     0x10000 → 0x33FFFF  (3.1875 MB)  — OTA slot 0 (active after first flash)
 #   app1     0x340000→ 0x66FFFF  (3.1875 MB)  — OTA slot 1 (target during OTA update)
-#   spiffs   0x670000→ 0x7FFFFF  (1.5625 MB)  — filesystem (logos, certs, etc.)
+#   spiffs   0x670000→ 0x7FAFFF  (~1.54 MB)   — filesystem (logos, certs, etc.)
+#   nvs      0x7FB000→ 0x7FFFFF  (20 KB)      — WiFi creds + settings (see above)
 #
 # Name,   Type, SubType, Offset,   Size,     Flags
-nvs,      data, nvs,     0x9000,   0x5000,
 otadata,  data, ota,     0xe000,   0x2000,
 app0,     app,  ota_0,   0x10000,  0x330000,
 app1,     app,  ota_1,   0x340000, 0x330000,
-spiffs,   data, spiffs,  0x670000, 0x190000,
+spiffs,   data, spiffs,  0x670000, 0x18b000,
+nvs,      data, nvs,     0x7fb000, 0x5000,
