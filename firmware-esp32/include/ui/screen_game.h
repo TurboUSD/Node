@@ -75,7 +75,9 @@ public:
         // vdiv must be 0 or >= 2 — vdiv_cnt == 1 divide-by-zero panics LVGL 8's
         // draw_div_lines on first draw (same crash as the Debt screen had).
         lv_chart_set_div_line_count(chart, 4, 0);
-        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 5, 1, true, 46);
+        // draw_size (last arg) is the area the label right-aligns into: it must
+        // be ~gutter-width or wide labels ("$10.0k") clip their left edge.
+        lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 5, 1, true, 60);
         projectionSeries = lv_chart_add_series(chart, lv_color_hex(0xff4d4d), LV_CHART_AXIS_PRIMARY_Y);
         lv_obj_add_event_cb(chart, _axisDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
 

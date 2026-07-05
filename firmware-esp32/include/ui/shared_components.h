@@ -186,6 +186,15 @@ inline void refreshSharedHeader(SharedHeaderRefs& refs, struct tm& t, float temp
     }
     lv_label_set_text(refs.timeLabel, timeBuf);
 
+    // Re-seat the bell: lv_obj_align_to() is ONE-SHOT and originally ran at
+    // build time against an EMPTY time label (width 0). Once "22:30" fills in,
+    // the label grows leftward into the bell's gap — so re-align against the
+    // real width on every clock refresh (needs an up-to-date layout first).
+    if (refs.alarmIcon) {
+        lv_obj_update_layout(refs.timeLabel);
+        lv_obj_align_to(refs.alarmIcon, refs.timeLabel, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+    }
+
     char tempBuf[12];
     char humBuf[12];
     if (sensorValid) {
