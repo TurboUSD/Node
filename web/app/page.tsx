@@ -1077,12 +1077,12 @@ const s: Record<string, React.CSSProperties> = {
   rank: { fontSize: 14, width: 28, textAlign: 'center', flexShrink: 0 },
 
   // Node detail panel
-  backdrop: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 200 },
+  backdrop: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 2000 },
   panel: {
     position: 'fixed', bottom: 0, left: 0, right: 0,
     background: C.card, border: `1px solid ${C.border}`, borderBottom: 'none',
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: '36px 24px 52px', zIndex: 201,
+    padding: '36px 24px 52px', zIndex: 2001,   // above Leaflet's panes (~1000)
     maxHeight: '80vh', overflowY: 'auto',
     maxWidth: 600, margin: '0 auto',
   },
