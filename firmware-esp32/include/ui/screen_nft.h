@@ -72,12 +72,17 @@ struct NftItem {
     char slug[64]          = {};  // OpenSea collection slug
     char image_url[256]    = {};
     float floor_price_eth  = 0.0f;
-    // Decoded image (nullptr until fetched). Pixels are LVGL-native RGB565
-    // stored in PSRAM, produced by the nft_img bg task via img_decode.h.
-    bool     img_tried     = false;
-    uint8_t* img_pixels    = nullptr;
-    uint32_t img_w         = 0;
-    uint32_t img_h         = 0;
+    // Decoded artwork, ONE SLOT PER GRID CLASS (0=1x1, 1=2x2, 2=3x3) so
+    // switching grid sizes can show something instantly. RGB565 in PSRAM,
+    // produced by the nft_img bg task via img_decode.h. Retention: the
+    // current grid's slot for every item, plus ALL THREE slots for the cell
+    // "covers" (first NFT of the top collections) — see _entitledSlot().
+    uint8_t* px[3]    = {};
+    uint16_t pw[3]    = {};
+    uint16_t ph[3]    = {};
+    bool     tried[3] = {};
+
+    void freeSlot(int c) { if (px[c]) { free(px[c]); px[c] = nullptr; } tried[c] = false; }
 };
 
 struct NftPendingResult {
@@ -330,6 +335,7 @@ private:
     volatile TaskHandle_t _imgTask = nullptr;   // image download/decode worker
     volatile bool         _imgDirty = false;    // set by img task → poll refreshes cells
     int                   _decodedForGrid = 0;  // grid size the cached pixels were decoded for
+    volatile uint16_t     _imgGen = 0;          // bumped when pixels are invalidated → stale workers abort
     static NftPendingResult _pendingResult;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -533,6 +539,15 @@ private:
             for (int i = 0; i < _cellCount; i++) _refreshCell(i);
         }
 
+        // Auto-kick: whenever no worker is running but images are still
+        // missing (interrupted run, grid-size change, beyond-cap items),
+        // start one. ~every 500 ms; _startImageFetch() no-ops when done.
+        static uint8_t kickDiv = 0;
+        if (++kickDiv >= 5) {
+            kickDiv = 0;
+            if (!_fetching && !_imgTask) _startImageFetch();
+        }
+
         if (!_fetching) return;
         if (!_pendingResult.ready) return;
         if (_imgTask) return;   // img worker still iterating the old cache — absorb next tick
@@ -546,12 +561,31 @@ private:
             return;
         }
 
-        // Absorb results into cache (freeing any previously decoded pixels)
-        for (auto& it : _nftCache) if (it.img_pixels) { free(it.img_pixels); it.img_pixels = nullptr; }
-        _nftCache.clear();
+        // Absorb results into cache. Decoded artwork is EXPENSIVE — carry it
+        // over to the new list (matched by image URL) instead of dropping it,
+        // so a periodic list refresh doesn't blank every cell and re-decode.
+        std::vector<NftItem> oldCache;
+        oldCache.swap(_nftCache);
         for (int i = 0; i < _pendingResult.count; i++) {
-            _nftCache.push_back(_pendingResult.items[i]);
+            NftItem it = _pendingResult.items[i];
+            for (auto& prev : oldCache) {
+                if (strcmp(prev.image_url, it.image_url) != 0) continue;
+                for (int c = 0; c < 3; c++) {
+                    if (!prev.px[c]) continue;
+                    it.px[c] = prev.px[c];    // steal the buffer
+                    it.pw[c] = prev.pw[c];
+                    it.ph[c] = prev.ph[c];
+                    it.tried[c] = true;
+                    prev.px[c] = nullptr;
+                }
+                break;
+            }
+            _nftCache.push_back(it);
         }
+        for (auto& prev : oldCache)
+            for (int c = 0; c < 3; c++)
+                if (prev.px[c]) free(prev.px[c]);   // no longer in the wallet
+        _imgGen++;                                        // indices changed → stale workers abort
         _cacheTimestamp = millis();
         _rebuildGrid();
     }
@@ -574,12 +608,17 @@ private:
         }
         lv_label_set_text(_loadingLabel, "");
 
-        // Decoded pixels are sized for ONE grid; on a size change free them
-        // and let the worker re-decode from the disk cache at the new size.
+        // On a grid-size change: redirect the worker (generation bump) and
+        // purge slots nobody is entitled to anymore — the current grid keeps
+        // everything, other grids keep only their cell covers. This bounds
+        // RAM while covers stay resident for instant switching.
         if (_decodedForGrid != _gridSize) {
             _decodedForGrid = _gridSize;
-            for (auto& it : _nftCache)
-                if (it.img_pixels) { free(it.img_pixels); it.img_pixels = nullptr; it.img_tried = false; }
+            _imgGen++;
+            for (int i = 0; i < (int)_nftCache.size(); i++)
+                for (int c = 0; c < 3; c++)
+                    if (_nftCache[i].px[c] && !_entitledSlot(c, i))
+                        _nftCache[i].freeSlot(c);
         }
 
         // ONE COLLECTION PER CELL (2x2 and 3x3): the cache is sorted by floor
@@ -679,15 +718,29 @@ private:
 
         // Image placeholder (full-cell canvas colored by tier)
         // If img_pixels is non-null (JPEG decoded), display as lv_img instead.
-        if (item.img_pixels && item.img_w > 0) {
+        // Pick the decoded slot for the CURRENT grid; if it isn't ready yet,
+        // stand in with another class's bitmap (covers keep all three sizes
+        // resident) so a grid switch always paints something immediately.
+        int gCls = _gridClass();
+        const uint8_t* px = item.px[gCls];
+        uint16_t pw = item.pw[gCls], ph = item.ph[gCls];
+        if (!px) {
+            static const int PREF[3][2] = { {1, 2}, {2, 0}, {1, 0} };  // closest size first
+            for (int k = 0; k < 2 && !px; k++) {
+                int c = PREF[gCls][k];
+                if (item.px[c]) { px = item.px[c]; pw = item.pw[c]; ph = item.ph[c]; }
+            }
+        }
+
+        if (px && pw > 0) {
             // Decoded image available (RGB565 in PSRAM). One dsc PER CELL —
             // a shared static one made every cell display the same image.
             cw.imgDsc.header.always_zero = 0;
-            cw.imgDsc.header.w           = item.img_w;
-            cw.imgDsc.header.h           = item.img_h;
+            cw.imgDsc.header.w           = pw;
+            cw.imgDsc.header.h           = ph;
             cw.imgDsc.header.cf          = LV_IMG_CF_TRUE_COLOR;
-            cw.imgDsc.data_size          = item.img_w * item.img_h * 2;
-            cw.imgDsc.data               = item.img_pixels;
+            cw.imgDsc.data_size          = (uint32_t)pw * ph * 2;
+            cw.imgDsc.data               = px;
 
             // ORIGINAL SIZE, 1:1: the bitmap was decoded to fit this exact
             // cell (contain), so it blits untransformed — centered, black
@@ -776,8 +829,9 @@ private:
         // The first NFT_IMG_MAX_FETCH images load eagerly; anything beyond
         // that gets fetched the moment the carousel reaches it.
         int nftIdx = cw.nftStart + (cw.nftCurrent % cw.nftCount);
-        if (nftIdx < (int)_nftCache.size() && !_nftCache[nftIdx].img_pixels
-            && !_nftCache[nftIdx].img_tried)
+        int gCls = _gridClass();
+        if (nftIdx < (int)_nftCache.size() && !_nftCache[nftIdx].px[gCls]
+            && !_nftCache[nftIdx].tried[gCls])
             _startImageFetch();
     }
 
@@ -938,21 +992,48 @@ private:
     // grid size changes, pixels are re-decoded from the disk cache (fast).
     #define NFT_IMG_MAX_FETCH 12   // per run — carousel taps re-trigger for the rest
 
-    // Inner drawable size of one cell for the current grid (matches
+    // Grid class: 0 = 1x1, 1 = 2x2, 2 = 3x3.
+    int _gridClass() const { return _gridSize == 1 ? 0 : (_gridSize == 4 ? 1 : 2); }
+    static int _classCells(int cls) { return cls == 0 ? 1 : (cls == 1 ? 4 : 9); }
+
+    // Inner drawable size of one cell for a grid class (matches
     // _rebuildGrid's math, minus the container's 4 px padding).
-    void _cellInner(int& wOut, int& hOut) {
-        int n = _gridSize, sd = (n == 1) ? 1 : (n == 4 ? 2 : 3);
+    static void _cellInnerFor(int cls, int& wOut, int& hOut) {
+        int sd = cls + 1;
         wOut = (480 - 4 - (sd - 1) * 4) / sd - 8;
         hOut = (NFT_GRID_H - 4 - (sd - 1) * 4) / sd - 8;
     }
 
+    // Whether item `idx` is entitled to keep/get a decoded slot for class
+    // `cls`: everything for the CURRENT grid; for other grids only the cell
+    // covers (first item of each collection group, up to that grid's cell
+    // count) — those are what make grid switching feel instant.
+    bool _entitledSlot(int cls, int idx) {
+        if (cls == _gridClass()) return true;
+        int cells = _classCells(cls);
+        int total = (int)_nftCache.size(), rank = 0, i = 0;
+        while (i < total && rank < cells) {
+            int j = i;
+            while (j < total && strcmp(_nftCache[j].slug, _nftCache[i].slug) == 0) j++;
+            if (idx == i) return true;        // group cover within top `cells`
+            if (idx > i && idx < j) return false;
+            rank++;
+            i = j;
+        }
+        return false;
+    }
+
     void _startImageFetch() {
         if (_imgTask || _nftCache.empty()) return;
-        // Don't spawn (and log) a no-op worker when everything visible is
+        // Don't spawn (and log) a no-op worker when every entitled slot is
         // already decoded or attempted.
         bool anyPending = false;
-        for (auto& it : _nftCache)
-            if (!it.img_pixels && !it.img_tried && it.image_url[0]) { anyPending = true; break; }
+        for (int i = 0; i < (int)_nftCache.size() && !anyPending; i++) {
+            NftItem& it = _nftCache[i];
+            if (!it.image_url[0]) continue;
+            for (int c = 0; c < 3; c++)
+                if (!it.px[c] && !it.tried[c] && _entitledSlot(c, i)) { anyPending = true; break; }
+        }
         if (!anyPending) return;
         xTaskCreatePinnedToCore(_bgImgFetchFn, "nft_img", 12288, nullptr, 1, (TaskHandle_t*)&_imgTask, 0);
     }
@@ -962,7 +1043,11 @@ private:
         if (!self) { vTaskDelete(nullptr); return; }
         netLock();   // exclusive TLS ownership — see net_lock.h
 
-        // Priority order: the visible NFT of each cell, then everything else.
+        uint16_t myGen = self->_imgGen;   // snapshot: invalidation aborts this run
+        int g = self->_gridClass();
+
+        // Priority order for the CURRENT grid: the visible NFT of each cell,
+        // then everything else.
         int order[NFT_MAX_ITEMS];
         int on = 0;
         int total = (int)self->_nftCache.size();
@@ -977,34 +1062,59 @@ private:
             if (!dup) order[on++] = i;
         }
 
-        int boxW, boxH;
-        self->_cellInner(boxW, boxH);
-
         int fetched = 0;
-        for (int k = 0; k < on; k++) {
-            NftItem& it = self->_nftCache[order[k]];
-            if (it.img_pixels || it.img_tried || !it.image_url[0]) continue;
-            it.img_tried = true;
+        bool aborted = false;
 
-            // seadn.io is imgix-backed: ask for a small variant. Fall back to
-            // the raw URL if the sized variant fails.
-            String base = it.image_url;
-            int q = base.indexOf('?');
-            if (q >= 0) base = base.substring(0, q);
-            uint16_t w = 0, h = 0;
-            uint8_t* px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
-                                              boxW, boxH, it.name, it.image_url, &w, &h);
-            if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h);
-            if (px) {
-                it.img_pixels = px;
-                it.img_w = w;
-                it.img_h = h;
-                self->_imgDirty = true;   // poll timer repaints on core 1
-                fetched++;
+        // Phase 1: current grid class, in priority order.
+        // Phase 2: pre-decode the cell COVERS for the OTHER two grid classes
+        // (from the disk cache when possible) so grid switches paint instantly.
+        for (int phase = 0; phase < 2 && !aborted; phase++) {
+            int cls0 = 0, cls1 = 2;
+            if (phase == 0) { cls0 = g; cls1 = g; }
+            for (int cls = cls0; cls <= cls1 && !aborted; cls++) {
+                if (phase == 1 && cls == g) continue;
+                int boxW, boxH;
+                _cellInnerFor(cls, boxW, boxH);
+                for (int k = 0; k < (phase == 0 ? on : total) && !aborted; k++) {
+                    int idx = (phase == 0) ? order[k] : k;
+                    NftItem& it = self->_nftCache[idx];
+                    if (it.px[cls] || it.tried[cls] || !it.image_url[0]) continue;
+                    if (phase == 1 && !self->_entitledSlot(cls, idx)) continue;
+                    it.tried[cls] = true;
+
+                    // seadn.io is imgix-backed: ask for a small variant. Fall
+                    // back to the raw URL if the sized variant fails.
+                    String base = it.image_url;
+                    int q = base.indexOf('?');
+                    if (q >= 0) base = base.substring(0, q);
+                    bool fromDisk = diskcache::has("img", it.image_url);
+                    uint16_t w = 0, h = 0;
+                    uint8_t* px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
+                                                      boxW, boxH, it.name, it.image_url, &w, &h);
+                    if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h);
+
+                    if (myGen != self->_imgGen) {
+                        // Grid/cache changed mid-decode: wrong size or wrong
+                        // item. Drop it; the poll timer's auto-kick relaunches
+                        // us with fresh parameters.
+                        if (px) free(px);
+                        it.tried[cls] = false;
+                        aborted = true;
+                        break;
+                    }
+                    if (px) {
+                        it.px[cls] = px;
+                        it.pw[cls] = w;
+                        it.ph[cls] = h;
+                        if (cls == g) self->_imgDirty = true;   // poll timer repaints
+                        fetched++;
+                    }
+                    // Rate-limit only real CDN hits — disk-cache re-decodes fly.
+                    if (!fromDisk) delay(NFT_RATELIMIT_DELAY_MS);
+                }
             }
-            delay(NFT_RATELIMIT_DELAY_MS);
         }
-        Serial.printf("NFT img worker: %d/%d images decoded\n", fetched, on);
+        Serial.printf("NFT img worker: %d slots decoded%s\n", fetched, aborted ? " (aborted: params changed)" : "");
 
         netUnlock();
         if (s_instance) s_instance->_imgTask = nullptr;   // ALWAYS clear before self-delete

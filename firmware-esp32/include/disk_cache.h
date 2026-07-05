@@ -79,6 +79,11 @@ inline bool save(const char* ns, const char* key, const uint8_t* data, size_t le
     return true;
 }
 
+inline bool has(const char* ns, const char* key) {
+    if (!s_ok) return false;
+    return LittleFS.exists(_pathFor(ns, key));
+}
+
 inline void remove(const char* ns, const char* key) {
     if (!s_ok) return;
     LittleFS.remove(_pathFor(ns, key));
