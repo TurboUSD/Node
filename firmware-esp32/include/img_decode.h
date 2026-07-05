@@ -64,10 +64,12 @@ static inline uint8_t* _alloc(size_t n) {
     return p ? p : (uint8_t*)malloc(n);
 }
 
-// Decode `body` (PNG/JPEG by magic) and scale to outW×outH RGB565.
-// Does NOT free `body`. NULL on failure.
+// Decode `body` (PNG/JPEG by magic) and scale to FIT INSIDE maxW×maxH
+// preserving aspect ratio (contain — no cropping). Actual output dims are
+// returned via outW/outH. Does NOT free `body`. NULL on failure.
 static uint8_t* _decodeScale(const uint8_t* body, size_t len,
-                             int outW, int outH, const char* tag) {
+                             int maxW, int maxH, const char* tag,
+                             uint16_t* outWp, uint16_t* outHp) {
     unsigned char* rgba = nullptr;
     unsigned iw = 0, ih = 0;
     bool rgbaFromLvMem = false;
@@ -117,6 +119,12 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
         return nullptr;
     }
 
+    // Fit inside the box, preserving aspect (letterbox handled by the caller).
+    int outW = maxW, outH = (int)((uint64_t)maxW * ih / iw);
+    if (outH > maxH) { outH = maxH; outW = (int)((uint64_t)maxH * iw / ih); }
+    if (outW < 1) outW = 1;
+    if (outH < 1) outH = 1;
+
     // Nearest-neighbour scale → RGB565 little-endian ([lo, hi] per pixel).
     uint8_t* px = _alloc((size_t)outW * outH * 2);
     if (!px) { if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return nullptr; }
@@ -131,14 +139,17 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
         }
     }
     if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba);
+    if (outWp) *outWp = (uint16_t)outW;
+    if (outHp) *outHp = (uint16_t)outH;
     Serial.printf("img[%s] decoded %ux%u -> %dx%d OK\n", tag, iw, ih, outW, outH);
     return px;
 }
 
 // Download `url` (or hit the disk cache if `cacheKey` was seen before) and
 // produce an outW×outH RGB565 bitmap. `tag` is only for serial logs.
-static uint8_t* fetchRgb565(const char* url, int outW, int outH,
-                            const char* tag, const char* cacheKey = nullptr) {
+static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
+                            const char* tag, const char* cacheKey = nullptr,
+                            uint16_t* outWp = nullptr, uint16_t* outHp = nullptr) {
     uint8_t* body    = nullptr;
     size_t   len     = 0;
     bool     fromDisk = false;
@@ -190,7 +201,7 @@ static uint8_t* fetchRgb565(const char* url, int outW, int outH,
         Serial.printf("img[%s] %u bytes, magic %02X%02X\n", tag, (unsigned)len, body[0], body[1]);
     }
 
-    uint8_t* px = _decodeScale(body, len, outW, outH, tag);
+    uint8_t* px = _decodeScale(body, len, maxW, maxH, tag, outWp, outHp);
     if (px && cacheKey && !fromDisk)  diskcache::save("img", cacheKey, body, len);
     if (!px && cacheKey && fromDisk)  diskcache::remove("img", cacheKey);   // corrupt/stale entry
     free(body);

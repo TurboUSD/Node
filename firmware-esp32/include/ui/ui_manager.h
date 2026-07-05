@@ -196,6 +196,13 @@ public:
         return true;
     }
 
+    // Retry hook for main.cpp: true once the debt chart has real data.
+    bool debtHistLoaded() const { return _debtHistLoaded; }
+    void retryDebtHistory() {
+        static const int yearValues[] = {5, 10, 20, 30, 50, 75};
+        reloadDebtHistory(yearValues[debtYearsRangeIndex % 6]);
+    }
+
     // Live TUSD price from DexScreener/GeckoTerminal (independent of the
     // treasury service, which may be down / not deployed).
     void updateTusdPrice(double priceUsd) {
@@ -1405,6 +1412,7 @@ private:
     void reloadDebtHistory(int years) {
         DebtHistoryPoint points[80];
         int count = apiClient.fetchDebtHistory(years, points, 80);
+        Serial.printf("debtHistory: %d points (years=%d)\n", count, years);
         if (count == 0) {
             Serial.println("reloadDebtHistory: no data returned, leaving chart as-is.");
             return;
@@ -1623,10 +1631,16 @@ private:
             lv_chart_set_next_value(c, s, scaled);
         }
 
-        // Window the Y axis to [now .. now + expected 2-min fall] so the tiny
-        // decline fills the plot height and visibly slides downward.
-        lv_coord_t fallWin = (lv_coord_t)(perSec * 10000.0 * GAME_RT_POINTS) + 4;
-        lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, scaled - 3, scaled + fallWin);
+        // Y window = the expected 2-minute fall. While the line is still
+        // FILLING left→right, anchor the window to the STARTING value so the
+        // line begins at the top of the plot and visibly sinks toward the
+        // bottom (anchoring to the current value kept it stuck at the bottom
+        // edge). Once scrolling, slide the window with the data.
+        lv_coord_t fallWin = (lv_coord_t)(perSec * 10000.0 * GAME_RT_POINTS) + 6;
+        lv_coord_t hiTop   = (_gameRtCount < GAME_RT_POINTS)
+                             ? (lv_coord_t)3                    // fill phase: top = first point
+                             : (lv_coord_t)(scaled + fallWin);  // scroll: follow the fall
+        lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, hiTop - fallWin - 6, hiTop);
 
         int dayCount = (int)(millis() / 86400000UL);
         gameScreen.updateRealtime(dayCount, v, perSec);

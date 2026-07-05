@@ -267,12 +267,11 @@ private:
         if (dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
             if (self && self->_rtMode) {
                 // Chart units are 0.0001 $ offsets from the baseline dollar
-                // value; the tick shows the 4-decimal fraction (".8932") —
-                // the integer dollars barely move, the decimals are the show.
+                // value. Ticks show the LOSS vs the original $10,000
+                // ("-0.0012") — fraction-only labels wrapped confusingly at
+                // whole-dollar boundaries (".0012" right above ".9994").
                 double v = self->_rtBaseline + (double)dsc->value * 0.0001;
-                double frac = v - floor(v);
-                snprintf(dsc->text, dsc->text_length, ".%04d",
-                         (int)llround(frac * 10000.0) % 10000);
+                snprintf(dsc->text, dsc->text_length, "%+.4f", v - 10000.0);
                 return;
             }
             int v = (int)dsc->value;

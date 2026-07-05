@@ -329,6 +329,7 @@ private:
     volatile TaskHandle_t _bgTask  = nullptr;   // written by workers on core 0, read on core 1
     volatile TaskHandle_t _imgTask = nullptr;   // image download/decode worker
     volatile bool         _imgDirty = false;    // set by img task → poll refreshes cells
+    int                   _decodedForGrid = 0;  // grid size the cached pixels were decoded for
     static NftPendingResult _pendingResult;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -573,6 +574,14 @@ private:
         }
         lv_label_set_text(_loadingLabel, "");
 
+        // Decoded pixels are sized for ONE grid; on a size change free them
+        // and let the worker re-decode from the disk cache at the new size.
+        if (_decodedForGrid != _gridSize) {
+            _decodedForGrid = _gridSize;
+            for (auto& it : _nftCache)
+                if (it.img_pixels) { free(it.img_pixels); it.img_pixels = nullptr; it.img_tried = false; }
+        }
+
         // ONE COLLECTION PER CELL (2x2 and 3x3): the cache is sorted by floor
         // price desc with same-collection items contiguous, so cell 0 gets the
         // most valuable collection, cell 1 the next, etc. Each cell's carousel
@@ -680,31 +689,15 @@ private:
             cw.imgDsc.data_size          = item.img_w * item.img_h * 2;
             cw.imgDsc.data               = item.img_pixels;
 
-            // FULL-BLEED COVER: the artwork fills the entire cell (like the
-            // web gallery), name/floor overlay on top. A clipping wrapper
-            // spans the cell; the image sits centered inside it and is zoomed
-            // about its center until it covers the larger cell dimension —
-            // whatever spills past the wrapper is clipped. This adapts to any
-            // grid size (the old fixed square left dark bands around it).
-            lv_obj_t* imgBox = lv_obj_create(cw.container);
-            lv_obj_set_size(imgBox, cw_w, cw_h);
-            lv_obj_align(imgBox, LV_ALIGN_TOP_LEFT, 0, 0);
-            lv_obj_set_style_bg_opa(imgBox, LV_OPA_0, 0);
-            lv_obj_set_style_border_width(imgBox, 0, 0);
-            lv_obj_set_style_pad_all(imgBox, 0, 0);
-            lv_obj_set_style_radius(imgBox, 4, 0);
-            lv_obj_set_style_clip_corner(imgBox, true, 0);
-            lv_obj_clear_flag(imgBox, LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_clear_flag(imgBox, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
-
-            lv_obj_t* imgObj = lv_img_create(imgBox);
+            // ORIGINAL SIZE, 1:1: the bitmap was decoded to fit this exact
+            // cell (contain), so it blits untransformed — centered, black
+            // bands where the aspect doesn't match. NO lv_img zoom here:
+            // runtime transforms re-scale every frame and made the whole
+            // screen shimmer ("interference").
+            lv_obj_t* imgObj = lv_img_create(cw.container);
             lv_img_set_src(imgObj, &cw.imgDsc);
-            lv_obj_center(imgObj);                    // center pivot + centered obj
-            lv_coord_t maxSide = cw_w > cw_h ? cw_w : cw_h;
-            long zoom = 256L * maxSide / (long)item.img_w + 2;   // +2: never underflow the box
-            lv_img_set_zoom(imgObj, (uint16_t)min(zoom, 1023L));
-            lv_img_set_antialias(imgObj, false);      // crisp pixel art
-            lv_obj_clear_flag(imgObj, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_align(imgObj, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_clear_flag(imgObj, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
         } else {
             // No decoded image — show a coloured tile with a subtle grid icon
             lv_obj_t* placeholder = lv_obj_create(cw.container);
@@ -939,9 +932,19 @@ private:
     // ── Image download/decode worker ─────────────────────────────────────────
     // Fetches artwork for the NFTs currently on screen (first item of each
     // cell's collection group first, then the rest, capped) and decodes to
-    // 224×224 RGB565 in PSRAM via img_decode.h. Cells repaint via _imgDirty.
-    #define NFT_IMG_SIDE     224   // decode size; cells zoom-fit whatever grid is active
+    // the CURRENT grid's cell size (contain, aspect preserved) so cells blit
+    // it 1:1. NO runtime lv_img zoom: transformed draws re-scale every frame
+    // on the RGB panel, which caused visible shimmer/"interference". When the
+    // grid size changes, pixels are re-decoded from the disk cache (fast).
     #define NFT_IMG_MAX_FETCH 12   // per run — carousel taps re-trigger for the rest
+
+    // Inner drawable size of one cell for the current grid (matches
+    // _rebuildGrid's math, minus the container's 4 px padding).
+    void _cellInner(int& wOut, int& hOut) {
+        int n = _gridSize, sd = (n == 1) ? 1 : (n == 4 ? 2 : 3);
+        wOut = (480 - 4 - (sd - 1) * 4) / sd - 8;
+        hOut = (NFT_GRID_H - 4 - (sd - 1) * 4) / sd - 8;
+    }
 
     void _startImageFetch() {
         if (_imgTask || _nftCache.empty()) return;
@@ -974,6 +977,9 @@ private:
             if (!dup) order[on++] = i;
         }
 
+        int boxW, boxH;
+        self->_cellInner(boxW, boxH);
+
         int fetched = 0;
         for (int k = 0; k < on; k++) {
             NftItem& it = self->_nftCache[order[k]];
@@ -985,12 +991,14 @@ private:
             String base = it.image_url;
             int q = base.indexOf('?');
             if (q >= 0) base = base.substring(0, q);
-            uint8_t* px = imgdec::fetchRgb565((base + "?w=256&auto=format").c_str(),
-                                              NFT_IMG_SIDE, NFT_IMG_SIDE, it.name, it.image_url);
-            if (!px) px = imgdec::fetchRgb565(it.image_url, NFT_IMG_SIDE, NFT_IMG_SIDE, it.name, it.image_url);
+            uint16_t w = 0, h = 0;
+            uint8_t* px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
+                                              boxW, boxH, it.name, it.image_url, &w, &h);
+            if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h);
             if (px) {
                 it.img_pixels = px;
-                it.img_w = it.img_h = NFT_IMG_SIDE;
+                it.img_w = w;
+                it.img_h = h;
                 self->_imgDirty = true;   // poll timer repaints on core 1
                 fetched++;
             }

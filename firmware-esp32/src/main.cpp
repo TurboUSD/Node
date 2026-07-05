@@ -344,6 +344,16 @@ void loop() {
         lastDebtRefreshAt = now;
     }
 
+    // Debt-history self-heal: the chart loads once via updateDebtData, but if
+    // that first fetch hit a transient failure (TLS memory, DNS, treasury API
+    // hiccup) the chart stayed empty forever. Retry once a minute until real
+    // data lands.
+    static uint32_t lastDebtHistRetryAt = 0;
+    if (!uiManager.debtHistLoaded() && now - lastDebtHistRetryAt > 60000) {
+        lastDebtHistRetryAt = now;
+        uiManager.retryDebtHistory();
+    }
+
     if (lastOhlcvRefreshAt == 0 || now - lastOhlcvRefreshAt > OHLCV_CHART_REFRESH_MS
         || uiManager.turboTfConsumeDirty()) {   // 1D/1W/1M dropdown changed
         OhlcvCandle candles[26];
