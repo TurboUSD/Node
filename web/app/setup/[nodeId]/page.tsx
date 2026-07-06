@@ -181,7 +181,52 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
       }]
     })
     if (items.length > 0) {
-      setPinItems(items)
+      // Ordinals metadata is derivable locally (name + ordinals.com artwork);
+      // EVM picks get their name/thumbnail re-resolved from OpenSea below.
+      const withMeta = items.map(i => i.chain === 'ord' ? {
+        ...i,
+        name:            'Ordinal',
+        image_url:       `https://ordinals.com/content/${i.contract}`,
+        collection_name: 'Ordinals',
+      } : i)
+      setPinItems(withMeta)
+
+      // Ordinals: upgrade to the real name + BTC floor in the background
+      const ordIds = withMeta.filter(i => i.chain === 'ord').map(i => i.contract)
+      if (ordIds.length > 0) {
+        callFunction<{ results: { id: string; name?: string | null; floor_btc?: number | null }[] }>('resolve-ordinal', { ids: ordIds })
+          .then(res => {
+            if (!res?.results) return
+            setPinItems(prev => prev.map(pI => {
+              if (pI.chain !== 'ord') return pI
+              const r = res.results.find(x => x.id === pI.contract)
+              if (!r) return pI
+              return {
+                ...pI,
+                name: r.name || 'Ordinal',
+                collection_name: r.floor_btc ? `Ordinals · ${r.floor_btc.toFixed(3)} ₿` : 'Ordinals',
+              }
+            }))
+          })
+          .catch(() => {})
+      }
+
+      const evmIds = withMeta.filter(i => i.chain !== 'ord').map(i => `${i.chain}:${i.contract}:${i.tokenId}`)
+      if (evmIds.length > 0) {
+        callFunction<{ results: { name?: string; image_url?: string; collection_name?: string; floor_price_eth?: number; error?: string }[] }>('resolve-nft', { items: evmIds })
+          .then(res => {
+            if (!res?.results) return
+            setPinItems(prev => prev.map(pI => {
+              if (pI.chain === 'ord') return pI
+              const idx = evmIds.indexOf(`${pI.chain}:${pI.contract}:${pI.tokenId}`)
+              const r = idx >= 0 ? res.results[idx] : null
+              return r && !r.error
+                ? { ...pI, name: r.name, image_url: r.image_url, collection_name: r.collection_name, floor_price_eth: r.floor_price_eth }
+                : pI
+            }))
+          })
+          .catch(() => { /* thumbnails stay as plain IDs — non-fatal */ })
+      }
     }
   }, [node])
 
@@ -1064,11 +1109,22 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
       const id = `ord:${parsed.contract}:0`
       if (items.some(i => `${i.chain}:${i.contract}:${i.tokenId}` === id)) { setError('This inscription is already in your list.'); return }
       if (items.length >= 20) { setError('Maximum 20 NFTs in the pinlist.'); return }
+      setResolving(true)
+      setError(null)
+      let name = 'Ordinal'
+      let floorBtc: number | undefined
+      try {
+        const res = await callFunction<{ results: { name?: string | null; floor_btc?: number | null }[] }>('resolve-ordinal', { ids: [parsed.contract] })
+        const r = res?.results?.[0]
+        if (r?.name) name = r.name
+        if (r?.floor_btc) floorBtc = r.floor_btc
+      } catch { /* fall back to plain "Ordinal" */ }
+      setResolving(false)
       onChange([...items, {
         chain: 'ord', contract: parsed.contract, tokenId: '0',
-        name: `Ordinal ${parsed.contract.slice(0, 8)}…`,
+        name,
         image_url: `https://ordinals.com/content/${parsed.contract}`,
-        collection_name: 'Ordinals',
+        collection_name: floorBtc ? `Ordinals · ${floorBtc.toFixed(3)} ₿` : 'Ordinals',
       }])
       setUrl('')
       return
