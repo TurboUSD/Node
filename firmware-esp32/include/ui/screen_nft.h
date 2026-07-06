@@ -455,6 +455,7 @@ private:
             char chain[16]    = {};
             char contract[72] = {};   // EVM 0x… (42) or Ordinals inscription id (66)
             char tokenId[24]  = {};
+            char bg[10]       = {};   // ordinals only: optional 4th field "#rrggbb"
         };
 
         static PinEntry entries[NFT_MAX_ITEMS];
@@ -465,14 +466,22 @@ private:
         for (int ci = 0; ci < (int)pinlist.length() && entryCount < NFT_MAX_ITEMS; ci++) {
             char ch = pinlist[ci];
             if (ch == ',') {
-                // Split on first two colons: chain : contract : tokenId
+                // Split on colons: chain : contract : tokenId [: #bg]
+                // The optional 4th field is the ordinal's user-picked
+                // background colour from the web editor ("ord:<id>:0:#f68b1f").
                 int first  = item.indexOf(':');
                 int second = item.indexOf(':', first + 1);
                 if (first > 0 && second > first) {
                     PinEntry& e = entries[entryCount++];
                     item.substring(0, first).toCharArray(e.chain,    sizeof(e.chain));
                     item.substring(first + 1, second).toCharArray(e.contract, sizeof(e.contract));
-                    item.substring(second + 1).toCharArray(e.tokenId, sizeof(e.tokenId));
+                    String tail = item.substring(second + 1);
+                    int third = tail.indexOf(':');
+                    if (third > 0 && tail.charAt(third + 1) == '#') {
+                        tail.substring(third + 1).toCharArray(e.bg, sizeof(e.bg));
+                        tail = tail.substring(0, third);
+                    }
+                    tail.toCharArray(e.tokenId, sizeof(e.tokenId));
                 }
                 item = "";
             } else {
@@ -499,6 +508,9 @@ private:
                          "https://ordinals.com/content/%s", e.contract);
                 oi.floor_price_eth = 0.0f;
                 oi.pinned = true;
+                // User-picked background from the pinlist 4th field: applied
+                // up-front so it works even when resolve-ordinal is down.
+                if (e.bg[0] == '#') oi.bg_color = (uint32_t)strtoul(e.bg + 1, nullptr, 16);
 
                 // Best-effort real name ("NodeMonke #9401") + BTC floor via
                 // our resolve-ordinal edge function (Magic Eden underneath).
@@ -523,8 +535,11 @@ private:
                             if (fb > 0) { oi.floor_price_eth = (float)fb; oi.floor_btc = true; }
                             const char* bg = od["results"][0]["bg"] | "";
                             if (bg[0] == '#') oi.bg_color = (uint32_t)strtoul(bg + 1, nullptr, 16);
-                            Serial.printf("NFT ord: resolved name='%s' coll='%s' floor=%.5f\n",
-                                          oi.name, oi.collection, oi.floor_price_eth);
+                            // The owner's colour choice from the web editor
+                            // WINS over any indexer-derived trait colour.
+                            if (e.bg[0] == '#') oi.bg_color = (uint32_t)strtoul(e.bg + 1, nullptr, 16);
+                            Serial.printf("NFT ord: resolved name='%s' coll='%s' floor=%.5f bg=%06x\n",
+                                          oi.name, oi.collection, oi.floor_price_eth, (unsigned)oi.bg_color);
                         } else {
                             Serial.println("NFT ord: resolve-ordinal JSON parse failed");
                         }
@@ -760,7 +775,7 @@ private:
         // Name is part of the signature: a refresh that only improves the
         // caption (e.g. resolve-ordinal finally returning "NodeMonke #9343"
         // with the floor still unknown) must NOT be skipped as "identical".
-        for (auto& it2 : _nftCache) { sig += it2.image_url; sig += ':'; sig += it2.name; sig += ':'; sig += String(it2.floor_price_eth, 4); sig += ';'; }
+        for (auto& it2 : _nftCache) { sig += it2.image_url; sig += ':'; sig += it2.name; sig += ':'; sig += String(it2.floor_price_eth, 4); sig += ':'; sig += String((unsigned)it2.bg_color, HEX); sig += ';'; }
         bool listChanged = (sig != _lastListSig);
         _lastListSig = sig;
 
@@ -870,7 +885,7 @@ private:
             for (int cls = 1; cls <= 2; cls++) {
                 if (!_entitledSlot(cls, i)) continue;
                 size_t blobLen = 0;
-                uint8_t* blob = diskcache::loadAlloc("dec", _decKey(_nftCache[i].image_url, cls).c_str(), &blobLen);
+                uint8_t* blob = diskcache::loadAlloc("dec", _decKey(_nftCache[i].image_url, cls, _nftCache[i].bg_color).c_str(), &blobLen);
                 if (!blob) continue;
                 uint16_t w = 0, h = 0;
                 if (blobLen > 4) { memcpy(&w, blob, 2); memcpy(&h, blob + 2, 2); }
@@ -1433,8 +1448,14 @@ private:
     #define NFT_IMG_MAX_FETCH 12   // per run — carousel taps re-trigger for the rest
 
     // Decoded-bitmap disk key: url + grid class (dims embedded in the blob).
-    static String _decKey(const char* url, int cls) {
-        return String(url) + "|dec" + String(cls);
+    // The BACKGROUND colour is part of the key: decoded bitmaps are composited
+    // onto it, so changing the colour (web picker) must miss the old entry —
+    // otherwise the pre-recolour bitmap would be served from flash forever.
+    // bg 0 (black, the default) keeps the legacy key so old caches stay warm.
+    static String _decKey(const char* url, int cls, uint32_t bg = 0) {
+        String k = String(url) + "|dec" + String(cls);
+        if (bg != 0) { char b[10]; snprintf(b, sizeof(b), "|%06x", (unsigned)bg); k += b; }
+        return k;
     }
 
     static String _urlEncode(const char* src) {
@@ -1692,7 +1713,7 @@ private:
                                 memcpy(blob, &w, 2);
                                 memcpy(blob + 2, &h, 2);
                                 memcpy(blob + 4, px, (size_t)w * h * 2);
-                                diskcache::save("dec", _decKey(it.image_url, cls).c_str(), blob, blobLen);
+                                diskcache::save("dec", _decKey(it.image_url, cls, it.bg_color).c_str(), blob, blobLen);
                                 free(blob);
                             }
                         }

@@ -79,8 +79,11 @@ public:
         ledcWrite(0, DUTY[level - 1]);  // channel 0 = backlight (see ledcSetup in initDisplayAndTouch)
     }
 
-    // Read brightness from NVS and apply it immediately.
+    // Read brightness from NVS and apply it immediately. No-op while the
+    // screen is off: the post-heartbeat call used to RELIGHT a screen the
+    // user had just turned off (short press / timeout), every ~3 minutes.
     void applyStoredBrightness() {
+        if (!_screenOn) return;
         setScreenBrightness(storage.getScreenBrightness());
     }
 
@@ -99,6 +102,17 @@ public:
     // button, so the firmware can't be wiped by accident. GPIO 38 isn't an RTC
     // pin, so this uses light sleep (any-GPIO wake), not deep sleep.
     void enterSleep() {
+        // With a USB host attached (web/serial console open), light sleep
+        // drops the native USB-CDC connection — the console shows "device has
+        // been lost" and reconnects find nothing until a wake. Degrade to a
+        // plain screen-off while plugged into a computer, so logs keep
+        // flowing; on a wall charger real light sleep still happens.
+        if (Serial) {
+            _screenOn = false;
+            ledcWrite(0, 0);
+            Serial.println("sleep: USB host attached — screen off only (no light sleep)");
+            return;
+        }
         ledcWrite(0, 0);                         // backlight off
         gpio_wakeup_enable((gpio_num_t)BTN_USER_GPIO, GPIO_INTR_LOW_LEVEL);
         esp_sleep_enable_gpio_wakeup();
