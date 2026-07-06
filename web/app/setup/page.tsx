@@ -137,14 +137,16 @@ export default function SetupPage() {
           </p>
 
           <div style={s.flashBox}>
-            {/* Manifest lives on main (always present). Its binary `path` uses
-                the releases/latest/download/ URL, so it still installs the
-                newest firmware. We do NOT point this at a release asset, because
-                if no release has published yet the manifest 404s and the flasher
-                shows "Failed to download manifest". The live version number above
-                is fetched separately from the GitHub API. */}
+            {/* Manifest served SAME-ORIGIN through our /firmware proxy (which
+                pulls it from the latest GitHub release, where CI uploads it
+                alongside the binaries). The old raw.githubusercontent.com URL
+                started failing ("Failed to download manifest") — raw is a
+                separate CDN with its own availability/CORS quirks and breaks
+                entirely if the repo ever goes private. The proxy route also
+                serves the four binary parts, so the whole flash flow now has
+                exactly ONE upstream: the latest release. */}
             <esp-web-install-button
-              manifest="https://raw.githubusercontent.com/turbousd/node/main/firmware-esp32/manifest.json"
+              manifest="https://network.turbousd.com/firmware/manifest.json"
             >
               <button slot="activate" style={s.flashBtn}>
                 ⚡ Install TurboUSD Firmware

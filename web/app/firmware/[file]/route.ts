@@ -43,10 +43,21 @@ export async function GET(
   }
 
   const upstream = `https://github.com/${REPO}/releases/latest/download/${file}`
-  let r: Response
+  let r: Response | null = null
   try {
     r = await fetch(upstream, { redirect: 'follow', cache: 'no-store' })
-  } catch {
+  } catch { /* fall through — the manifest has a second source below */ }
+  // manifest.json only joined the CI asset list recently — if the latest
+  // release predates that (or the release fetch hiccups), fall back to the
+  // copy on main so the flasher never sees "Failed to download manifest".
+  if ((!r || !r.ok || !r.body) && file === 'manifest.json') {
+    try {
+      r = await fetch(
+        `https://raw.githubusercontent.com/${REPO}/main/firmware-esp32/manifest.json`,
+        { cache: 'no-store' })
+    } catch { /* fall through to the 502 below */ }
+  }
+  if (!r) {
     return new Response('Upstream fetch failed', { status: 502 })
   }
   if (!r.ok || !r.body) {
