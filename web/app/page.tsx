@@ -517,13 +517,27 @@ function StatPill({ label, value, color }: { label: string; value: number; color
 }
 
 function GetNotifiedBanner() {
-  const [dismissed, setDismissed] = useState(false)
+  // Dismissal persists 7 days (localStorage timestamp). Start hidden and
+  // decide in an effect so SSR/hydration never disagree about the DOM.
+  const DISMISS_KEY = 'tg_banner_dismissed_at'
+  const DISMISS_MS  = 7 * 24 * 60 * 60 * 1000
+  const [dismissed, setDismissed] = useState(true)
+  useEffect(() => {
+    try {
+      const at = Number(localStorage.getItem(DISMISS_KEY) ?? 0)
+      setDismissed(at > 0 && Date.now() - at < DISMISS_MS)
+    } catch { setDismissed(false) }
+  }, [])
+  const dismiss = () => {
+    setDismissed(true)
+    try { localStorage.setItem(DISMISS_KEY, String(Date.now())) } catch { /* private mode */ }
+  }
   if (dismissed) return null
   return (
     <div style={s.notifBanner}>
       {/* Dismiss pinned to the corner so it doesn't eat a column of width */}
       <button
-        onClick={() => setDismissed(true)}
+        onClick={dismiss}
         style={{ position: 'absolute', top: 4, right: 6, background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 13, padding: 2, lineHeight: 1 }}
         aria-label="Dismiss"
       >✕</button>

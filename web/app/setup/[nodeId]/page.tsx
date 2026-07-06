@@ -182,7 +182,6 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
     })
     if (items.length > 0) {
       setPinItems(items)
-      setNftTab('manual')
     }
   }, [node])
 
