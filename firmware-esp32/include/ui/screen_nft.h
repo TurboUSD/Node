@@ -397,6 +397,10 @@ private:
     std::vector<NftItem> _nftCache;
     uint32_t _cacheTimestamp = 0;
     bool     _snapshotOnly   = false;   // cache came from disk → still needs a live refresh
+    bool     _imgSettled     = false;   // img worker found nothing new to decode → stop the
+                                        // ~500ms auto-kick (it was re-spawning a no-op worker
+                                        // forever, spamming "0 slots decoded"). Reset when new
+                                        // art is actually needed (rebuild / new fetch / carousel).
     String   _lastListSig;              // change detector: skip rebuilds on identical refreshes
     String   _fetchedPinlistSig;        // the pinlist string the current cache was built from —
                                         // if it changes on the web (pins added/removed/reordered
@@ -434,6 +438,7 @@ private:
         if (_fetching) return;
         _fetching = true;
         _fetchedPinlistSig = storage.getNftPinlist();   // remember what we're fetching
+        _imgSettled = false;
         _pendingResult.ready = false;
         _pendingResult.error = false;
         _pendingResult.count = 0;
@@ -745,6 +750,7 @@ private:
         if (_fetching) return;
         _fetching = true;
         _fetchedPinlistSig = storage.getNftPinlist();   // pins merge into wallet mode too
+        _imgSettled = false;
         _pendingResult.ready = false;
         _pendingResult.error = false;
         _pendingResult.count = 0;
@@ -800,13 +806,23 @@ private:
             _rebuildGrid();
         }
 
-        // Auto-kick: whenever no worker is running but images are still
-        // missing (interrupted run, grid-size change, beyond-cap items),
-        // start one. ~every 500 ms; _startImageFetch() no-ops when done.
+        // Auto-kick: whenever no worker is running but images are still missing,
+        // start one. Gated by _imgSettled so a fully-decoded gallery stops
+        // re-spawning no-op workers. ~every 500 ms.
         static uint8_t kickDiv = 0;
         if (++kickDiv >= 5) {
             kickDiv = 0;
-            if (!_fetching && !_imgTask) _startImageFetch();
+            // A web pinlist edit (synced via heartbeat) → refetch the whole list
+            // so a newly-added pin (e.g. an Ordinal) appears WITHOUT leaving the
+            // NFT screen. This was the "NodeMonke never shows" bug: the pinlist
+            // arrived after the fetch and nothing re-fetched while on-screen.
+            if (!_fetching && !_imgTask && storage.getNftPinlist() != _fetchedPinlistSig) {
+                _imgSettled = false;
+                if (storage.hasNftWallet()) _startFetch();
+                else if (storage.hasNftPinlist()) _startPinlistFetch();
+            } else if (!_fetching && !_imgTask && !_imgSettled) {
+                _startImageFetch();
+            }
         }
 
         if (!_fetching) return;
@@ -995,6 +1011,7 @@ private:
     // ── Grid builder ──────────────────────────────────────────────────────────
 
     void _rebuildGrid() {
+        _imgSettled = false;   // fresh cells → let the img worker run again
         // Delete old cells
         for (int i = 0; i < _cellCount; i++) {
             if (_cells[i].container) {
@@ -1353,6 +1370,7 @@ private:
         if (cw.nftCount <= 1) return;
         cw.nftCurrent = (cw.nftCurrent + 1) % cw.nftCount;
         cw.dotsAt = millis();   // reveal the position dots briefly
+        _imgSettled = false;    // the new carousel item may still need decoding
         _refreshCell(idx);
         // The first NFT_IMG_MAX_FETCH images load eagerly; anything beyond
         // that gets fetched the moment the carousel reaches it.
@@ -1835,7 +1853,12 @@ private:
                 }
             }
         }
-        Log.printf("NFT img worker: %d slots decoded%s\n", fetched, aborted ? " (aborted: params changed)" : "");
+        // Nothing new decoded and not aborted → the visible set is fully
+        // decoded/attempted; stop the auto-kick until real new art is needed.
+        if (fetched == 0 && !aborted) self->_imgSettled = true;
+        // Only log when something actually happened (no more "0 slots" spam).
+        if (fetched > 0 || aborted)
+            Log.printf("NFT img worker: %d slots decoded%s\n", fetched, aborted ? " (aborted: params changed)" : "");
 
         netUnlock();
         if (s_instance) s_instance->_imgTask = nullptr;   // ALWAYS clear before self-delete

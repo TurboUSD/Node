@@ -199,13 +199,12 @@ void setup() {
     pinMode(BUZZER_PIN, OUTPUT);          // factory beep_init()
     delay(500);                           // factory settle delay before first beep
 
-    // Boot self-test: ONE beep, factory drive (plain analogWrite 127, default
-    // 1 kHz PWM), BEFORE any UART/I2C init so a hung peripheral can never
-    // silence it. No beep at power-on → buzzer pin/drive problem.
-    analogWrite(BUZZER_PIN, 127);         // EXACTLY factory beep_on()
-    delay(150);
+    // Boot self-test: ONE short, SOFT beep (low duty, brief) — just enough to
+    // confirm the buzzer works at power-on. The alarm is the only loud sound.
+    analogWrite(BUZZER_PIN, 30);          // soft (~12% duty vs the 127 alarm peak)
+    delay(70);
     analogWrite(BUZZER_PIN, 0);
-    delay(250);
+    delay(200);
 
     Serial1.setRX(UART_FROM_S3_RX);
     Serial1.setTX(UART_TO_S3_TX);
@@ -268,21 +267,10 @@ void loop() {
     while (Serial1.available()) {
         uint8_t b = Serial1.read();
 
-        // ── Link diagnostic (first 2 minutes after boot only) ────────────────
-        // A very short blip for ANY received byte, at most one every 3 s.
-        // Combined with the ESP32's chime attempt ~6 s after ITS boot, the
-        // sounds tell the whole story without a serial monitor:
-        //   2 boot beeps + blip/chime later  → UART RX is alive.
-        //   2 boot beeps + silence           → no bytes ever arrive from the
-        //     ESP32 → electrical/pin-level problem, not firmware.
-        static uint32_t lastBlipAt = 0;
-        uint32_t blipEvery = millis() < 120000 ? 3000 : 10000;   // always-on diagnostic
-        if (millis() - lastBlipAt > blipEvery) {
-            lastBlipAt = millis();
-            analogWrite(BUZZER_PIN, 60);
-            delay(35);
-            analogWrite(BUZZER_PIN, 0);
-        }
+        // (The old per-byte "link diagnostic" blip lived here — it made the
+        // buzzer chirp every few seconds once the link was up. The link is
+        // confirmed working now, so it's gone: the buzzer only sounds for the
+        // boot beep and the alarm.)
 
         if (frameIndex == 0 && b != 0x7E) continue; // resync: wait for a start byte
         frame[frameIndex++] = b;

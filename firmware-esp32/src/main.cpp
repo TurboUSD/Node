@@ -299,17 +299,15 @@ void loop() {
     // a display/pin problem but is really "the UI was never drawn".
     uiManager.loop();
 
-    // Link self-test: ONE chime ~6 s after boot (RP2040 is fully up by then).
-    // Boot sounds now tell the whole story: two beeps = RP2040 alive (its own
-    // firmware), a third beep = the ESP32→RP2040 UART link works end-to-end —
-    // i.e. the alarm WILL sound. Two beeps but no third = link problem.
-    static int linkChimesSent = 0;
-    static const uint32_t CHIME_AT[3] = { 6000, 12000, 20000 };
-    if (linkChimesSent < 3 && millis() > CHIME_AT[linkChimesSent]) {
-        linkChimesSent++;
-        rp2040Link.printStatus();                      // visible even if the monitor attached late
-        Log.printf("RP-link: chime attempt %d\n", linkChimesSent);
-        rp2040Link.playChime();   // three attempts → three chances to hear the link
+    // Link status check ~6/12/20 s after boot. SILENT now (no chime): the link
+    // is verified in /logs via the RP2040 heartbeat + ping-OK lines, so there's
+    // no need to make the buzzer beep at boot. Only the alarm sounds.
+    static int linkChecks = 0;
+    static const uint32_t CHECK_AT[3] = { 6000, 12000, 20000 };
+    if (linkChecks < 3 && millis() > CHECK_AT[linkChecks]) {
+        linkChecks++;
+        rp2040Link.printStatus();
+        Log.printf("RP-link: status check %d\n", linkChecks);
     }
 
     // Round-trip test every 30 s, FOREVER (the old one-shot at t=30s was
