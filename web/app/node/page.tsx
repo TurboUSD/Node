@@ -146,7 +146,7 @@ export default function NodeProductPage() {
           </p>
         </div>
         <div style={s.heroImgWrap}>
-          <DeviceHero />
+          <DeviceRenderCarousel />
         </div>
       </section>
 
@@ -300,6 +300,51 @@ export default function NodeProductPage() {
 
 
 // ── Animated device hero ──────────────────────────────────────────────────────
+// ── Device hero: auto-swiping carousel of the real device renders ─────────────
+// Seven render PNGs (web/public/device-renders/1..7.webp), slid sideways on a
+// timer so the hero looks like the device swiping through its own screens.
+const DEVICE_RENDER_COUNT = 7
+const DEVICE_RENDER_MS    = 2600
+
+function DeviceRenderCarousel() {
+  const [idx, setIdx] = useState(0)
+  const N = DEVICE_RENDER_COUNT
+
+  useEffect(() => {
+    const t = setInterval(() => setIdx(i => (i + 1) % N), DEVICE_RENDER_MS)
+    return () => clearInterval(t)
+  }, [N])
+
+  return (
+    <div style={{ width: '100%', maxWidth: 420 }}>
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '1000 / 981', overflow: 'hidden', borderRadius: 18 }}>
+        <div style={{
+          display: 'flex', width: `${N * 100}%`, height: '100%',
+          transform: `translateX(-${idx * (100 / N)}%)`,
+          transition: 'transform 620ms cubic-bezier(.4,0,.2,1)',
+        }}>
+          {Array.from({ length: N }).map((_, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={i} src={`/device-renders/${i + 1}.webp`} alt="TurboUSD Node screen"
+              loading={i === 0 ? 'eager' : 'lazy'}
+              style={{ width: `${100 / N}%`, height: '100%', objectFit: 'contain', display: 'block' }} />
+          ))}
+        </div>
+      </div>
+      {/* Position dots */}
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 14 }}>
+        {Array.from({ length: N }).map((_, i) => (
+          <button key={i} aria-label={`Screen ${i + 1}`} onClick={() => setIdx(i)}
+            style={{
+              width: 7, height: 7, borderRadius: '50%', border: 'none', padding: 0, cursor: 'pointer',
+              background: i === idx ? C.green : '#3a3a3a', transition: 'background 250ms ease',
+            }} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // The real D1 photo with a live NodeOS mock composited onto the panel. The
 // screens slide sideways on a timer, as if the device were swiping itself.
 const HERO_SCREENS = 6
