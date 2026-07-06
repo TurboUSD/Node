@@ -56,6 +56,11 @@ interface NodeConfig {
   nft_wallet_address?:    string | null
   nft_grid_size?:         1 | 4 | 9
   nft_carousel_enabled?:  boolean
+  nft_show_data?:         boolean
+  nft_coll_order?:        string | null
+  nft_coll_hidden?:       string | null
+  nft_collections?:       { slug: string; name: string; floor: number }[] | null
+  screen_hidden?:         string | null
   nft_slideshow_secs?:    number
   // Screen order (optional — requires DB migration)
   // Comma-separated ScreenId integers, e.g. "0,1,2,3,4,5,6". Position 0 is always Home.
@@ -219,6 +224,10 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         nft_wallet_address:    node.nft_wallet_address,
         nft_grid_size:         node.nft_grid_size,
         nft_carousel_enabled:  node.nft_carousel_enabled,
+        nft_show_data:         node.nft_show_data ?? true,
+        nft_coll_order:        node.nft_coll_order ?? '',
+        nft_coll_hidden:       node.nft_coll_hidden ?? '',
+        screen_hidden:         node.screen_hidden ?? '',
         nft_slideshow_secs:    node.nft_slideshow_secs,
         // Serialize pinlist: active if items exist, null to clear (falls back to wallet mode on device)
         nft_pinlist:           pinItems.length > 0
@@ -516,7 +525,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               options={[['1', '1×1'], ['4', '2×2'], ['9', '3×3']]}
               onChange={v => setNode({ ...node, nft_grid_size: Number(v) as 1 | 4 | 9 })}
             />
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 8, marginBottom: 10 }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 8, marginBottom: 10, flexWrap: 'wrap' }}>
               <label style={s.checkboxLabel}>
                 <input type="checkbox"
                   checked={node.nft_carousel_enabled ?? true}
@@ -525,7 +534,21 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
                 />
                 Auto-carousel (cycle NFTs per cell)
               </label>
+              <label style={s.checkboxLabel}>
+                <input type="checkbox"
+                  checked={node.nft_show_data ?? true}
+                  onChange={e => setNode({ ...node, nft_show_data: e.target.checked })}
+                  style={{ accentColor: C.green }}
+                />
+                Show collection name &amp; floor price
+              </label>
             </div>
+            <NftCollectionsBoard
+              collections={node.nft_collections ?? null}
+              order={node.nft_coll_order ?? ''}
+              hidden={node.nft_coll_hidden ?? ''}
+              onChange={(ord, hid) => setNode({ ...node, nft_coll_order: ord, nft_coll_hidden: hid })}
+            />
             <Field label="Slideshow interval (seconds)" hint="How long each NFT is shown before advancing. Set 0 to disable.">
               <input type="number" style={{ ...s.input, width: 100 }} min={0} max={120}
                 value={node.nft_slideshow_secs ?? 10}
@@ -542,7 +565,9 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
           </p>
           <ScreenOrderSection
             value={node.screen_order ?? null}
+            hidden={node.screen_hidden ?? ''}
             onChange={order => setNode({ ...node, screen_order: order })}
+            onHiddenChange={h => setNode({ ...node, screen_hidden: h })}
           />
         </Section>
 
@@ -786,7 +811,110 @@ function parseOrder(raw: string | null): number[] {
   return DEFAULT_ORDER
 }
 
-function ScreenOrderSection({ value, onChange }: { value: string | null; onChange: (v: string) => void }) {
+// ── NFT collections board — one row per collection the DEVICE detected in
+// the wallet (reported on each heartbeat). Checkbox = shown on the device;
+// arrows reorder; the first 9 checked rows fill the 3×3 grid (4 for 2×2,
+// 1 for 1×1). Order/hidden are stored as comma-joined slug lists.
+const collBtnStyle: React.CSSProperties = {
+  background: 'none', border: `1px solid ${C.border}`, borderRadius: 4,
+  color: C.muted, cursor: 'pointer', width: 26, height: 26, fontSize: 12,
+  lineHeight: 1, flexShrink: 0,
+}
+
+function NftCollectionsBoard({ collections, order, hidden, onChange }: {
+  collections: { slug: string; name: string; floor: number }[] | null
+  order: string
+  hidden: string
+  onChange: (order: string, hidden: string) => void
+}) {
+  if (!collections || collections.length === 0) {
+    return (
+      <p style={{ fontSize: 12, color: C.muted, margin: '10px 0' }}>
+        No collections reported yet — the device sends the detected list a few
+        minutes after it loads the gallery for the first time.
+      </p>
+    )
+  }
+  const hiddenSet = new Set(hidden.split(',').map(x => x.trim()).filter(Boolean))
+  // Effective order: listed slugs first (in saved order), then the rest by reported (floor) order
+  const bySlug = new Map(collections.map(c => [c.slug, c]))
+  const ordered: { slug: string; name: string; floor: number }[] = []
+  for (const slug of order.split(',').map(x => x.trim()).filter(Boolean)) {
+    const c = bySlug.get(slug)
+    if (c) { ordered.push(c); bySlug.delete(slug) }
+  }
+  for (const c of collections) if (bySlug.has(c.slug)) { ordered.push(c); bySlug.delete(c.slug) }
+
+  const commit = (list: typeof ordered, hs: Set<string>) =>
+    onChange(list.map(c => c.slug).join(','), [...hs].join(','))
+
+  const move = (idx: number, dir: number) => {
+    const to = idx + dir
+    if (to < 0 || to >= ordered.length) return
+    const next = [...ordered]
+    ;[next[idx], next[to]] = [next[to], next[idx]]
+    commit(next, hiddenSet)
+  }
+
+  let visibleRank = 0
+  return (
+    <div style={{ marginTop: 6, marginBottom: 12 }}>
+      <p style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
+        Collections detected in the wallet — check to show on the device, reorder
+        with the arrows. The first <strong style={{ color: C.text }}>9 checked</strong> fill
+        the grid (top-left first).
+      </p>
+      {ordered.map((c, idx) => {
+        const isHidden = hiddenSet.has(c.slug)
+        const rank = !isHidden ? ++visibleRank : 0
+        const inGrid = rank > 0 && rank <= 9
+        return (
+          <div key={c.slug} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 12px', marginBottom: 5, borderRadius: 8,
+            background: C.card, border: `1px solid ${inGrid ? C.blue : C.border}`,
+            opacity: isHidden ? 0.5 : 1,
+          }}>
+            <input type="checkbox" checked={!isHidden} style={{ accentColor: C.blue, flexShrink: 0 }}
+              onChange={e => {
+                const hs = new Set(hiddenSet)
+                if (e.target.checked) hs.delete(c.slug); else hs.add(c.slug)
+                commit(ordered, hs)
+              }}
+            />
+            <span style={{ fontSize: 11, color: inGrid ? C.blue : C.muted, width: 22, textAlign: 'center', flexShrink: 0 }}>
+              {rank > 0 ? `#${rank}` : '—'}
+            </span>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {c.name || c.slug}
+            </span>
+            <span style={{ fontSize: 12, color: C.muted, flexShrink: 0 }}>
+              {c.floor >= 0.01 ? c.floor.toFixed(2) : c.floor.toFixed(3)} Ξ
+            </span>
+            <button type="button" style={{ ...collBtnStyle, opacity: idx > 0 ? 1 : 0.25 }} disabled={idx === 0}
+              onClick={() => move(idx, -1)}>▲</button>
+            <button type="button" style={{ ...collBtnStyle, opacity: idx < ordered.length - 1 ? 1 : 0.25 }} disabled={idx === ordered.length - 1}
+              onClick={() => move(idx, 1)}>▼</button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ScreenOrderSection({ value, hidden, onChange, onHiddenChange }: {
+  value: string | null
+  hidden: string
+  onChange: (v: string) => void
+  onHiddenChange: (v: string) => void
+}) {
+  const hiddenSet = new Set(hidden.split(',').map(x => x.trim()).filter(Boolean))
+  const toggleHidden = (screenId: number) => {
+    const hs = new Set(hiddenSet)
+    const key = String(screenId)
+    if (hs.has(key)) hs.delete(key); else hs.add(key)
+    onHiddenChange([...hs].join(','))
+  }
   const [order, setOrder] = React.useState<number[]>(() => parseOrder(value))
   const [dragSrc, setDragSrc] = React.useState<number | null>(null)
   const [dragOver, setDragOver] = React.useState<number | null>(null)
@@ -863,9 +991,27 @@ function ScreenOrderSection({ value, onChange }: { value: string | null; onChang
             </span>
 
             {/* screen name */}
-            <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isHome ? C.muted : C.text }}>
+            <span style={{
+              flex: 1, fontSize: 14, fontWeight: 600,
+              color: isHome ? C.muted : hiddenSet.has(String(screenId)) ? C.muted : C.text,
+              textDecoration: hiddenSet.has(String(screenId)) ? 'line-through' : 'none',
+              opacity: hiddenSet.has(String(screenId)) ? 0.6 : 1,
+            }}>
               {SCREEN_LABELS[screenId] ?? `Screen ${screenId}`}
             </span>
+
+            {/* eye: visible / hidden on the device (Home can't be hidden) */}
+            {!isHome && (
+              <button type="button" onClick={() => toggleHidden(screenId)}
+                title={hiddenSet.has(String(screenId)) ? 'Hidden on device — click to show' : 'Shown on device — click to hide'}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 15, lineHeight: 1, flexShrink: 0, padding: '0 2px',
+                  opacity: hiddenSet.has(String(screenId)) ? 0.6 : 1,
+                }}>
+                {hiddenSet.has(String(screenId)) ? '🚫' : '👁️'}
+              </button>
+            )}
 
             {/* up/down arrows (alternative to drag on mobile) */}
             {!isHome && (
