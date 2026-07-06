@@ -130,7 +130,6 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
   const [verifyMsg,   setVerifyMsg]   = useState<{ text: string; ok: boolean } | null>(null)
 
   // NFT Gallery: tab selector + manual pinlist
-  const [nftTab,   setNftTab]   = useState<'wallet' | 'manual'>('wallet')
   const [ensMsg,   setEnsMsg]   = useState<string | null>(null)
   const [pinItems, setPinItems] = useState<PinItem[]>([])
   const pinlistInitRef = useRef(false)
@@ -469,55 +468,42 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
           {/* ── NFT Gallery ── */}
         <Section title="NFT Gallery" accent={C.blue}>
           <p style={s.bodyText}>
-            Your device can auto-detect NFTs from a wallet, or show a hand-picked list of
-            specific NFTs. Manual picks take priority when active.
+            Your device auto-detects NFTs from a wallet, and you can add hand-picked NFTs
+            (or Bitcoin Ordinals) on top. Manual picks are ALWAYS shown in the grid — each
+            one takes the cell of the lowest-floor wallet collection.
             Data is fetched from OpenSea and cached 30 minutes on device.
           </p>
 
-          {/* Mode tabs */}
-          <div style={{ display: 'flex', border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
-            {(['wallet', 'manual'] as const).map((tab, i) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setNftTab(tab)}
-                style={{
-                  flex: 1, padding: '9px 0', fontSize: 13, fontWeight: 600,
-                  background: nftTab === tab ? C.blue : 'transparent',
-                  color:      nftTab === tab ? '#fff' : C.muted,
-                  border: 'none', cursor: 'pointer',
-                  borderLeft: i > 0 ? `1px solid ${C.border}` : 'none',
-                  transition: 'background .15s',
-                }}
-              >
-                {tab === 'wallet' ? 'By Wallet' : `Manual Picks${pinItems.length > 0 ? ` (${pinItems.length})` : ''}`}
-              </button>
-            ))}
-          </div>
+          <Field label="NFT wallet address" hint="EVM address (0x…) or ENS name (yourname.eth — resolved automatically). Can differ from your reward wallet. Spam NFTs (floor price = 0) are filtered automatically.">
+            <input style={s.input} placeholder="0x… or yourname.eth (defaults to reward wallet if empty)" maxLength={64}
+              value={node.nft_wallet_address ?? ''}
+              onChange={e => { setEnsMsg(null); setNode({ ...node, nft_wallet_address: e.target.value || null }) }}
+              onBlur={async e => {
+                const v = e.target.value.trim()
+                if (!/\.eth$/i.test(v)) return
+                setEnsMsg(`Resolving ${v}…`)
+                const addr = await resolveEns(v)
+                if (addr) {
+                  setNode(n => n ? { ...n, nft_wallet_address: addr } : n)
+                  setEnsMsg(`${v} → ${addr.slice(0, 6)}…${addr.slice(-4)}`)
+                } else {
+                  setEnsMsg(`Could not resolve ${v} — check the name.`)
+                }
+              }}
+            />
+            {ensMsg && <p style={{ fontSize: 12, color: ensMsg.startsWith('Could not') ? C.red : C.green, marginTop: 6 }}>{ensMsg}</p>}
+          </Field>
 
-          {nftTab === 'wallet' ? (
-            <Field label="NFT wallet address" hint="EVM address (0x…) or ENS name (yourname.eth — resolved automatically). Can differ from your reward wallet. Spam NFTs (floor price = 0) are filtered automatically.">
-              <input style={s.input} placeholder="0x… or yourname.eth (defaults to reward wallet if empty)" maxLength={64}
-                value={node.nft_wallet_address ?? ''}
-                onChange={e => { setEnsMsg(null); setNode({ ...node, nft_wallet_address: e.target.value || null }) }}
-                onBlur={async e => {
-                  const v = e.target.value.trim()
-                  if (!/\.eth$/i.test(v)) return
-                  setEnsMsg(`Resolving ${v}…`)
-                  const addr = await resolveEns(v)
-                  if (addr) {
-                    setNode(n => n ? { ...n, nft_wallet_address: addr } : n)
-                    setEnsMsg(`${v} → ${addr.slice(0, 6)}…${addr.slice(-4)}`)
-                  } else {
-                    setEnsMsg(`Could not resolve ${v} — check the name.`)
-                  }
-                }}
-              />
-              {ensMsg && <p style={{ fontSize: 12, color: ensMsg.startsWith('Could not') ? C.red : C.green, marginTop: 6 }}>{ensMsg}</p>}
-            </Field>
-          ) : (
-            <NftPinlistEditor items={pinItems} onChange={setPinItems} />
-          )}
+          <NftCollectionsBoard
+            collections={node.nft_collections ?? null}
+            order={node.nft_coll_order ?? ''}
+            hidden={node.nft_coll_hidden ?? ''}
+            onChange={(ord, hid) => setNode({ ...node, nft_coll_order: ord, nft_coll_hidden: hid })}
+          />
+
+          {/* Manual picks join the list above: each pick is ALWAYS shown on the
+              device, taking the cell of the lowest-floor wallet collection. */}
+          <NftPinlistEditor items={pinItems} onChange={setPinItems} />
 
           {/* Display settings apply to both modes */}
           <div style={{ marginTop: 4 }}>
@@ -543,12 +529,6 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
                 Show collection name &amp; floor price
               </label>
             </div>
-            <NftCollectionsBoard
-              collections={node.nft_collections ?? null}
-              order={node.nft_coll_order ?? ''}
-              hidden={node.nft_coll_hidden ?? ''}
-              onChange={(ord, hid) => setNode({ ...node, nft_coll_order: ord, nft_coll_hidden: hid })}
-            />
             <Field label="Slideshow interval (seconds)" hint="How long each NFT is shown before advancing. Set 0 to disable.">
               <input type="number" style={{ ...s.input, width: 100 }} min={0} max={120}
                 value={node.nft_slideshow_secs ?? 10}
@@ -1132,8 +1112,7 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
   return (
     <div style={{ marginBottom: 4 }}>
       <p style={{ ...s.hint, marginBottom: 10, opacity: 1 }}>
-        Paste an OpenSea link to add NFTs one by one. The device will only show these specific NFTs (pinlist takes priority over wallet).
-      </p>
+        Paste an OpenSea link — or an Ordinals inscription URL/id — to add NFTs one by one. Picks are ALWAYS shown on the device, alongside your wallet collections. </p>
 
       {/* URL input + Add button */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
@@ -1207,7 +1186,8 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
             </div>
           ))}
           <p style={{ ...s.hint, marginTop: 2 }}>
-            {items.length}/20 NFTs · Remove all items to revert to wallet mode.
+            {items.length}/20 NFTs · Picks merge with the wallet scan — remove one and that
+            grid cell returns to the wallet collections.
           </p>
         </div>
       )}
