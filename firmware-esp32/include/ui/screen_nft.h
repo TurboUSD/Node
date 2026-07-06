@@ -456,6 +456,7 @@ private:
     // by the wallet task so manual picks merge into the wallet scan.
     static void _appendPinlistItems() {
         String pinlist = storage.getNftPinlist();
+        Log.printf("NFT pinlist (device NVS): '%s' (len=%u)\n", pinlist.c_str(), (unsigned)pinlist.length());
         if (pinlist.length() == 0) return;
 
         // ── Parse "chain:contract:tokenId,…" ─────────────────────────────────
@@ -497,6 +498,12 @@ private:
             }
         }
 
+        {
+            int ordN = 0;
+            for (int k = 0; k < entryCount; k++) if (strcmp(entries[k].chain, "ord") == 0) ordN++;
+            Log.printf("NFT pinlist: parsed %d entries (%d ord). count=%d/%d\n",
+                       entryCount, ordN, _pendingResult.count, NFT_MAX_ITEMS);
+        }
         if (entryCount == 0) return;
 
         // ── Fetch each NFT individually from OpenSea ──────────────────────────

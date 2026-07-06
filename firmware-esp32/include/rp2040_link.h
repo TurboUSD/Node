@@ -159,7 +159,11 @@ public:
     // should keep showing the previous value (or "--") when this returns false.
     // See PROTOCOL.md → "Sensor response" for the 7-byte frame layout.
     bool readTempHumidity(float& tempC, int& humidityPct, uint32_t timeoutMs = 250) {
-        if (_ok) uart_flush_input(LINK_UART);   // drain stale bytes so we don't desync
+        // NOTE: we deliberately do NOT uart_flush_input() here anymore — that
+        // ran every ~10 s and could swallow the RP2040's 0x7E 0xEE heartbeat
+        // before pollRx() logged it, masking a live link. The frame parser
+        // below already resyncs on the 0x7E start byte, so stale bytes are
+        // skipped safely without a flush.
         sendCommand(Rp2040Command::READ_TH);
 
         uint8_t frame[7];
