@@ -11,6 +11,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import SiteHeader from '@/components/SiteHeader'
 
 // ── Brand tokens (same palette as the network page) ───────────────────────────
 const C = {
@@ -74,13 +75,7 @@ export default function NodeProductPage() {
   const [nodes,  setNodes]  = useState<NodeRow[]>([])
   const [blocks, setBlocks] = useState<MiningBlock[]>([])
   const [nowMs,  setNowMs]  = useState(Date.now())
-  const [savedNodeCode, setSavedNodeCode] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<string | null>(null)   // fullsize image popup
-
-  useEffect(() => {
-    const code = localStorage.getItem('turbousd_node_code')
-    if (code) setSavedNodeCode(code)
-  }, [])
 
   const refresh = useCallback(async () => {
     const [n, b] = await Promise.all([
@@ -120,10 +115,6 @@ export default function NodeProductPage() {
   }, [blocks, pendingBlock])
   const countdown = nextBlockAt ? fmtCountdown(Math.max(0, nextBlockAt.getTime() - nowMs)) : '--:--'
 
-  // Header "My Node" keeps the remembered code; the Flash CTAs always go to
-  // the GENERIC setup page (a prospective buyer has no node code yet).
-  const myNodeHref = savedNodeCode ? `/setup/${savedNodeCode}` : '/setup'
-
   return (
     <div style={s.root}>
       {/* Hidden-scrollbar rule for the draggable block lane (WebKit needs a
@@ -131,22 +122,7 @@ export default function NodeProductPage() {
       <style>{`.np-lane::-webkit-scrollbar{display:none}`}</style>
 
       {/* ── Header ── */}
-      <header style={s.header}>
-        <div style={s.headerInner}>
-          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', color: C.text }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="https://turbousd.com/wp-content/uploads/2025/07/TurboUSD_t.png"
-              alt="₸USD" style={{ height: 36, width: 'auto', objectFit: 'contain', display: 'block' }}
-            />
-            <span style={s.logo}>₸USD Node</span>
-          </Link>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-            <Link href="/" style={s.navLink}>Network</Link>
-            <a href={myNodeHref} style={s.setupBtn}>{savedNodeCode ? 'My Node →' : 'Setup →'}</a>
-          </div>
-        </div>
-      </header>
+      <SiteHeader />
 
       {/* ── Hero ── */}
       <section style={s.hero}>
@@ -159,9 +135,8 @@ export default function NodeProductPage() {
             your clock and alarm, your NFT gallery and the most honest inflation monitor money can buy.
           </p>
           <div style={s.ctaRow}>
-            <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" style={s.ctaPrimary}>Get the hardware →</a>
+            <Link href="/" style={s.ctaPrimary}>Live network →</Link>
             <a href="/setup" style={s.ctaSecondary}>Flash NodeOS →</a>
-            <Link href="/" style={s.ctaSecondary}>Live network →</Link>
           </div>
           <p style={{ fontSize: 11, color: C.muted, marginTop: 14 }}>
             Runs on the Seeed SenseCAP Indicator D1. Off-the-shelf hardware, no soldering,
@@ -204,14 +179,21 @@ export default function NodeProductPage() {
           <Spec value="RP2040" label="co-processor & buzzer" />
           <Spec value="Wi-Fi" label="that's all it needs" />
         </div>
+        {/* On mobile the device photos span the full width of the section. */}
+        <style>{`
+          @media (max-width: 640px) {
+            .hw-col { width: 100%; flex-basis: 100%; }
+            .hw-img { width: 100% !important; max-width: 100% !important; }
+          }
+        `}</style>
         <div style={s.hwSplit}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
+          <div className="hw-col" style={{ display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0 }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={DEVICE_IMG_BACK} alt="SenseCAP Indicator D1 back: button, Grove ports, USB-C"
-              style={s.hwImg} onClick={() => setLightbox(DEVICE_IMG_BACK)} />
+              className="hw-img" style={s.hwImg} onClick={() => setLightbox(DEVICE_IMG_BACK)} />
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={DEVICE_IMG_ALT} alt="SenseCAP Indicator D1 edge: internal button, USB-C, microSD, antenna"
-              style={s.hwImg} onClick={() => setLightbox(DEVICE_IMG_ALT)} />
+              className="hw-img" style={s.hwImg} onClick={() => setLightbox(DEVICE_IMG_ALT)} />
           </div>
           <div style={{ flex: 1, minWidth: 260 }}>
             <p style={s.p}>
@@ -224,8 +206,8 @@ export default function NodeProductPage() {
               web flasher, and your node is registered and mining in minutes. All settings (tickers,
               NFTs, screens, alarm) are managed from a simple web page and sync to the device automatically.
             </p>
-            <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" style={{ ...s.ctaSecondary, display: 'inline-block', marginTop: 4 }}>
-              SenseCAP Indicator D1 on Seeed Studio →
+            <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" style={{ ...s.ctaPrimary, display: 'inline-block', marginTop: 4 }}>
+              Get the hardware →
             </a>
           </div>
         </div>

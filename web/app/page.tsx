@@ -3,8 +3,8 @@
 // app/network/page.tsx — network.turbousd.com
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import SiteHeader from '@/components/SiteHeader'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
 const C = {
@@ -170,18 +170,12 @@ export default function NetworkPage() {
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  // Node code remembered from a previous setup visit
-  const [savedNodeCode, setSavedNodeCode] = useState<string | null>(null)
-
   // Install-to-home-screen state
   const [deferredPrompt, setDeferredPrompt] = useState<Event | null>(null)
   const [showInstall,    setShowInstall]    = useState(false)
   const [isIos,          setIsIos]          = useState(false)
 
   useEffect(() => {
-    const code = localStorage.getItem('turbousd_node_code')
-    if (code) setSavedNodeCode(code)
-
     // Don't prompt if already running as installed PWA
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
@@ -303,28 +297,7 @@ export default function NetworkPage() {
     <div style={s.root}>
 
       {/* ── Header ── */}
-      <header style={s.header}>
-        <div style={s.headerInner}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="https://turbousd.com/wp-content/uploads/2025/07/TurboUSD_t.png"
-              alt="₸USD" style={{ height: 36, width: 'auto', objectFit: 'contain', display: 'block' }}
-            />
-            {/* Hide text on very small screens so the button always fits */}
-            {winW >= 360 && <span style={s.logo}>₸USD Network</span>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: winW >= 420 ? 18 : 10 }}>
-            <Link href="/node" style={s.navLink}>The Device</Link>
-            <a
-              href={savedNodeCode ? `/setup/${savedNodeCode}` : '/setup'}
-              style={s.setupBtn}
-            >
-              {savedNodeCode ? 'My Node →' : 'Setup →'}
-            </a>
-          </div>
-        </div>
-      </header>
+      <SiteHeader />
 
       {/* ── Countdown bar ── */}
       {nextBlockAt && (
@@ -1004,6 +977,12 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
                 : <UnverifiedBadge size={10} />}
               {node.is_genesis  && <span style={{ fontSize: 10, flexShrink: 0 }}>⚡</span>}
             </div>
+            {/* Location under the name — also shown on desktop leaderboard */}
+            {node.country && (
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {node.country}{node.city ? ` · ${node.city}` : ''}
+              </div>
+            )}
           </div>
           {right(node)}
         </div>
@@ -1036,10 +1015,13 @@ function NodeRowCard({ node, right, prefix, onClick }: {
           {node.is_genesis  && <span style={s.genesisBadge}>⚡</span>}
           {node.display_name && <span style={s.nodeCode}>#{node.node_code}</span>}
         </div>
-        {(node.bio || node.country) && (
+        {/* Leaderboard cards show the LOCATION (not the bio), left-aligned
+            under the name. */}
+        {node.country && (
           <div style={s.nodeMeta}>
-            {node.bio && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{node.bio}</span>}
-            {node.country && <span style={{ flexShrink: 0, opacity: 0.6 }}>{node.country}{node.city ? ` · ${node.city}` : ''}</span>}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {node.country}{node.city ? ` · ${node.city}` : ''}
+            </span>
           </div>
         )}
       </div>
@@ -1257,7 +1239,7 @@ const s: Record<string, React.CSSProperties> = {
   nodeMeta:     { display: 'flex', gap: 8, fontSize: 13, color: C.muted, marginTop: 2, overflow: 'hidden' },
 
   // Leaderboard toggle
-  toggle:       { display: 'flex', background: '#111', border: `1px solid ${C.border}`, borderRadius: 20, overflow: 'hidden', padding: 3, gap: 2 },
+  toggle:       { display: 'inline-flex', background: '#111', border: `1px solid ${C.border}`, borderRadius: 20, overflow: 'hidden', padding: 3, gap: 2 },
   toggleBtn:    { padding: '5px 16px', fontSize: 12, fontWeight: 600, background: 'transparent', color: C.muted, border: 'none', cursor: 'pointer', borderRadius: 16 },
   toggleActive: { background: '#2a2a2a', color: C.text },
 
