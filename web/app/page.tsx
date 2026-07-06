@@ -34,7 +34,8 @@ interface NodeRow {
   total_tusd_earned: number
   blocks_won:        number
   windows_online:    number
-  uptime_seconds:    number | null
+  uptime_seconds:       number | null   // since boot (resets on reboot)
+  total_uptime_seconds: number | null   // cumulative across reboots (server-accumulated)
   uptime_pct:        number
   created_at:        string
   last_seen_at:      string | null
@@ -92,6 +93,12 @@ function fmtUptimeSecs(secs: number): string {
   if (secs < 3600) return `${Math.floor(secs / 60)}m`
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
   return `${Math.floor(secs / 86400)}d ${Math.floor((secs % 86400) / 3600)}h`
+}
+
+// Cumulative uptime across reboots (server-accumulated); falls back to the
+// since-boot figure until the total_uptime_seconds migration has run.
+function totalUptime(node: NodeRow): number {
+  return node.total_uptime_seconds ?? node.uptime_seconds ?? 0
 }
 
 function fmtOnlineHours(windows: number): string {
@@ -341,7 +348,7 @@ export default function NetworkPage() {
           {activeList.length === 0
             ? <p style={s.empty}>No nodes online.</p>
             : activeList.map(node => (
-              <OnlineNodeCard key={node.node_code} node={node} onClick={() => setSelectedNode(node)} />
+              <OnlineNodeCard key={node.node_code} node={node} wide={winW >= 640} onClick={() => setSelectedNode(node)} />
             ))
           }
         </section>
@@ -869,10 +876,25 @@ function NetworkGrowthSparkline({ data, totalNodes }: {
   )
 }
 
-function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void }) {
+function OnlineNodeCard({ node, onClick, wide }: { node: NodeRow; onClick: () => void; wide?: boolean }) {
   const firstOnline = new Date(node.created_at).toLocaleDateString('en-GB', {
     day: 'numeric', month: 'short', year: 'numeric',
   })
+  // On desktop (`wide`) the stat chips move to the RIGHT of the name — the
+  // card has plenty of free width there. On mobile they stay stacked below.
+  const stats = (
+    <div style={{
+      display: 'flex', gap: wide ? 20 : 14,
+      ...(wide
+        ? { marginLeft: 'auto', flexShrink: 0, alignItems: 'center', flexWrap: 'nowrap' as const }
+        : { marginTop: 5, flexWrap: 'wrap' as const }),
+    }}>
+      <StatChip label="Since" value={firstOnline} />
+      <StatChip label="Uptime" value={totalUptime(node) > 0 ? fmtUptimeSecs(totalUptime(node)) : '—'} />
+      <StatChip label="Blocks" value={String(node.blocks_won)} color={node.blocks_won > 0 ? C.green : undefined} />
+      <StatChip label="Earned" value={`₸${node.total_tusd_earned.toFixed(1)}`} color={node.total_tusd_earned > 0 ? C.green : undefined} />
+    </div>
+  )
   return (
     <div style={s.nodeRow} onClick={onClick} role="button" tabIndex={0}
       onKeyDown={e => e.key === 'Enter' && onClick()}>
@@ -883,9 +905,9 @@ function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void 
       }} />
 
       {/* Main content */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, ...(wide ? { display: 'flex', alignItems: 'center', gap: 16 } : {}) }}>
         {/* Row 1: name + badges + code */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const, ...(wide ? { minWidth: 0 } : {}) }}>
           <span style={{ ...s.nodeName, color: C.text }}>
             {node.display_name || `Node #${node.node_code}`}
           </span>
@@ -895,19 +917,8 @@ function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void 
           {node.is_genesis && <GenesisBadge size={11} />}
           {node.display_name && <span style={{ ...s.nodeCode, marginLeft: 2 }}>#{node.node_code}</span>}
         </div>
-        {/* Row 2: stats */}
-        <div style={{ display: 'flex', gap: 14, marginTop: 5, flexWrap: 'wrap' as const }}>
-          <StatChip label="Since" value={firstOnline} />
-          <StatChip label="Uptime" value={(node.uptime_seconds ?? 0) > 0 ? fmtUptimeSecs(node.uptime_seconds!) : '—'} />
-          <StatChip label="Blocks" value={String(node.blocks_won)} color={node.blocks_won > 0 ? C.green : undefined} />
-          <StatChip label="Earned" value={`₸${node.total_tusd_earned.toFixed(1)}`} color={node.total_tusd_earned > 0 ? C.green : undefined} />
-          {false && (
-            <StatChip label="Uptime"
-              value={`${node.uptime_pct}%`}
-              color={node.uptime_pct >= 90 ? C.green : node.uptime_pct >= 60 ? C.yellow : C.muted}
-            />
-          )}
-        </div>
+        {/* Stats — right of the name on desktop, second row on mobile */}
+        {stats}
       </div>
     </div>
   )
@@ -942,9 +953,13 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
           }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap' as const, overflow: 'hidden' }}>
-              <a href={`/node/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, fontWeight: 600, color: C.text, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {/* Plain span, NOT a link: clicking anywhere on the row (name
+                  included) opens the same bottom-sheet overlay as the Nodes
+                  Online list. The standalone /node/<code> page stays reachable
+                  from the overlay's own link. */}
+              <span style={{ fontSize: 12, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {node.display_name || `Node #${node.node_code}`}
-              </a>
+              </span>
               {node.is_verified
                 ? <span style={{ fontSize: 10, color: '#1d9bf0', fontWeight: 700, flexShrink: 0 }}>✓</span>
                 : <UnverifiedBadge size={10} />}
@@ -1011,7 +1026,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
 
   function shareOnX() {
     const name = node.display_name || `Node #${node.node_code}`
-    const up = (node.uptime_seconds ?? 0) > 0 ? ` · ${fmtUptimeSecs(node.uptime_seconds!)} uptime` : ''
+    const up = totalUptime(node) > 0 ? ` · ${fmtUptimeSecs(totalUptime(node))} uptime` : ''
     const text = `My node "${name}" is live on the @TurboUSD network ⛏\n${node.blocks_won} blocks won · ${node.total_tusd_earned.toFixed(2)} ₸USD earned${up}`
     const url  = `https://network.turbousd.com/node/${node.node_code}`
     window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank')
@@ -1064,7 +1079,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
           <DetailStat label="Total earned" value={`₸${node.total_tusd_earned.toFixed(4)}`} color={C.green}  />
           <DetailStat label="Blocks won"   value={String(node.blocks_won)}                 color={C.blue}   />
           <DetailStat label="Uptime"
-            value={(node.uptime_seconds ?? 0) > 0 ? fmtUptimeSecs(node.uptime_seconds!) : '—'}
+            value={totalUptime(node) > 0 ? fmtUptimeSecs(totalUptime(node)) : '—'}
             color={C.green} />
           <DetailStat label="Since"        value={new Date(node.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} color={C.yellow} />
         </div>
