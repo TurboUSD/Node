@@ -69,7 +69,7 @@ async function fetchBlocks(): Promise<MiningBlock[]> {
     .from('public_mining_feed')
     .select('*')
     .order('block_number', { ascending: false })
-    .limit(20)
+    .limit(50)   // deeper history — the mined lane is horizontally scrollable now
   return (data ?? []) as MiningBlock[]
 }
 
@@ -273,12 +273,15 @@ export default function NetworkPage() {
             {/* Hide text on very small screens so the button always fits */}
             {winW >= 360 && <span style={s.logo}>₸USD Network</span>}
           </div>
-          <a
-            href={savedNodeCode ? `/setup/${savedNodeCode}` : '/setup'}
-            style={s.setupBtn}
-          >
-            {savedNodeCode ? 'My Node →' : 'Setup →'}
-          </a>
+          <div style={{ display: 'flex', alignItems: 'center', gap: winW >= 420 ? 18 : 10 }}>
+            <Link href="/node" style={s.navLink}>The Device</Link>
+            <a
+              href={savedNodeCode ? `/setup/${savedNodeCode}` : '/setup'}
+              style={s.setupBtn}
+            >
+              {savedNodeCode ? 'My Node →' : 'Setup →'}
+            </a>
+          </div>
         </div>
       </header>
 
@@ -294,7 +297,8 @@ export default function NetworkPage() {
       {/* ── Block ticker: mined lane (left) | dashed divider | pending (fixed right) ── */}
       <div style={s.tickerWrap} aria-hidden="true">
         <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}>
-          <div style={s.tickerMinedLane}>
+          <div style={s.tickerMinedLane}
+            ref={el => { if (el && el.dataset.autoscrolled !== String(minedOldestFirst.length)) { el.scrollLeft = el.scrollWidth; el.dataset.autoscrolled = String(minedOldestFirst.length) } }}>
             {minedOldestFirst.length === 0
               ? <span style={{ alignSelf: 'center', color: C.muted, fontSize: 11, whiteSpace: 'nowrap' }}>No blocks mined yet — first one below ↓</span>
               : minedOldestFirst.map(b => (
@@ -534,23 +538,91 @@ const VERIFY_HELP =
   '3. Include the wallet holding your TUSD\n' +
   '4. We manually review and whitelist your node'
 
-function UnverifiedBadge({ size = 10 }: { size?: number }) {
+const GENESIS_HELP =
+  'Genesis node ⚡\n\nOne of the founding nodes that joined the TurboUSD network at launch. ' +
+  'The lightning badge is permanent — it marks the earliest supporters of the network.'
+
+// Dark, centered info modal (the native alert() was a white browser popup
+// pinned to the top — ugly on desktop, worse on mobile).
+function InfoModal({ title, body, onClose }: { title: string; body: string; onClose: () => void }) {
   return (
-    <span
-      title={VERIFY_HELP}
-      onClick={e => { e.stopPropagation(); e.preventDefault(); alert(VERIFY_HELP) }}
+    <div
+      onClick={e => { e.stopPropagation(); onClose() }}
       style={{
-        position: 'relative', display: 'inline-block', fontSize: size,
-        color: '#6e7280', fontWeight: 700, flexShrink: 0, cursor: 'help',
-        lineHeight: 1, padding: '0 1px',
+        position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,.72)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
       }}
     >
-      ✓
-      <span style={{
-        position: 'absolute', left: '-15%', right: '-15%', top: '48%',
-        borderTop: '2px solid #e5484d', transform: 'rotate(45deg)',
-      }} />
-    </span>
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#101012', border: `1px solid ${C.border}`, borderRadius: 14,
+          padding: '22px 24px', maxWidth: 420, width: '100%', color: C.text,
+          boxShadow: '0 18px 60px rgba(0,0,0,.6)', position: 'relative',
+        }}
+      >
+        <button onClick={onClose} aria-label="Close" style={{
+          position: 'absolute', top: 10, right: 12, background: 'none', border: 'none',
+          color: C.muted, fontSize: 16, cursor: 'pointer', lineHeight: 1,
+        }}>✕</button>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{title}</div>
+        <div style={{ fontSize: 13, color: '#c4c4cc', lineHeight: 1.55, whiteSpace: 'pre-line' }}>
+          {body}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function UnverifiedBadge({ size = 10 }: { size?: number }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <span
+        title="Verification pending — tap for how to get verified"
+        onClick={e => { e.stopPropagation(); e.preventDefault(); setOpen(true) }}
+        style={{
+          position: 'relative', display: 'inline-block', fontSize: size,
+          color: '#6e7280', fontWeight: 700, flexShrink: 0, cursor: 'help',
+          lineHeight: 1, padding: '0 1px',
+        }}
+      >
+        ✓
+        <span style={{
+          position: 'absolute', left: '-15%', right: '-15%', top: '48%',
+          borderTop: '2px solid #e5484d', transform: 'rotate(45deg)',
+        }} />
+      </span>
+      {open && <InfoModal title="Verification pending" body={VERIFY_HELP.replace('Verification pending.\n\n', '')} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+function GenesisChip() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <span
+        title="Genesis node — tap to learn more"
+        onClick={e => { e.stopPropagation(); setOpen(true) }}
+        style={{ fontSize: 12, color: C.yellow, fontWeight: 'bold', cursor: 'help' }}
+      >⚡ genesis</span>
+      {open && <InfoModal title="Genesis node ⚡" body={GENESIS_HELP.replace('Genesis node ⚡\n\n', '')} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+function GenesisBadge({ size = 11 }: { size?: number }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <span
+        title="Genesis node — tap to learn more"
+        onClick={e => { e.stopPropagation(); e.preventDefault(); setOpen(true) }}
+        style={{ fontSize: size, flexShrink: 0, cursor: 'help' }}
+      >⚡</span>
+      {open && <InfoModal title="Genesis node ⚡" body={GENESIS_HELP.replace('Genesis node ⚡\n\n', '')} onClose={() => setOpen(false)} />}
+    </>
   )
 }
 
@@ -820,17 +892,13 @@ function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void 
           {node.is_verified
             ? <span style={{ fontSize: 11, color: '#1d9bf0', fontWeight: 700 }}>✓</span>
             : <UnverifiedBadge size={11} />}
-          {node.is_genesis && (
-            <span style={{ fontSize: 11 }}>⚡</span>
-          )}
+          {node.is_genesis && <GenesisBadge size={11} />}
           {node.display_name && <span style={{ ...s.nodeCode, marginLeft: 2 }}>#{node.node_code}</span>}
         </div>
         {/* Row 2: stats */}
         <div style={{ display: 'flex', gap: 14, marginTop: 5, flexWrap: 'wrap' as const }}>
           <StatChip label="Since" value={firstOnline} />
-          {(node.uptime_seconds ?? 0) > 0 && (
-            <StatChip label="Uptime" value={fmtUptimeSecs(node.uptime_seconds!)} />
-          )}
+          <StatChip label="Uptime" value={(node.uptime_seconds ?? 0) > 0 ? fmtUptimeSecs(node.uptime_seconds!) : '—'} />
           <StatChip label="Blocks" value={String(node.blocks_won)} color={node.blocks_won > 0 ? C.green : undefined} />
           <StatChip label="Earned" value={`₸${node.total_tusd_earned.toFixed(1)}`} color={node.total_tusd_earned > 0 ? C.green : undefined} />
           {false && (
@@ -943,7 +1011,8 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
 
   function shareOnX() {
     const name = node.display_name || `Node #${node.node_code}`
-    const text = `My node "${name}" is live on the @turbousd network ⛏\n${node.blocks_won} blocks won · ${node.total_tusd_earned.toFixed(2)} ₸USD earned · ${node.uptime_pct}% uptime`
+    const up = (node.uptime_seconds ?? 0) > 0 ? ` · ${fmtUptimeSecs(node.uptime_seconds!)} uptime` : ''
+    const text = `My node "${name}" is live on the @TurboUSD network ⛏\n${node.blocks_won} blocks won · ${node.total_tusd_earned.toFixed(2)} ₸USD earned${up}`
     const url  = `https://network.turbousd.com/node/${node.node_code}`
     window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank')
   }
@@ -970,7 +1039,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 12, color: C.muted }}>#{node.node_code}</span>
               {node.is_verified && <span style={{ fontSize: 12, color: C.blue, fontWeight: 'bold' }}>✓ verified</span>}
-              {node.is_genesis  && <span style={{ fontSize: 12, color: C.yellow, fontWeight: 'bold' }}>⚡ genesis</span>}
+              {node.is_genesis  && <GenesisChip />}
               {node.twitter_handle && (
                 <a href={`https://x.com/${node.twitter_handle}`} target="_blank" rel="noreferrer"
                   style={{ fontSize: 12, color: C.green, textDecoration: 'none' }}>
@@ -1056,7 +1125,8 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   },
   logo:     { fontSize: 18, fontWeight: 'bold', letterSpacing: -0.5 },
-  setupBtn: { padding: '7px 18px', background: C.green, color: C.onGreen, borderRadius: 20, fontWeight: 'bold', fontSize: 13, textDecoration: 'none' },
+  navLink:  { color: C.muted, fontSize: 13, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' },
+  setupBtn: { padding: '7px 18px', background: C.green, color: C.onGreen, borderRadius: 20, fontWeight: 'bold', fontSize: 13, textDecoration: 'none', whiteSpace: 'nowrap' },
 
   // Countdown
   countdownBar: {
@@ -1077,7 +1147,7 @@ const s: Record<string, React.CSSProperties> = {
   // No flex:1 — the lane shrinks to its content so the whole strip (mined +
   // divider + pending) sits CENTERED; when it grows past ~70% width it clips
   // on the left, keeping the newest blocks visible next to the divider.
-  tickerMinedLane: { display: 'flex', gap: 8, padding: '12px 8px', overflow: 'hidden', justifyContent: 'flex-end', minWidth: 0, maxWidth: 'calc(100% - 180px)' },
+  tickerMinedLane: { display: 'flex', gap: 8, padding: '12px 8px', overflowX: 'auto' as const, overflowY: 'hidden' as const, minWidth: 0, maxWidth: 'calc(100% - 180px)', scrollbarWidth: 'thin' as const },
   tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '10px 16px', opacity: 0.75 },
 
   block: {
