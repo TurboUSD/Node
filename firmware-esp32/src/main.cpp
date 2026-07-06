@@ -18,6 +18,7 @@
 #include "rp2040_link.h"
 #include "ota_updater.h"
 #include "ui/ui_manager.h"
+#include "screenshot_server.h"   // http://<ip>/shot.bmp — pixel-perfect captures
 
 SemaphoreHandle_t gNetLock = nullptr;   // see net_lock.h
 
@@ -292,6 +293,11 @@ void loop() {
         delay(500);
         return;
     }
+
+    // Screenshot server: lazy-started on the first connected pass (the
+    // provisioning portal owns port 80 in AP mode, never simultaneously).
+    if (!screenshot::started()) screenshot::init();
+    screenshot::poll();
 
     uint32_t now = millis();
 

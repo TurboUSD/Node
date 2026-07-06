@@ -30,6 +30,7 @@
 #include "api_client.h"
 #include "rp2040_link.h"   // confirmation chime on alarm save (link self-test)
 #include "storage.h"
+#include "screenshot_server.h"   // flush_cb mirrors frames into its shadow fb
 
 // Large clock font (Montserrat 72px, digits + ":" + AM/PM) — assets/montserrat_clock.c
 LV_FONT_DECLARE(montserrat_clock);
@@ -158,6 +159,9 @@ public:
     }
 
     bool isOnNodeScreen() { return currentScreen == ScreenId::NODE_NETWORK; }
+
+    // RGB panel handle — the screenshot server reads its PSRAM framebuffer.
+    esp_lcd_panel_handle_t lcdPanel() const { return _lcdPanel; }
 
     // Called by main.cpp when the nightly OTA check finds a newer version.
     // Creates a small persistent badge at the bottom of the screen. Tapping
@@ -794,9 +798,12 @@ private:
                 area->x1, area->y1,
                 area->x2 + 1, area->y2 + 1,
                 colorP);
+            // Mirror into the screenshot shadow framebuffer (http://<ip>/shot.bmp).
+            screenshot::mirror(area, colorP);
             lv_disp_flush_ready(drv);
         };
         lv_disp_drv_register(&dispDrv);
+        screenshot::ensureShadow();
 
         // 10. Register LVGL touch input driver (FT6336U, polled — no INT pin).
         //     Reads 5 bytes from I2C 0x48: [touch_count, xH, xL, yH, yL].
