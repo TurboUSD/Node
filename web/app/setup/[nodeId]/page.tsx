@@ -174,10 +174,23 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
       const firstColon  = raw.indexOf(':')
       const secondColon = raw.indexOf(':', firstColon + 1)
       if (firstColon < 1 || secondColon < 1) return []
+      // Ordinals may carry a 4th field: a user-picked background colour
+      // ("ord:<inscription>:0:#f68b1f") — the on-chain PNGs are transparent
+      // and no keyless indexer still serves the Background trait, so the
+      // owner chooses the colour here and the device composites onto it.
+      let tail = raw.slice(secondColon + 1)
+      let bg: string | undefined
+      const thirdColon = tail.indexOf(':')
+      if (thirdColon > 0) {
+        const maybe = tail.slice(thirdColon + 1)
+        if (/^#[0-9a-f]{6}$/i.test(maybe)) bg = maybe.toLowerCase()
+        tail = tail.slice(0, thirdColon)
+      }
       return [{
         chain:    raw.slice(0, firstColon),
         contract: raw.slice(firstColon + 1, secondColon),
-        tokenId:  raw.slice(secondColon + 1),
+        tokenId:  tail,
+        bg,
         // name / image_url not stored in DB, shown as plain IDs until user re-adds via UI
       }]
     })
@@ -195,7 +208,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
       // Ordinals: upgrade to the real name + BTC floor in the background
       const ordIds = withMeta.filter(i => i.chain === 'ord').map(i => i.contract)
       if (ordIds.length > 0) {
-        callFunction<{ results: { id: string; name?: string | null; floor_btc?: number | null }[] }>('resolve-ordinal', { ids: ordIds })
+        callFunction<{ results: { id: string; name?: string | null; collection?: string | null; floor_btc?: number | null }[] }>('resolve-ordinal', { ids: ordIds })
           .then(res => {
             if (!res?.results) return
             setPinItems(prev => prev.map(pI => {
@@ -205,7 +218,10 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               return {
                 ...pI,
                 name: r.name || 'Ordinal',
-                collection_name: r.floor_btc ? `Ordinals · ${r.floor_btc.toFixed(3)} ₿` : 'Ordinals',
+                // "NodeMonkes · 0.039 ₿" (real collection name when resolved)
+                collection_name: [r.collection || 'Ordinals',
+                                  r.floor_btc ? `${r.floor_btc.toFixed(3)} ₿` : null]
+                                 .filter(Boolean).join(' · '),
               }
             }))
           })
@@ -276,7 +292,10 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         nft_slideshow_secs:    node.nft_slideshow_secs,
         // Serialize pinlist: active if items exist, null to clear (falls back to wallet mode on device)
         nft_pinlist:           pinItems.length > 0
-                                 ? pinItems.map(i => `${i.chain}:${i.contract}:${i.tokenId}`).join(',')
+                                 ? pinItems.map(i =>
+                                     `${i.chain}:${i.contract}:${i.tokenId}` +
+                                     (i.chain === 'ord' && i.bg ? `:${i.bg}` : ''))
+                                   .join(',')
                                  : null,
         screen_order:          node.screen_order ?? undefined,
       })
@@ -1077,6 +1096,7 @@ interface PinItem {
   chain:            string
   contract:         string
   tokenId:          string
+  bg?:              string   // ordinals only: user-picked background "#rrggbb"
   name?:            string
   image_url?:       string
   collection_name?: string
@@ -1118,11 +1138,13 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
       setResolving(true)
       setError(null)
       let name = 'Ordinal'
+      let coll: string | undefined
       let floorBtc: number | undefined
       try {
-        const res = await callFunction<{ results: { name?: string | null; floor_btc?: number | null }[] }>('resolve-ordinal', { ids: [parsed.contract] })
+        const res = await callFunction<{ results: { name?: string | null; collection?: string | null; floor_btc?: number | null }[] }>('resolve-ordinal', { ids: [parsed.contract] })
         const r = res?.results?.[0]
         if (r?.name) name = r.name
+        if (r?.collection) coll = r.collection
         if (r?.floor_btc) floorBtc = r.floor_btc
       } catch { /* fall back to plain "Ordinal" */ }
       setResolving(false)
@@ -1130,7 +1152,8 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
         chain: 'ord', contract: parsed.contract, tokenId: '0',
         name,
         image_url: `https://ordinals.com/content/${parsed.contract}`,
-        collection_name: floorBtc ? `Ordinals · ${floorBtc.toFixed(3)} ₿` : 'Ordinals',
+        collection_name: [coll || 'Ordinals', floorBtc ? `${floorBtc.toFixed(3)} ₿` : null]
+                         .filter(Boolean).join(' · '),
       }])
       setUrl('')
       return
@@ -1230,7 +1253,10 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
                   {item.name ?? `#${item.tokenId}`}
                 </div>
                 <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-                  {item.collection_name ?? item.chain} · #{item.tokenId}
+                  {/* Ordinals: no "#0" suffix — their tokenId is a placeholder
+                      (pinlist format ord:<inscription>:0); the real number is
+                      already part of the name ("NodeMonke #9343"). */}
+                  {item.collection_name ?? item.chain}{item.chain !== 'ord' ? ` · #${item.tokenId}` : ''}
                 </div>
                 {item.floor_price_eth != null && item.floor_price_eth > 0 && (
                   <div style={{ fontSize: 11, color: C.green, marginTop: 1 }}>
@@ -1238,6 +1264,21 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
                   </div>
                 )}
               </div>
+              {item.chain === 'ord' && (
+                // Background colour for transparent on-chain art (NodeMonkes
+                // et al). Synced to the device, which composites the PNG onto
+                // this colour instead of plain black.
+                <label title="Artwork background color on the device"
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, cursor: 'pointer' }}>
+                  <span style={{ fontSize: 10, color: C.muted }}>BG</span>
+                  <input
+                    type="color"
+                    value={item.bg ?? '#000000'}
+                    onChange={e => onChange(items.map((it, i) => i === idx ? { ...it, bg: e.target.value.toLowerCase() } : it))}
+                    style={{ width: 26, height: 26, padding: 0, border: `1px solid ${C.border}`, borderRadius: 6, background: 'none', cursor: 'pointer' }}
+                  />
+                </label>
+              )}
               <button
                 type="button"
                 onClick={() => onChange(items.filter((_, i) => i !== idx))}
