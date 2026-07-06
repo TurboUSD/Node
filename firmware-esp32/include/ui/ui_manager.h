@@ -819,32 +819,38 @@ private:
         lv_obj_set_style_bg_color(screens[(int)ScreenId::TURBO_STATS], lv_color_black(), 0);
         turboScreen.build(screens[(int)ScreenId::TURBO_STATS], onLogoTapped, onDateTapped, onQrTapped, this);
         _wireAlarmIcon(turboScreen.header);
+        _wireFooterNav(turboScreen.footer);
 
         screens[(int)ScreenId::DEBT] = lv_obj_create(nullptr);
         lv_obj_set_style_bg_color(screens[(int)ScreenId::DEBT], lv_color_black(), 0);
         debtScreen.build(screens[(int)ScreenId::DEBT], onLogoTapped, onDateTapped, onQrTapped,
                           onDebtRangeTapped, onSinceBtnTapped, onRateBtnTapped, this);
         _wireAlarmIcon(debtScreen.header);
+        _wireFooterNav(debtScreen.footer);
 
         screens[(int)ScreenId::INFLATION_GAME] = lv_obj_create(nullptr);
         lv_obj_set_style_bg_color(screens[(int)ScreenId::INFLATION_GAME], lv_color_black(), 0);
         gameScreen.build(screens[(int)ScreenId::INFLATION_GAME], onLogoTapped, onDateTapped, onQrTapped, onGameYearsTapped, this);
         _wireAlarmIcon(gameScreen.header);
+        _wireFooterNav(gameScreen.footer);
 
         screens[(int)ScreenId::NODE_NETWORK] = lv_obj_create(nullptr);
         lv_obj_set_style_bg_color(screens[(int)ScreenId::NODE_NETWORK], lv_color_black(), 0);
         nodeScreen.build(screens[(int)ScreenId::NODE_NETWORK], onLogoTapped, onDateTapped, onQrTapped, onVerifyBadgeTapped, this);
         _wireAlarmIcon(nodeScreen.header);
+        _wireFooterNav(nodeScreen.footer);
 
         screens[(int)ScreenId::NFT] = lv_obj_create(nullptr);
         lv_obj_set_style_bg_color(screens[(int)ScreenId::NFT], lv_color_black(), 0);
         nftScreen.build(screens[(int)ScreenId::NFT], onLogoTapped, onDateTapped, onQrTapped, this);
         _wireAlarmIcon(nftScreen.header);
+        _wireFooterNav(nftScreen.footer);
 
         screens[(int)ScreenId::TICKERS] = lv_obj_create(nullptr);
         lv_obj_set_style_bg_color(screens[(int)ScreenId::TICKERS], lv_color_black(), 0);
         tickerScreen.build(screens[(int)ScreenId::TICKERS], onLogoTapped, onDateTapped, onQrTapped, this);
         _wireAlarmIcon(tickerScreen.header);
+        _wireFooterNav(tickerScreen.footer);
         TickerScreen::s_instance = &tickerScreen;
         lv_timer_create(TickerScreen::pollPending, 100, &tickerScreen);
 
@@ -855,6 +861,22 @@ private:
         attachSwipeGesture(screens[(int)ScreenId::NODE_NETWORK]);
         attachSwipeGesture(screens[(int)ScreenId::NFT]);
         attachSwipeGesture(screens[(int)ScreenId::TICKERS]);
+    }
+
+    // Footer navigation: tapping the node name/ID, the separator or the
+    // "N NODES" counter jumps straight to the Network screen.
+    void _wireFooterNav(SharedFooterRefs& ftr) {
+        lv_obj_t* targets[3] = { ftr.nodeNameLabel, ftr.nodeSepLabel, ftr.nodeCountLabel };
+        for (int i = 0; i < 3; i++) {
+            if (!targets[i]) continue;
+            lv_obj_add_flag(targets[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_ext_click_area(targets[i], 8);   // small text → forgiving target
+            lv_obj_add_event_cb(targets[i], [](lv_event_t* e) {
+                UiManager* self = (UiManager*)lv_event_get_user_data(e);
+                if (self && self->currentScreen != ScreenId::NODE_NETWORK)
+                    self->showScreen(ScreenId::NODE_NETWORK);
+            }, LV_EVENT_CLICKED, this);
+        }
     }
 
     // Wire the alarm bell icon on a non-clock header after build().
@@ -915,6 +937,7 @@ private:
         lv_obj_add_flag(clockWeatherLabel, LV_OBJ_FLAG_HIDDEN);  // hidden per design; code kept
 
         clockFooterRefs = buildSharedFooter(scr, onQrTapped, this);
+        _wireFooterNav(clockFooterRefs);
 
         return scr;
     }
