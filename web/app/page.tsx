@@ -231,10 +231,14 @@ export default function NetworkPage() {
   // been mined (only the first pending block exists), fall back to the
   // pending block's created_at so the countdown ring still runs.
   const nextBlockAt = useMemo<Date | null>(() => {
-    const last = blocks.find(b => b.mined_at != null)
-    if (last?.mined_at) return new Date(new Date(last.mined_at).getTime() + BLOCK_INTERVAL_MS)
+    // Anchor the countdown on the PENDING block's own open time. That is the
+    // value the backend restarts when a block goes unmined (no node online), so
+    // the ring visibly counts down again instead of freezing at 00:00. Fall
+    // back to the last mined block only if no pending block carries a timestamp.
     const pending = blocks.find(b => b.mined_at == null)
     if (pending?.created_at) return new Date(new Date(pending.created_at).getTime() + BLOCK_INTERVAL_MS)
+    const last = blocks.find(b => b.mined_at != null)
+    if (last?.mined_at) return new Date(new Date(last.mined_at).getTime() + BLOCK_INTERVAL_MS)
     return null
   }, [blocks])
 
@@ -1198,8 +1202,8 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: 8, textAlign: 'center', flexShrink: 0,
     display: 'flex', flexDirection: 'column', alignItems: 'center',
   },
-  blockMined:   { background: 'linear-gradient(160deg,#081a10,#050d08)', border: `1px solid ${C.green}28` },
-  blockPending: { background: 'linear-gradient(160deg,#1a1300,#0a0800)', border: `1px solid ${C.yellow}28` },
+  blockMined:   { background: 'linear-gradient(160deg,#081a10,rgba(39,93,59,0.57))', border: `1px solid ${C.green}55` },
+  blockPending: { background: 'linear-gradient(160deg,#1a1300,rgba(93,78,39,0.57))', border: `1px solid ${C.yellow}55` },
   blockNum:     { fontSize: 12, fontWeight: 700, color: '#c4c4cc', letterSpacing: 0.5, marginBottom: 4 },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green, flex: 1, display: 'flex', alignItems: 'center' },
   blockWinner: { fontSize: 12, fontWeight: 600, color: '#e8e8e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 96 },
@@ -1249,7 +1253,7 @@ const s: Record<string, React.CSSProperties> = {
   backdrop: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 2000 },
   panel: {
     position: 'fixed', bottom: 0, left: 0, right: 0,
-    background: C.card, border: `1px solid ${C.border}`, borderBottom: 'none',
+    background: 'rgb(24, 24, 24)', border: `1px solid ${C.border}`, borderBottom: 'none',
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: '36px 24px 52px', zIndex: 2001,   // above Leaflet's panes (~1000)
     maxHeight: '80vh', overflowY: 'auto',

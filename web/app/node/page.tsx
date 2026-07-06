@@ -108,9 +108,11 @@ export default function NodeProductPage() {
                                  .sort((a, b) => a.block_number - b.block_number)
 
   const nextBlockAt = useMemo<Date | null>(() => {
+    // Prefer the pending block's own open time so a backend countdown-restart
+    // (unmined block, no node online) shows up here instead of freezing at 0.
+    if (pendingBlock?.created_at) return new Date(new Date(pendingBlock.created_at).getTime() + BLOCK_INTERVAL_MS)
     const last = blocks.find(b => b.mined_at != null)
     if (last?.mined_at) return new Date(new Date(last.mined_at).getTime() + BLOCK_INTERVAL_MS)
-    if (pendingBlock?.created_at) return new Date(new Date(pendingBlock.created_at).getTime() + BLOCK_INTERVAL_MS)
     return null
   }, [blocks, pendingBlock])
   const countdown = nextBlockAt ? fmtCountdown(Math.max(0, nextBlockAt.getTime() - nowMs)) : '--:--'
@@ -771,8 +773,8 @@ const s: Record<string, React.CSSProperties> = {
     minWidth: 92, padding: '10px 10px 9px', borderRadius: 8, textAlign: 'center', flexShrink: 0,
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, justifyContent: 'center',
   },
-  blockMined:   { background: 'linear-gradient(160deg,#081a10,#050d08)', border: `1px solid ${C.green}28` },
-  blockPending: { background: 'linear-gradient(160deg,#1a1300,#0a0800)', border: `1px solid ${C.yellow}28` },
+  blockMined:   { background: 'linear-gradient(160deg,#081a10,rgba(39,93,59,0.57))', border: `1px solid ${C.green}55` },
+  blockPending: { background: 'linear-gradient(160deg,#1a1300,rgba(93,78,39,0.57))', border: `1px solid ${C.yellow}55` },
   blockNum:     { fontSize: 11, fontWeight: 700, color: '#c4c4cc', letterSpacing: 0.5 },
 
   miniMapWrap: {

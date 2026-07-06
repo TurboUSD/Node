@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { VerifiedBadge, UnverifiedBadge, GenesisBadge } from '@/components/NodeBadges'
 
 const C = {
   bg:     '#0a0a0a',
@@ -122,8 +123,8 @@ export default function PublicNodePage() {
             flexShrink: 0,
           }} />
           <h1 style={{ fontSize: 24, margin: 0 }}>{name}</h1>
-          {node.is_verified && <span style={s.badge}>✓</span>}
-          {node.is_genesis  && <span title="Genesis node" style={{ fontSize: 18 }}>⚡</span>}
+          {node.is_verified ? <VerifiedBadge /> : <UnverifiedBadge />}
+          {node.is_genesis  && <GenesisBadge />}
         </div>
 
         <div style={{ color: C.muted, fontSize: 13, marginBottom: node.bio ? 14 : 18 }}>
@@ -135,7 +136,7 @@ export default function PublicNodePage() {
         {node.bio && <p style={{ color: C.text, fontSize: 15, lineHeight: 1.7, margin: '0 0 20px' }}>{node.bio}</p>}
 
         <div style={s.statsGrid}>
-          <Stat label="Uptime"  value={`⚡ ${uptime}%`}                                     color={uptimeColor} />
+          <Stat label="Uptime"  value={`${uptime}%`}                                        color={uptimeColor} />
           <Stat label="Earned"  value={`₸${(stats?.total_tusd_earned ?? 0).toFixed(2)}`}    color={C.green} />
           <Stat label="Blocks"  value={String(stats?.blocks_won ?? 0)}                       color={C.blue} />
           <Stat label="Since"   value={joinDate(node.created_at)}                            color={C.yellow} />
@@ -151,9 +152,15 @@ export default function PublicNodePage() {
 
 function Stat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
-      <div style={{ fontSize: 18, fontWeight: 'bold', color, lineHeight: '24px', height: 24 }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.muted, marginTop: 5, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', minWidth: 0 }}>
+      {/* Flexible min-height (fits two lines like "27 Jun 2026") so the value
+          never overflows onto the label below, and labels stay aligned across
+          all four columns. */}
+      <div style={{
+        fontSize: 16, fontWeight: 'bold', color, lineHeight: 1.2, minHeight: 40,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>{value}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )
 }
