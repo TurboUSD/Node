@@ -4,6 +4,11 @@
 
 #pragma once
 
+// `Log` — tees every console line to Serial AND a WiFi-readable ring buffer
+// (http://<device-ip>/logs). Included here because nearly every file includes
+// config.h; the firmware calls Log.printf/println/print instead of Serial.*.
+#include "weblog.h"
+
 // ---------------------------------------------------------------------
 // Backend endpoints (Supabase Edge Functions)
 // ---------------------------------------------------------------------

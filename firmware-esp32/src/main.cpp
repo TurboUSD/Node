@@ -22,6 +22,8 @@
 
 SemaphoreHandle_t gNetLock = nullptr;   // see net_lock.h
 
+WebLog Log;   // console tee → Serial + WiFi ring buffer (http://<ip>/logs)
+
 Storage storage;
 WifiManager wifiManager;
 ApiClient apiClient;
@@ -57,7 +59,7 @@ void syncTimeFromNtp() {
     // the first geo sync) so localtime_r() returns the user's local wall-clock
     // time. daylightOffset is 0 because the geo offset already includes DST.
     configTime(storage.getTzOffsetSec(), 0, "pool.ntp.org", "time.nist.gov");
-    Serial.printf("NTP sync requested (tz offset %ld s).\n", (long)storage.getTzOffsetSec());
+    Log.printf("NTP sync requested (tz offset %ld s).\n", (long)storage.getTzOffsetSec());
 }
 
 // Geo-IP → timezone + regional formatting defaults. Timezone always tracks the
@@ -66,7 +68,7 @@ void syncTimeFromNtp() {
 void autoConfigureLocaleFromGeo() {
     GeoLocale geo;
     if (!apiClient.fetchGeoLocale(geo)) {
-        Serial.println("Geo locale: lookup failed, keeping current settings.");
+        Log.println("Geo locale: lookup failed, keeping current settings.");
         return;
     }
 
@@ -82,7 +84,7 @@ void autoConfigureLocaleFromGeo() {
     storage.setDateFormat(dateFmt);
     storage.setTimeFormat(timeFmt);
     storage.setWeekStart(weekStart);
-    Serial.printf("Geo locale: %s offset=%ld → %c %s %s wk%u\n",
+    Log.printf("Geo locale: %s offset=%ld → %c %s %s wk%u\n",
                   geo.countryCode, (long)geo.utcOffsetSec, tempUnit,
                   dateFmt.c_str(), timeFmt.c_str(), (unsigned)weekStart);
 }
@@ -96,9 +98,9 @@ void ensureNodeIsRegistered() {
     if (apiClient.registerNode(nodeCode)) {
         storage.setNodeCode(nodeCode);
         nodeRegistered = true;
-        Serial.printf("Registered as node %s\n", nodeCode.c_str());
+        Log.printf("Registered as node %s\n", nodeCode.c_str());
     } else {
-        Serial.println("Node registration failed, will retry next loop.");
+        Log.println("Node registration failed, will retry next loop.");
     }
 }
 
@@ -186,7 +188,7 @@ void checkAlarmTrigger() {
         (t.tm_hour == alarmH) && (t.tm_min == alarmM || (t.tm_min + 1) % 60 == alarmM);
     if (nearAlarm && t.tm_sec != lastLoggedSec) {
         lastLoggedSec = t.tm_sec;
-        Serial.printf("ALARM chk %02d:%02d:%02d | enabled=%d activeToday=%d set=%02u:%02u vol=%u "
+        Log.printf("ALARM chk %02d:%02d:%02d | enabled=%d activeToday=%d set=%02u:%02u vol=%u "
                       "timeMatch=%d firedThisMin=%d overlay=%d\n",
                       t.tm_hour, t.tm_min, t.tm_sec, enabled, activeToday, alarmH, alarmM, alarmVol,
                       timeMatch, (minuteId == lastFiredMinuteId), uiManager.isAlarmOverlayActive());
@@ -197,7 +199,7 @@ void checkAlarmTrigger() {
         lastFiredMinuteId = minuteId;
         alarmCurrentlyFiring = true;
         alarmFiredAt = millis();
-        Serial.printf("ALARM: FIRING now (%02d:%02d:%02d) vol=%u — sending PLAY_ALARM to RP2040\n",
+        Log.printf("ALARM: FIRING now (%02d:%02d:%02d) vol=%u — sending PLAY_ALARM to RP2040\n",
                       t.tm_hour, t.tm_min, t.tm_sec, alarmVol);
         rp2040Link.playAlarm(alarmVol);
         uiManager.showAlarmFiringOverlay();
@@ -216,7 +218,7 @@ void checkAlarmTrigger() {
         && millis() - alarmFiredAt < 5UL * 60UL * 1000UL
         && millis() - lastAlarmResendAt > 10000) {
         lastAlarmResendAt = millis();
-        Serial.println("ALARM: overlay still up — re-sending PLAY_ALARM to RP2040");
+        Log.println("ALARM: overlay still up — re-sending PLAY_ALARM to RP2040");
         rp2040Link.playAlarm(alarmVol);
     }
 }
@@ -232,12 +234,12 @@ bool isOtaCheckWindow() {
 }
 
 void applyPendingOtaUpdate() {
-    Serial.printf("OTA: user confirmed install of %s\n", pendingOtaVersion.c_str());
+    Log.printf("OTA: user confirmed install of %s\n", pendingOtaVersion.c_str());
     if (otaUpdater.applyPendingUpdate(pendingOtaUrl, pendingOtaSha256)) {
         delay(500);
         ESP.restart();
     } else {
-        Serial.println("OTA: apply failed. Device continues on current firmware.");
+        Log.println("OTA: apply failed. Device continues on current firmware.");
         // Clear pending so the badge disappears; next nightly check will re-detect.
         pendingOtaVersion = "";
         pendingOtaUrl = "";
@@ -250,7 +252,7 @@ void applyPendingOtaUpdate() {
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("\nTurboUSD Node booting, firmware " FIRMWARE_VERSION);
+    Log.println("\nTurboUSD Node booting, firmware " FIRMWARE_VERSION);
 
     // Log WHY we booted. If the device is mysteriously restarting (e.g. "it
     // reboots when I open screen X"), this line on the serial monitor tells us
@@ -259,7 +261,7 @@ void setup() {
     esp_reset_reason_t rr = esp_reset_reason();
     static const char* RR_NAMES[] = {"UNKNOWN","POWERON","EXT","SW","PANIC","INT_WDT",
                                      "TASK_WDT","WDT","DEEPSLEEP","BROWNOUT","SDIO"};
-    Serial.printf("Reset reason: %d (%s)\n", (int)rr,
+    Log.printf("Reset reason: %d (%s)\n", (int)rr,
                   (rr >= 0 && rr <= 10) ? RR_NAMES[rr] : "?");
 
     pinMode(BTN_USER_GPIO, INPUT_PULLUP);  // top user button, active LOW
@@ -269,7 +271,7 @@ void setup() {
     storage.begin();
     // Alarm config snapshot at boot — so the serial log always shows what the
     // device thinks the alarm is, independent of the web UI.
-    Serial.printf("ALARM cfg @boot: enabled=%d %02u:%02u vol=%u days=0x%02X dirty=%d\n",
+    Log.printf("ALARM cfg @boot: enabled=%d %02u:%02u vol=%u days=0x%02X dirty=%d\n",
                   storage.getAlarmEnabled(), storage.getAlarmHour(), storage.getAlarmMinute(),
                   storage.getAlarmVolume(), storage.getAlarmDays(), storage.getAlarmDirty());
     rp2040Link.begin();
@@ -306,7 +308,7 @@ void loop() {
     if (linkChimesSent < 3 && millis() > CHIME_AT[linkChimesSent]) {
         linkChimesSent++;
         rp2040Link.printStatus();                      // visible even if the monitor attached late
-        Serial.printf("RP-link: chime attempt %d\n", linkChimesSent);
+        Log.printf("RP-link: chime attempt %d\n", linkChimesSent);
         rp2040Link.playChime();   // three attempts → three chances to hear the link
     }
 
@@ -320,7 +322,7 @@ void loop() {
     if (millis() - lastPingAt > 30000) {
         lastPingAt = millis();
         bool ok = rp2040Link.ping(300);
-        Serial.printf("RP-link: ping %s\n", ok ? "OK — link is ALIVE both ways" : "FAILED — no ACK from RP2040");
+        Log.printf("RP-link: ping %s\n", ok ? "OK — link is ALIVE both ways" : "FAILED — no ACK from RP2040");
     }
 
     // While the provisioning portal is up, prioritize serving it.
@@ -399,7 +401,7 @@ void loop() {
         now - lastDebtRefreshAt > (debtLive ? US_DEBT_REFRESH_MS : 60000UL)) {
         DebtData data = apiClient.fetchUsDebt();
         if (data.valid) { uiManager.updateDebtData(data); debtLive = true; }
-        else Serial.println("fetchUsDebt: no data, retrying in 60 s");
+        else Log.println("fetchUsDebt: no data, retrying in 60 s");
         lastDebtRefreshAt = now;
     }
 

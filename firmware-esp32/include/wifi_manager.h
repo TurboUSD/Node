@@ -3,7 +3,7 @@
 // with zero technical knowledge get the device online: power it up, connect
 // their phone to "TurboUSD-Setup-XXXX", pick their home WiFi, done.
 
-#pragma once
+#include "weblog.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -49,7 +49,7 @@ public:
         uint32_t now = millis();
         if (now - _lastReconnectAt < 30000) return;
         _lastReconnectAt = now;
-        Serial.println("WiFi disconnected -- attempting reconnect...");
+        Log.println("WiFi disconnected -- attempting reconnect...");
         WiFi.reconnect();
     }
 
@@ -83,20 +83,20 @@ private:
         WiFi.mode(WIFI_STA);
         WiFi.begin(storage.getWifiSsid().c_str(), storage.getWifiPass().c_str());
 
-        Serial.print("Connecting to saved WiFi");
+        Log.print("Connecting to saved WiFi");
         uint32_t start = millis();
         while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
             delay(300);
-            Serial.print(".");
+            Log.print(".");
         }
-        Serial.println();
+        Log.println();
 
         if (WiFi.status() != WL_CONNECTED) {
-            Serial.println("Could not connect with saved credentials -- falling back to provisioning portal.");
+            Log.println("Could not connect with saved credentials -- falling back to provisioning portal.");
             startProvisioningPortal();
         } else {
-            Serial.print("Connected, IP: ");
-            Serial.println(WiFi.localIP());
+            Log.print("Connected, IP: ");
+            Log.println(WiFi.localIP());
             _installFallbackDns();
         }
     }
@@ -112,7 +112,7 @@ private:
         ip_addr_t d;
         IP_ADDR4(&d, 8, 8, 8, 8);
         dns_setserver(1, &d);
-        Serial.println("DNS fallback (8.8.8.8) installed as secondary.");
+        Log.println("DNS fallback (8.8.8.8) installed as secondary.");
     }
 
     void startProvisioningPortal() {
@@ -149,8 +149,8 @@ private:
         snprintf(apName, sizeof(apName), "TurboUSD-Setup-%02X%02X", mac[4], mac[5]);
 
         WiFi.softAP(apName);
-        Serial.print("Provisioning AP started: ");
-        Serial.println(apName);
+        Log.print("Provisioning AP started: ");
+        Log.println(apName);
 
         // Captive portal: redirect every DNS query to ourselves so phones
         // auto-open the setup page instead of the user having to type an IP.

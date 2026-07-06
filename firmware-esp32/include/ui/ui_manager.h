@@ -19,7 +19,7 @@
 //        Arduino-ESP32 3.x -- see platformio.ini's espressif32@^6.0.0)
 //     6. Backlight enable (GPIO 45, active HIGH)
 
-#pragma once
+#include "weblog.h"
 #include <Wire.h>
 #include <lvgl.h>
 #include "esp_lcd_panel_rgb.h"
@@ -110,7 +110,7 @@ public:
         if (Serial) {
             _screenOn = false;
             ledcWrite(0, 0);
-            Serial.println("sleep: USB host attached — screen off only (no light sleep)");
+            Log.println("sleep: USB host attached — screen off only (no light sleep)");
             return;
         }
         ledcWrite(0, 0);                         // backlight off
@@ -1528,9 +1528,9 @@ private:
     void reloadDebtHistory(int years) {
         DebtHistoryPoint points[80];
         int count = apiClient.fetchDebtHistory(years, points, 80);
-        Serial.printf("debtHistory: %d points (years=%d)\n", count, years);
+        Log.printf("debtHistory: %d points (years=%d)\n", count, years);
         if (count == 0) {
-            Serial.println("reloadDebtHistory: no data returned, leaving chart as-is.");
+            Log.println("reloadDebtHistory: no data returned, leaving chart as-is.");
             return;
         }
         // Find the data's min/max so we can (a) fit the Y axis to it and (b) fill

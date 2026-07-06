@@ -36,7 +36,7 @@ inline void ensureShadow() {
     if (s_shadow) return;
     s_shadow = (uint16_t*)heap_caps_malloc((size_t)LCD_H_RES * LCD_V_RES * 2,
                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!s_shadow) Serial.println("Screenshot: shadow fb alloc FAILED (no captures)");
+    if (!s_shadow) Log.println("Screenshot: shadow fb alloc FAILED (no captures)");
 }
 
 // Called from the LVGL flush_cb with every region blitted to the panel.
@@ -92,7 +92,7 @@ inline void _sendBmp() {
         off += wr;
         delay(0);                                // feed the watchdog
     }
-    Serial.println("Screenshot served");
+    Log.println("Screenshot served");
 }
 
 inline void _sendIndex() {
@@ -115,14 +115,49 @@ inline void _sendIndex() {
         "</body></html>");
 }
 
+// Raw log ring buffer as plain text (newest at the bottom). Independent of the
+// USB serial console — this is how you read runtime logs when the RP2040 link
+// on GPIO43/44 has taken over the UART console pins.
+inline void _sendLogTxt() {
+    char* buf = (char*)malloc(weblog::CAP + 1);
+    if (!buf) { s_srv->send(500, "text/plain", "oom"); return; }
+    size_t n = weblog::snapshot(buf, weblog::CAP);
+    buf[n] = 0;
+    s_srv->send(200, "text/plain; charset=utf-8", buf);
+    free(buf);
+}
+
+// Auto-refreshing HTML log viewer.
+inline void _sendLogPage() {
+    s_srv->send(200, "text/html",
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>TurboUSD Node logs</title>"
+        "<style>html,body{margin:0;background:#000;color:#d8f0d8;"
+        "font-family:ui-monospace,Menlo,Consolas,monospace}"
+        "#bar{position:sticky;top:0;background:#0a0a0a;border-bottom:1px solid #1c1c1c;"
+        "padding:8px 12px;font-size:13px;color:#8a8a8a}"
+        "#l{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.45;"
+        "padding:10px 12px 40px}b{color:#3aff7a}</style></head><body>"
+        "<div id='bar'>TurboUSD Node logs · <b>live</b> · auto-refresh 1.5s</div>"
+        "<div id='l'>loading…</div>"
+        "<script>let follow=true;const e=document.getElementById('l');"
+        "addEventListener('scroll',()=>{follow=(innerHeight+scrollY)>=(document.body.scrollHeight-60)});"
+        "async function u(){try{let r=await fetch('/log.txt',{cache:'no-store'});"
+        "e.textContent=await r.text();if(follow)scrollTo(0,document.body.scrollHeight)}catch(x){}}"
+        "u();setInterval(u,1500);</script></body></html>");
+}
+
 // Call once WiFi is connected (STA mode).
 inline void init() {
     if (s_srv) return;
     s_srv = new WebServer(80);
-    s_srv->on("/",         HTTP_GET, []() { _sendIndex(); });
-    s_srv->on("/shot.bmp", HTTP_GET, []() { _sendBmp();   });
+    s_srv->on("/",         HTTP_GET, []() { _sendIndex();  });
+    s_srv->on("/shot.bmp", HTTP_GET, []() { _sendBmp();    });
+    s_srv->on("/logs",     HTTP_GET, []() { _sendLogPage(); });
+    s_srv->on("/log.txt",  HTTP_GET, []() { _sendLogTxt();  });
     s_srv->begin();
-    Serial.printf("Screenshot server: http://%s/  (raw: /shot.bmp)\n",
+    Log.printf("Screenshot server: http://%s/  (screen: /shot.bmp, logs: /logs)\n",
                   WiFi.localIP().toString().c_str());
 }
 

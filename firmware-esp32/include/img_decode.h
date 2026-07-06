@@ -15,7 +15,7 @@
 // Returns nullptr on any failure (HTTP error, unsupported format — e.g.
 // webp/gif —, decode error, out of memory). Caller owns the buffer (free()).
 
-#pragma once
+#include "weblog.h"
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <lvgl.h>
@@ -78,7 +78,7 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
     if (body[0] == 0x89 && body[1] == 0x50) {              // PNG
         unsigned rc = lodepng_decode32(&rgba, &iw, &ih, body, len);
         if (rc != 0 || !rgba || iw == 0 || ih == 0) {
-            Serial.printf("img[%s] png decode rc=%u\n", tag, rc);
+            Log.printf("img[%s] png decode rc=%u\n", tag, rc);
             if (rgba) lv_mem_free(rgba);
             return nullptr;
         }
@@ -89,12 +89,12 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
         JDEC jd;
         JpegCtx ctx{ body, len, 0, nullptr, 0, 0 };
         if (jd_prepare(&jd, _jin, work, 4096, &ctx) != JDR_OK) {
-            Serial.printf("img[%s] jd_prepare failed\n", tag);
+            Log.printf("img[%s] jd_prepare failed\n", tag);
             free(work); return nullptr;
         }
         ctx.w = jd.width; ctx.h = jd.height;
         if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 800u * 800u) {
-            Serial.printf("img[%s] bad dims %ux%u\n", tag, ctx.w, ctx.h);
+            Log.printf("img[%s] bad dims %ux%u\n", tag, ctx.w, ctx.h);
             free(work); return nullptr;
         }
         ctx.rgb = _alloc((uint32_t)ctx.w * ctx.h * 3);
@@ -102,7 +102,7 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
         JRESULT dr = jd_decomp(&jd, _jout, 0);
         free(work);
         if (dr != JDR_OK) {
-            Serial.printf("img[%s] tjpgd rc=%d (%ux%u)\n", tag, (int)dr, ctx.w, ctx.h);
+            Log.printf("img[%s] tjpgd rc=%d (%ux%u)\n", tag, (int)dr, ctx.w, ctx.h);
             free(ctx.rgb); return nullptr;
         }
         iw = ctx.w; ih = ctx.h;
@@ -120,7 +120,7 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
         }
         free(ctx.rgb);
     } else {
-        Serial.printf("img[%s] unsupported format %02X%02X (webp/gif?)\n", tag, body[0], body[1]);
+        Log.printf("img[%s] unsupported format %02X%02X (webp/gif?)\n", tag, body[0], body[1]);
         return nullptr;
     }
 
@@ -158,7 +158,7 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
     if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba);
     if (outWp) *outWp = (uint16_t)outW;
     if (outHp) *outHp = (uint16_t)outH;
-    Serial.printf("img[%s] decoded %ux%u -> %dx%d OK\n", tag, iw, ih, outW, outH);
+    Log.printf("img[%s] decoded %ux%u -> %dx%d OK\n", tag, iw, ih, outW, outH);
     return px;
 }
 
@@ -176,7 +176,7 @@ static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
         body = diskcache::loadAlloc("img", cacheKey, &len);
         if (body) {
             fromDisk = true;
-            Serial.printf("img[%s] from disk cache (%u B)\n", tag, (unsigned)len);
+            Log.printf("img[%s] from disk cache (%u B)\n", tag, (unsigned)len);
         }
     }
 
@@ -190,13 +190,13 @@ static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
         http.setTimeout(15000);
         int code = http.GET();
         if (code != 200) {
-            Serial.printf("img[%s] GET %d %s\n", tag, code, url);
+            Log.printf("img[%s] GET %d %s\n", tag, code, url);
             http.end();
             return nullptr;
         }
         const size_t CAP = 300 * 1024;
         int declared = http.getSize();
-        if (declared > (int)CAP) { Serial.printf("img[%s] too big (%d B)\n", tag, declared); http.end(); return nullptr; }
+        if (declared > (int)CAP) { Log.printf("img[%s] too big (%d B)\n", tag, declared); http.end(); return nullptr; }
         body = _alloc(declared > 0 ? declared : CAP);
         if (!body) { http.end(); return nullptr; }
         WiFiClient* s = http.getStreamPtr();
@@ -212,11 +212,11 @@ static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
         }
         http.end();
         if (len < 8) {
-            Serial.printf("img[%s] body too short (%u B)\n", tag, (unsigned)len);
+            Log.printf("img[%s] body too short (%u B)\n", tag, (unsigned)len);
             free(body);
             return nullptr;
         }
-        Serial.printf("img[%s] %u bytes, magic %02X%02X\n", tag, (unsigned)len, body[0], body[1]);
+        Log.printf("img[%s] %u bytes, magic %02X%02X\n", tag, (unsigned)len, body[0], body[1]);
     }
 
     uint8_t* px = _decodeScale(body, len, maxW, maxH, tag, outWp, outHp, bgColor);

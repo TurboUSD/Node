@@ -65,7 +65,7 @@ public:
         PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[RP2040_UART_RX_PIN]);
         printStatus();
         _ok = (_e1 == ESP_OK && _e2 == ESP_OK && _e3 == ESP_OK);
-        if (!_ok) Serial.println("RP-link: INIT FAILED — alarm commands cannot reach the RP2040");
+        if (!_ok) Log.println("RP-link: INIT FAILED — alarm commands cannot reach the RP2040");
     }
 
     // Re-printable at any time — serial monitors usually attach AFTER boot,
@@ -76,7 +76,7 @@ public:
     void printStatus() {
         uint32_t baud = 0;
         uart_get_baudrate(LINK_UART, &baud);
-        Serial.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d, %lu baud) | "
+        Log.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d, %lu baud) | "
                       "tx_pad=%d rx_pad=%d | heap=%u maxblk=%u\n",
                       (int)_e1, (int)_e2, (int)_e3, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN, (int)LINK_UART,
                       (unsigned long)baud,
@@ -97,7 +97,7 @@ public:
             Rp2040Command::PLAY_ALARM_V4,
             Rp2040Command::PLAY_ALARM_V5,
         };
-        Serial.printf("RP-link: playAlarm(vol=%u) → cmd=0x%02X uart_ok=%d\n",
+        Log.printf("RP-link: playAlarm(vol=%u) → cmd=0x%02X uart_ok=%d\n",
                       volume, (unsigned)VOL_CMD[volume - 1], (int)_ok);
         sendCommand(VOL_CMD[volume - 1]);
     }
@@ -123,7 +123,7 @@ public:
         if (hello) {
             if (millis() - lastLogAt > 4000) {
                 lastLogAt = millis();
-                Serial.println("RP-link: RP2040 heartbeat RECEIVED — RP->ESP direction ALIVE, new RP firmware confirmed");
+                Log.println("RP-link: RP2040 heartbeat RECEIVED — RP->ESP direction ALIVE, new RP firmware confirmed");
             }
             return;
         }
@@ -131,7 +131,7 @@ public:
             lastLogAt = millis();
             char hex[3 * sizeof(buf) + 1] = {};
             for (int i = 0; i < n; i++) snprintf(hex + i * 3, 4, "%02X ", buf[i]);
-            Serial.printf("RP-link: RX %d bytes: %s\n", n, hex);
+            Log.printf("RP-link: RX %d bytes: %s\n", n, hex);
         }
     }
 
@@ -203,7 +203,7 @@ private:
         // link is a few centimeters of trace on the same PCB, not a noisy
         // long-range channel, so we're guarding against framing bugs more
         // than line noise.
-        if (!_ok) { Serial.println("RP-link: send skipped (uart init failed)"); return; }
+        if (!_ok) { Log.println("RP-link: send skipped (uart init failed)"); return; }
         uint8_t f[3] = { 0x7E, static_cast<uint8_t>(cmd),
                          (uint8_t)(0x7E ^ static_cast<uint8_t>(cmd)) };
         uart_write_bytes(LINK_UART, (const char*)f, sizeof(f));

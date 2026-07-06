@@ -14,7 +14,7 @@
 // All functions are safe to call from bg tasks (esp_littlefs serialises with
 // an internal mutex). Buffers are allocated in PSRAM.
 
-#pragma once
+#include "weblog.h"
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <esp_heap_caps.h>
@@ -27,11 +27,11 @@ inline void init() {
     // Partition label "spiffs" (see partitions.csv); format on first use.
     s_ok = LittleFS.begin(true /*formatOnFail*/, "/lfs", 5, "spiffs");
     if (s_ok) {
-        Serial.printf("DiskCache: mounted, %u/%u KB used\n",
+        Log.printf("DiskCache: mounted, %u/%u KB used\n",
                       (unsigned)(LittleFS.usedBytes() / 1024),
                       (unsigned)(LittleFS.totalBytes() / 1024));
     } else {
-        Serial.println("DiskCache: mount FAILED — caching disabled");
+        Log.println("DiskCache: mount FAILED — caching disabled");
     }
 }
 
@@ -71,7 +71,7 @@ inline bool save(const char* ns, const char* key, const uint8_t* data, size_t le
     // Leave headroom: if the partition is nearly full just skip (no eviction
     // policy needed at our sizes — logos are ~5 KB, NFT source images ~25 KB).
     if (LittleFS.totalBytes() - LittleFS.usedBytes() < len + 16 * 1024) {
-        Serial.printf("DiskCache: full, skipping %s\n", key);
+        Log.printf("DiskCache: full, skipping %s\n", key);
         return false;
     }
     String path = _pathFor(ns, key);

@@ -441,7 +441,7 @@ private:
             char em[TICKER_MAX + 1];
             for (int i = 0; i < _tickerCount && i < TICKER_MAX; i++) em[i] = _tickers[i].is_expanded ? 'E' : '.';
             em[min(_tickerCount, (int)TICKER_MAX)] = '\0';
-            Serial.printf("tickers: rebuild n=%d expanded=[%s]\n", _tickerCount, em);
+            Log.printf("tickers: rebuild n=%d expanded=[%s]\n", _tickerCount, em);
         }
         // Delete all existing ticker card objects.
         // NOTE: only ever called from timer/init context (pollPending, onShow),
@@ -545,7 +545,7 @@ private:
         TickerEntry& t = _tickers[idx];
         CardWidgets& w = _cards[idx];
         if (!t.logo_ready || t.logo_applied || !w.symBg) return;
-        Serial.printf("logo[%s] applied to card\n", t.base_symbol);
+        Log.printf("logo[%s] applied to card\n", t.base_symbol);
         w.logoImg = lv_img_create(w.symBg);
         lv_img_set_src(w.logoImg, &t.logo_dsc);
         lv_obj_center(w.logoImg);
@@ -1433,7 +1433,7 @@ private:
                     http.begin(url);
                     http.setTimeout(8000);
                     int code = http.GET();
-                    Serial.printf("search[%s]: HTTP %d\n", query.c_str(), code);
+                    Log.printf("search[%s]: HTTP %d\n", query.c_str(), code);
                     if (code == 200) {
                         // DexScreener /search returns ~30 pairs, each a big object
                         // (txns, volume, fdv, socials…). Parsing all of that in the
@@ -1475,9 +1475,9 @@ private:
                                 n++;
                             }
                             self->_searchResultCount = n;
-                            Serial.printf("search[%s]: %d results kept\n", query.c_str(), n);
+                            Log.printf("search[%s]: %d results kept\n", query.c_str(), n);
                         } else {
-                            Serial.printf("search[%s]: JSON parse error %s\n", query.c_str(), err.c_str());
+                            Log.printf("search[%s]: JSON parse error %s\n", query.c_str(), err.c_str());
                         }
                     }
                     // Always mark done so the spinner hides even on error/no-result.
@@ -1694,7 +1694,7 @@ private:
                 }
                 th.end();
                 if (!te.logo_url[0])
-                    Serial.printf("logo[%s] no imageUrl anywhere (token %s)\n", te.base_symbol, baseAddrs[j]);
+                    Log.printf("logo[%s] no imageUrl anywhere (token %s)\n", te.base_symbol, baseAddrs[j]);
             }
         }
     }
@@ -1810,7 +1810,7 @@ private:
                 te.logo_dsc.data      = blob;
                 te.logo_px            = blob;
                 te.logo_ready         = true;   // pollPending picks this up on core 1
-                Serial.printf("logo[%s] from disk cache\n", te.base_symbol);
+                Log.printf("logo[%s] from disk cache\n", te.base_symbol);
                 return;
             }
             if (blob) free(blob);   // wrong size → stale format, refetch
@@ -1825,7 +1825,7 @@ private:
         int q = base.indexOf('?');
         if (q >= 0) base = base.substring(0, q);
         if (_tryLogoVariant(self, idx, base + "?width=64&height=64&quality=80")) return;
-        Serial.printf("logo[%s] retrying at 128x128\n", te.base_symbol);
+        Log.printf("logo[%s] retrying at 128x128\n", te.base_symbol);
         _tryLogoVariant(self, idx, base + "?width=128&height=128&quality=80");
     }
 
@@ -1839,7 +1839,7 @@ private:
         http.setTimeout(9000);
         int lcode = http.GET();
         if (lcode != 200) {
-            Serial.printf("logo[%s] GET %d url=%s\n", te.base_symbol, lcode, url.c_str());
+            Log.printf("logo[%s] GET %d url=%s\n", te.base_symbol, lcode, url.c_str());
             http.end();
             return false;
         }
@@ -1864,11 +1864,11 @@ private:
         }
         http.end();
         if (pngLen < 8) {
-            Serial.printf("logo[%s] body too short (%u bytes)\n", te.base_symbol, (unsigned)pngLen);
+            Log.printf("logo[%s] body too short (%u bytes)\n", te.base_symbol, (unsigned)pngLen);
             free(png);
             return false;
         }
-        Serial.printf("logo[%s] downloaded %u bytes, magic %02X%02X\n",
+        Log.printf("logo[%s] downloaded %u bytes, magic %02X%02X\n",
                       te.base_symbol, (unsigned)pngLen, png[0], png[1]);
 
         // Decode to RGBA8888 (rgba, iw×ih) — format picked by magic bytes.
@@ -1885,20 +1885,20 @@ private:
         } else if (png[0] == 0xFF && png[1] == 0xD8) {
             // Baseline JPEG via tjpgd (what DexScreener's CDN actually sends).
             uint8_t* work = (uint8_t*)malloc(4096);   // tjpgd workspace (needs ~3.1 KB)
-            if (!work) { Serial.printf("logo[%s] no mem for tjpgd work\n", te.base_symbol); free(png); return false; }
+            if (!work) { Log.printf("logo[%s] no mem for tjpgd work\n", te.base_symbol); free(png); return false; }
             JDEC jd;
             JpegCtx ctx{ png, pngLen, 0, nullptr, 0, 0 };
-            if (jd_prepare(&jd, _jpegIn, work, 4096, &ctx) != JDR_OK) { Serial.printf("logo[%s] jd_prepare failed\n", te.base_symbol); free(work); free(png); return false; }
+            if (jd_prepare(&jd, _jpegIn, work, 4096, &ctx) != JDR_OK) { Log.printf("logo[%s] jd_prepare failed\n", te.base_symbol); free(work); free(png); return false; }
             ctx.w = jd.width; ctx.h = jd.height;
-            if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 512u * 512u) { Serial.printf("logo[%s] bad dims %ux%u\n", te.base_symbol, ctx.w, ctx.h); free(work); free(png); return false; }
+            if (ctx.w == 0 || ctx.h == 0 || (uint32_t)ctx.w * ctx.h > 512u * 512u) { Log.printf("logo[%s] bad dims %ux%u\n", te.base_symbol, ctx.w, ctx.h); free(work); free(png); return false; }
             ctx.rgb = (uint8_t*)heap_caps_malloc((uint32_t)ctx.w * ctx.h * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!ctx.rgb) ctx.rgb = (uint8_t*)malloc((uint32_t)ctx.w * ctx.h * 3);
-            if (!ctx.rgb) { Serial.printf("logo[%s] no mem for rgb\n", te.base_symbol); free(work); free(png); return false; }
+            if (!ctx.rgb) { Log.printf("logo[%s] no mem for rgb\n", te.base_symbol); free(work); free(png); return false; }
             JRESULT dr = jd_decomp(&jd, _jpegOut, 0);
             free(work);
             free(png);
             if (dr != JDR_OK) {
-                Serial.printf("logo[%s] tjpgd decomp failed rc=%d (%ux%u)\n", te.base_symbol, (int)dr, ctx.w, ctx.h);
+                Log.printf("logo[%s] tjpgd decomp failed rc=%d (%ux%u)\n", te.base_symbol, (int)dr, ctx.w, ctx.h);
                 free(ctx.rgb);
                 return false;
             }
@@ -1906,7 +1906,7 @@ private:
             iw = ctx.w; ih = ctx.h;
             rgba = (unsigned char*)heap_caps_malloc((uint32_t)iw * ih * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!rgba) rgba = (unsigned char*)malloc((uint32_t)iw * ih * 4);
-            if (!rgba) { Serial.printf("logo[%s] no mem for rgba\n", te.base_symbol); free(ctx.rgb); return false; }
+            if (!rgba) { Log.printf("logo[%s] no mem for rgba\n", te.base_symbol); free(ctx.rgb); return false; }
             for (uint32_t i = 0; i < (uint32_t)iw * ih; i++) {
                 rgba[i * 4 + 0] = ctx.rgb[i * 3 + 0];
                 rgba[i * 4 + 1] = ctx.rgb[i * 3 + 1];
@@ -1925,7 +1925,7 @@ private:
         const int W = 40, H = 40;
         uint8_t* px = (uint8_t*)heap_caps_malloc(W * H * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!px) px = (uint8_t*)malloc(W * H * 3);
-        if (!px) { Serial.printf("logo[%s] no mem for px\n", te.base_symbol); if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return false; }
+        if (!px) { Log.printf("logo[%s] no mem for px\n", te.base_symbol); if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return false; }
         for (int y = 0; y < H; y++) {
             unsigned sy = (unsigned)((uint64_t)y * ih / H);
             for (int x = 0; x < W; x++) {
@@ -1949,7 +1949,7 @@ private:
         te.logo_px            = px;
         te.logo_ready         = true;   // pollPending picks this up on core 1
         diskcache::save("logo", te.logo_url, px, W * H * 3);   // survive reboots
-        Serial.printf("logo[%s] READY (%ux%u -> 40x40)\n", te.base_symbol, iw, ih);
+        Log.printf("logo[%s] READY (%ux%u -> 40x40)\n", te.base_symbol, iw, ih);
         return true;
     }
 
@@ -1974,7 +1974,7 @@ private:
 
         self->_tickers[idx].is_expanded = !self->_tickers[idx].is_expanded;
         self->_setExpandedPool(self->_tickers[idx].pool_address, self->_tickers[idx].is_expanded);
-        Serial.printf("tickers: tap %s -> %s\n", self->_tickers[idx].base_symbol,
+        Log.printf("tickers: tap %s -> %s\n", self->_tickers[idx].base_symbol,
                       self->_tickers[idx].is_expanded ? "EXPAND" : "collapse");
         if (self->_tickers[idx].is_expanded && !self->_tickers[idx].chart_loaded) {
             self->_chartLoadRequestIdx = idx;   // fetched after the rebuild
@@ -2006,7 +2006,7 @@ private:
         if (!self || idx < 0 || idx >= self->_tickerCount) return;
         self->_tickers[idx].is_expanded = false;
         self->_setExpandedPool(self->_tickers[idx].pool_address, false);
-        Serial.printf("tickers: X-collapse %s\n", self->_tickers[idx].base_symbol);
+        Log.printf("tickers: X-collapse %s\n", self->_tickers[idx].base_symbol);
         self->_rebuildRequested = true;
     }
 

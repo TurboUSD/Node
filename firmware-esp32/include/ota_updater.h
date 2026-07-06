@@ -31,7 +31,7 @@ public:
     // previous firmware, so it must be called on every clean boot.
     static void markBootValid() {
         esp_ota_mark_app_valid_cancel_rollback();
-        Serial.println("OTA: boot marked valid, rollback guard cleared.");
+        Log.println("OTA: boot marked valid, rollback guard cleared.");
     }
 
     // ── Silent nightly check ──────────────────────────────────────────────────
@@ -44,14 +44,14 @@ public:
 
         String latestVersion = release["version"].as<String>();
         if (latestVersion == FIRMWARE_VERSION || latestVersion.isEmpty()) {
-            Serial.println("OTA: firmware is current.");
+            Log.println("OTA: firmware is current.");
             return false;
         }
 
         outVersion = latestVersion;
         outUrl     = release["binary_url"].as<String>();
         outSha256  = release["sha256"].as<String>();
-        Serial.printf("OTA: new version available %s -> %s\n",
+        Log.printf("OTA: new version available %s -> %s\n",
                       FIRMWARE_VERSION, latestVersion.c_str());
         return true;
     }
@@ -77,7 +77,7 @@ private:
         http.begin(String(ENDPOINT_LATEST_FIRMWARE) + "?target=esp32s3");
         int statusCode = http.GET();
         if (statusCode != 200) {
-            Serial.printf("OTA check failed, HTTP %d\n", statusCode);
+            Log.printf("OTA check failed, HTTP %d\n", statusCode);
             http.end();
             return false;
         }
@@ -91,20 +91,20 @@ private:
         http.begin(url);
         int statusCode = http.GET();
         if (statusCode != 200) {
-            Serial.printf("OTA download failed, HTTP %d\n", statusCode);
+            Log.printf("OTA download failed, HTTP %d\n", statusCode);
             http.end();
             return false;
         }
 
         int contentLength = http.getSize();
         if (contentLength <= 0) {
-            Serial.println("OTA download has no Content-Length, aborting.");
+            Log.println("OTA download has no Content-Length, aborting.");
             http.end();
             return false;
         }
 
         if (!Update.begin(contentLength)) {
-            Serial.println("Not enough free space for OTA update.");
+            Log.println("Not enough free space for OTA update.");
             http.end();
             return false;
         }
@@ -128,7 +128,7 @@ private:
 
             size_t bytesWritten = Update.write(buf, readBytes);
             if ((int)bytesWritten != readBytes) {
-                Serial.printf("OTA flash write error at byte %d: wrote %d of %d\n",
+                Log.printf("OTA flash write error at byte %d: wrote %d of %d\n",
                               written, (int)bytesWritten, readBytes);
                 Update.abort();
                 mbedtls_sha256_free(&shaCtx);
@@ -149,17 +149,17 @@ private:
         hashHex[64] = '\0';
 
         if (expectedSha256Hex.length() > 0 && !expectedSha256Hex.equalsIgnoreCase(hashHex)) {
-            Serial.println("OTA SHA256 mismatch -- refusing to apply a possibly-corrupt image.");
+            Log.println("OTA SHA256 mismatch -- refusing to apply a possibly-corrupt image.");
             Update.abort();
             return false;
         }
 
         if (written != contentLength || !Update.end(true)) {
-            Serial.printf("OTA write incomplete or failed: %s\n", Update.errorString());
+            Log.printf("OTA write incomplete or failed: %s\n", Update.errorString());
             return false;
         }
 
-        Serial.println("OTA update applied successfully. Restarting...");
+        Log.println("OTA update applied successfully. Restarting...");
         return true; // caller restarts
     }
 };

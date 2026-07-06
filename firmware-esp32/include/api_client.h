@@ -169,7 +169,7 @@ public:
         int statusCode = http.POST(payload);
         String responseBody = http.getString(); // read once — stream is consumed after this
         if (statusCode != 200 && statusCode != 201) {
-            Serial.printf("registerNode failed, HTTP %d: %s\n", statusCode, responseBody.c_str());
+            Log.printf("registerNode failed, HTTP %d: %s\n", statusCode, responseBody.c_str());
             http.end();
             return false;
         }
@@ -226,7 +226,7 @@ public:
             String rep = storage.getNftCollsReport();
             if (rep.length()) {
                 reqDoc["nft_collections"] = serialized(rep);
-                Serial.printf("heartbeat: pushing NFT collections report (%u bytes)\n",
+                Log.printf("heartbeat: pushing NFT collections report (%u bytes)\n",
                               (unsigned)rep.length());
             }
         }
@@ -235,7 +235,7 @@ public:
 
         int statusCode = http.POST(payload);
         if (statusCode != 200) {
-            Serial.printf("Heartbeat failed, HTTP %d\n", statusCode);
+            Log.printf("Heartbeat failed, HTTP %d\n", statusCode);
             http.end();
             return false;
         }
@@ -270,7 +270,7 @@ public:
         http.setTimeout(20000);
         int statusCode = http.GET();
         if (statusCode != 200) {
-            Serial.printf("fetchTreasuryData failed, HTTP %d\n", statusCode);
+            Log.printf("fetchTreasuryData failed, HTTP %d\n", statusCode);
             http.end();
             return result;
         }
@@ -290,7 +290,7 @@ public:
                                                    DeserializationOption::Filter(filter));
         http.end();
         if (err) {
-            Serial.printf("fetchTreasuryData JSON parse error: %s\n", err.c_str());
+            Log.printf("fetchTreasuryData JSON parse error: %s\n", err.c_str());
             return result;
         }
 
@@ -324,7 +324,7 @@ public:
         http.setTimeout(8000);
         int statusCode = http.GET();
         if (statusCode != 200) {
-            Serial.printf("fetchUsDebt failed, HTTP %d\n", statusCode);
+            Log.printf("fetchUsDebt failed, HTTP %d\n", statusCode);
             http.end();
             return result;
         }
@@ -356,7 +356,7 @@ public:
         http.setTimeout(9000);
         int statusCode = http.GET();
         if (statusCode != 200) {
-            Serial.printf("fetchDebtHistory failed, HTTP %d\n", statusCode);
+            Log.printf("fetchDebtHistory failed, HTTP %d\n", statusCode);
             http.end();
             return 0;
         }
@@ -421,7 +421,7 @@ public:
                 }
             }
         } else {
-            Serial.printf("fetchOhlcvHistory failed, HTTP %d\n", statusCode);
+            Log.printf("fetchOhlcvHistory failed, HTTP %d\n", statusCode);
         }
         http.end();
         if (count > 0) return count;
@@ -524,7 +524,7 @@ public:
 
         int statusCode = http.GET();
         if (statusCode != 200) {
-            Serial.printf("miningFeed: HTTP %d\n", statusCode);
+            Log.printf("miningFeed: HTTP %d\n", statusCode);
             http.end();
             return 0;
         }
@@ -532,7 +532,7 @@ public:
         JsonDocument doc;
         DeserializationError ferr = deserializeJson(doc, http.getStream());
         http.end();
-        if (ferr) { Serial.printf("miningFeed: parse %s\n", ferr.c_str()); return 0; }
+        if (ferr) { Log.printf("miningFeed: parse %s\n", ferr.c_str()); return 0; }
 
         int count = 0;
         for (JsonObject row : doc.as<JsonArray>()) {
@@ -553,7 +553,7 @@ public:
         }
         // Decisive trace: if the Node screen is empty, this line tells us
         // whether the data arrived (parse side) or the fetch failed (above).
-        Serial.printf("miningFeed: %d entries, first block #%ld created=%ld mined=%ld\n",
+        Log.printf("miningFeed: %d entries, first block #%ld created=%ld mined=%ld\n",
                       count,
                       count ? (long)outEntries[0].blockNumber : 0L,
                       count ? (long)outEntries[0].createdAtUtc : 0L,

@@ -534,7 +534,7 @@ private:
                     ho.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
                     String body = String("{\"ids\":[\"") + e.contract + "\"]}";
                     int oCode = ho.POST(body);
-                    Serial.printf("NFT ord: resolve-ordinal POST %d for %.12s...\n", oCode, e.contract);
+                    Log.printf("NFT ord: resolve-ordinal POST %d for %.12s...\n", oCode, e.contract);
                     if (oCode == 200) {
                         JsonDocument od;
                         if (deserializeJson(od, ho.getStream()) == DeserializationError::Ok) {
@@ -549,10 +549,10 @@ private:
                             // The owner's colour choice from the web editor
                             // WINS over any indexer-derived trait colour.
                             if (e.bg[0] == '#') oi.bg_color = (uint32_t)strtoul(e.bg + 1, nullptr, 16);
-                            Serial.printf("NFT ord: resolved name='%s' coll='%s' floor=%.5f bg=%06x\n",
+                            Log.printf("NFT ord: resolved name='%s' coll='%s' floor=%.5f bg=%06x\n",
                                           oi.name, oi.collection, oi.floor_price_eth, (unsigned)oi.bg_color);
                         } else {
-                            Serial.println("NFT ord: resolve-ordinal JSON parse failed");
+                            Log.println("NFT ord: resolve-ordinal JSON parse failed");
                         }
                     }
                     ho.end();
@@ -707,7 +707,7 @@ private:
         if (e > 0) s_ethUsd = e;
         if (b > 0) s_btcUsd = b;
         if (e > 0 || b > 0) s_ratesAt = millis();
-        Serial.printf("NFT floor rates: ETH=$%.0f BTC=$%.0f\n", s_ethUsd, s_btcUsd);
+        Log.printf("NFT floor rates: ETH=$%.0f BTC=$%.0f\n", s_ethUsd, s_btcUsd);
     }
 
     static double _floorUsd(const NftItem& it) {
@@ -877,10 +877,10 @@ private:
             if (rep != storage.getNftCollsReport()) {
                 storage.setNftCollsReport(rep);
                 storage.setNftCollsDirty(true);   // next heartbeat pushes it up
-                Serial.printf("NFT: collections report updated (%u bytes) — will push on next heartbeat\n",
+                Log.printf("NFT: collections report updated (%u bytes) — will push on next heartbeat\n",
                               (unsigned)rep.length());
             } else {
-                Serial.println("NFT: collections report unchanged");
+                Log.println("NFT: collections report unchanged");
             }
         }
         if (listChanged) _rebuildGrid();
@@ -975,7 +975,7 @@ private:
                 free(blob);
             }
         }
-        Serial.printf("NFT: %u items + %d decoded covers restored from disk\n",
+        Log.printf("NFT: %u items + %d decoded covers restored from disk\n",
                       (unsigned)n, loaded);
         return true;
     }
@@ -1593,6 +1593,19 @@ private:
             }
             i = j;
         }
+
+        // DEFAULT ORDER = collection floor value (USD), most valuable first.
+        // _nftCache is already USD-sorted, but a stale custom order or the
+        // pinned-promotion used to strand a high-value pick (e.g. a BTC Ordinal)
+        // last — so we explicitly floor-sort the groups here. A manual reorder
+        // via the on-device arrows (_ordBuf, applied just below) still wins.
+        for (int a = 0; a < n - 1; a++)
+            for (int b = 0; b < n - 1 - a; b++) {
+                double fa = _floorUsd(_nftCache[g[b].start]);
+                double fb = _floorUsd(_nftCache[g[b + 1].start]);
+                if (fa < fb) { NftGrp t = g[b]; g[b] = g[b + 1]; g[b + 1] = t; }
+            }
+
         if (_ordBuf[0]) {
             // In-place stable reorder (NO temp array: these run on the LVGL
             // task's 8 KB stack — stack-allocating 2× NftGrp[30] here was a
@@ -1795,7 +1808,7 @@ private:
                 }
             }
         }
-        Serial.printf("NFT img worker: %d slots decoded%s\n", fetched, aborted ? " (aborted: params changed)" : "");
+        Log.printf("NFT img worker: %d slots decoded%s\n", fetched, aborted ? " (aborted: params changed)" : "");
 
         netUnlock();
         if (s_instance) s_instance->_imgTask = nullptr;   // ALWAYS clear before self-delete
@@ -1892,7 +1905,7 @@ private:
             int attempts = (page == 0) ? 3 : 1;
             for (int attempt = 0; attempt < attempts; attempt++) {
                 if (attempt > 0) {
-                    Serial.printf("NFT fetch retry %d (prev code %d)\n", attempt, code);
+                    Log.printf("NFT fetch retry %d (prev code %d)\n", attempt, code);
                     vTaskDelay(pdMS_TO_TICKS(2500));
                 }
                 http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
@@ -1979,7 +1992,7 @@ private:
             }
 
             const char* nx = doc["next"] | "";
-            Serial.printf("NFT: page %d -> %d kept, %d collections so far%s\n",
+            Log.printf("NFT: page %d -> %d kept, %d collections so far%s\n",
                           page + 1, rawCount, slugCount, nx[0] ? "" : " (last page)");
             if (!nx[0]) break;
             nextCursor = nx;
@@ -2013,7 +2026,7 @@ private:
                 }
             }
             hStats.end();
-            Serial.printf("NFT stats[%s] HTTP %d floor=%.4f\n", slugList[si], sc, floorPrices[si]);
+            Log.printf("NFT stats[%s] HTTP %d floor=%.4f\n", slugList[si], sc, floorPrices[si]);
 
             // Rate-limit: don't hammer OpenSea's free tier
             delay(NFT_RATELIMIT_DELAY_MS);
@@ -2054,7 +2067,7 @@ private:
 
         _refreshUsdRates();   // ETH/BTC USD rates so BTC & ETH floors rank together
         _sortByFloor();
-        Serial.printf("NFT: %d items after spam filter + picks (sorted by floor desc)\n", _pendingResult.count);
+        Log.printf("NFT: %d items after spam filter + picks (sorted by floor desc)\n", _pendingResult.count);
 
         _pendingResult.ready = true;
 
