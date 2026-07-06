@@ -772,13 +772,22 @@ function AccessDenied({ nodeCode }: { nodeCode: string }) {
           your device (tap the QR icon in the footer) and <strong style={{ color: C.text }}>scan the QR code</strong>,
           it opens this page with the correct token. You can also type the exact URL shown right below the QR.
         </p>
-        <a href={`/node/${nodeCode}`} style={{
-          padding: '11px 24px', background: 'transparent', color: C.text,
-          border: '1px solid #3a3a3a', borderRadius: 8, fontWeight: 'bold',
-          fontSize: 14, textDecoration: 'none', cursor: 'pointer',
-        }}>
-          View public profile instead →
-        </a>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <a href={`/node/${nodeCode}`} style={{
+            padding: '11px 24px', background: 'transparent', color: C.text,
+            border: '1px solid #3a3a3a', borderRadius: 8, fontWeight: 'bold',
+            fontSize: 14, textDecoration: 'none', cursor: 'pointer',
+          }}>
+            View public profile →
+          </a>
+          <a href="/my-node" style={{
+            padding: '11px 24px', background: 'transparent', color: C.text,
+            border: '1px solid #3a3a3a', borderRadius: 8, fontWeight: 'bold',
+            fontSize: 14, textDecoration: 'none', cursor: 'pointer',
+          }}>
+            Enter a node code →
+          </a>
+        </div>
       </div>
     </div>
   )

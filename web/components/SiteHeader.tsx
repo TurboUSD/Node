@@ -35,12 +35,10 @@ function CloseIcon() {
 export default function SiteHeader() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
-  const [savedNodeCode, setSavedNodeCode] = useState<string | null>(null)
   const [isDesktop, setIsDesktop] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setSavedNodeCode(localStorage.getItem('turbousd_node_code'))
     const update = () => setIsDesktop(window.innerWidth >= DESKTOP_MIN)
     update()
     window.addEventListener('resize', update)
@@ -62,9 +60,7 @@ export default function SiteHeader() {
     { label: 'Home', href: 'https://turbousd.com', external: true },
     { label: 'Live network', href: '/' },
     { label: 'The Device', href: '/node' },
-    savedNodeCode
-      ? { label: 'My Node', href: `/node/${savedNodeCode}` }
-      : { label: 'Setup', href: '/setup' },
+    { label: 'My Node', href: '/my-node' },
   ]
 
   const Socials = ({ color, gap }: { color: string; gap: number }) => (
