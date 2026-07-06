@@ -74,6 +74,7 @@ struct NftItem {
     char image_url[256]    = {};
     float floor_price_eth  = 0.0f;
     bool  pinned           = false;   // manual pick — ALWAYS earns a grid cell
+    bool  floor_btc        = false;   // floor denominated in BTC (Ordinals) instead of ETH
     // Decoded artwork, ONE SLOT PER GRID CLASS (0=1x1, 1=2x2, 2=3x3) so
     // switching grid sizes can show something instantly. RGB565 in PSRAM,
     // produced by the nft_img bg task via img_decode.h. Retention: the
@@ -101,31 +102,38 @@ struct NftPendingResult {
 // for everything else, so one label can render "0.005 Ξ". Built field-by-field
 // at runtime (not aggregate init) so struct layout changes can't bite us.
 static const uint8_t s_xiBitmap[] = {
-    // 7×7 1bpp, rows packed MSB-first: ▬▬▬ / gap / ▬▬ inset / gap / ▬▬▬
-    0xFE, 0x00, 0x03, 0xE0, 0x00, 0x3F, 0x80
+    // Ξ — 7×7 1bpp, rows packed MSB-first: ▬▬▬ / gap / ▬▬ inset / gap / ▬▬▬
+    0xFE, 0x00, 0x03, 0xE0, 0x00, 0x3F, 0x80,
+    // ₿ — 7×9 1bpp: a "B" with the two strokes poking out top and bottom
+    0x51, 0xF2, 0x14, 0x2F, 0x90, 0xA1, 0x7C, 0x50,
 };
 static const lv_font_fmt_txt_glyph_dsc_t s_xiGlyphs[] = {
-    {0, 0,   0, 0, 0, 0},   // glyph id 0 is reserved in LVGL fonts
-    {0, 144, 7, 7, 1, 0},   // Ξ: adv 9px (144/16), 7×7 box on the baseline
+    {0, 0,   0, 0, 0, 0},    // glyph id 0 is reserved in LVGL fonts
+    {0, 144, 7, 7, 1, 0},    // Ξ: adv 9px (144/16), 7×7 box on the baseline
+    {7, 144, 7, 9, 1, -1},   // ₿: bitmap offset 7, 7×9 box, dips 1px below baseline
 };
 static const lv_font_t* ethXiFont10() {
     static bool ready = false;
-    static lv_font_fmt_txt_cmap_t        cmap;
+    static lv_font_fmt_txt_cmap_t        cmaps[2];
     static lv_font_fmt_txt_dsc_t         dsc;
     static lv_font_fmt_txt_glyph_cache_t cache;
     static lv_font_t                     font;
     if (!ready) {
-        memset(&cmap, 0, sizeof(cmap));
-        cmap.range_start    = 0x039E;   // Ξ
-        cmap.range_length   = 1;
-        cmap.glyph_id_start = 1;
-        cmap.type           = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY;
+        memset(cmaps, 0, sizeof(cmaps));
+        cmaps[0].range_start    = 0x039E;   // Ξ (ETH floors)
+        cmaps[0].range_length   = 1;
+        cmaps[0].glyph_id_start = 1;
+        cmaps[0].type           = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY;
+        cmaps[1].range_start    = 0x20BF;   // ₿ (Ordinals floors)
+        cmaps[1].range_length   = 1;
+        cmaps[1].glyph_id_start = 2;
+        cmaps[1].type           = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY;
 
         memset(&dsc, 0, sizeof(dsc));
         dsc.glyph_bitmap = s_xiBitmap;
         dsc.glyph_dsc    = s_xiGlyphs;
-        dsc.cmaps        = &cmap;
-        dsc.cmap_num     = 1;
+        dsc.cmaps        = cmaps;
+        dsc.cmap_num     = 2;
         dsc.bpp          = 1;
         dsc.cache        = &cache;
 
@@ -365,6 +373,7 @@ private:
         lv_obj_t* img       = nullptr;   // lv_canvas or lv_img for decoded image
         lv_img_dsc_t imgDsc = {};        // PER-CELL: a shared static dsc made every cell show the same image
         const uint8_t* shownPx = nullptr; // bitmap currently displayed (repaint only on change)
+        lv_coord_t cellW = 0, cellH = 0;  // set at build — lv_obj_get_width() reads 0 pre-layout
         lv_obj_t* nameLbl   = nullptr;
         lv_obj_t* floorLbl  = nullptr;
         lv_obj_t* dotRow    = nullptr;   // carousel position dots
@@ -479,13 +488,36 @@ private:
             // NodeMonkes and friends; SVG/webp fall back to the wsrv proxy).
             if (strcmp(e.chain, "ord") == 0) {
                 NftItem& oi = _pendingResult.items[_pendingResult.count++];
-                snprintf(oi.name, sizeof(oi.name), "Ordinal %.8s", e.contract);
+                snprintf(oi.name, sizeof(oi.name), "Ordinal");   // fallback
                 snprintf(oi.collection, sizeof(oi.collection), "Ordinals");
                 snprintf(oi.slug, sizeof(oi.slug), "ordinals");
                 snprintf(oi.image_url, sizeof(oi.image_url),
                          "https://ordinals.com/content/%s", e.contract);
                 oi.floor_price_eth = 0.0f;
                 oi.pinned = true;
+
+                // Best-effort real name ("NodeMonke #9401") + BTC floor via
+                // our resolve-ordinal edge function (Magic Eden underneath).
+                {
+                    HTTPClient ho;
+                    ho.useHTTP10(true);
+                    ho.begin(String(SUPABASE_FUNCTIONS_BASE_URL) + "/resolve-ordinal");
+                    ho.setTimeout(9000);
+                    ho.addHeader("Content-Type", "application/json");
+                    ho.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+                    String body = String("{\"ids\":[\"") + e.contract + "\"]}";
+                    if (ho.POST(body) == 200) {
+                        JsonDocument od;
+                        if (deserializeJson(od, ho.getStream()) == DeserializationError::Ok) {
+                            const char* nm = od["results"][0]["name"] | "";
+                            if (nm[0]) snprintf(oi.name, sizeof(oi.name), "%s", nm);
+                            double fb = od["results"][0]["floor_btc"] | 0.0;
+                            if (fb > 0) { oi.floor_price_eth = (float)fb; oi.floor_btc = true; }
+                        }
+                    }
+                    ho.end();
+                }
+                delay(NFT_RATELIMIT_DELAY_MS);
                 continue;
             }
 
@@ -744,6 +776,7 @@ private:
         char  image_url[256];
         float floor;
         uint8_t pinned;
+        uint8_t floor_btc;
     };
 
     void _saveSnapshot() {
@@ -761,7 +794,8 @@ private:
             strncpy(r[i].slug,       _nftCache[i].slug,       sizeof(r[i].slug) - 1);
             strncpy(r[i].image_url,  _nftCache[i].image_url,  sizeof(r[i].image_url) - 1);
             r[i].floor  = _nftCache[i].floor_price_eth;
-            r[i].pinned = _nftCache[i].pinned ? 1 : 0;
+            r[i].pinned    = _nftCache[i].pinned ? 1 : 0;
+            r[i].floor_btc = _nftCache[i].floor_btc ? 1 : 0;
         }
         diskcache::save("meta", "nft_list", buf, sz);
         free(buf);
@@ -784,6 +818,7 @@ private:
             strncpy(it.image_url,  r[i].image_url,  sizeof(it.image_url) - 1);
             it.floor_price_eth = r[i].floor;
             it.pinned          = r[i].pinned != 0;
+            it.floor_btc       = r[i].floor_btc != 0;
             _nftCache.push_back(it);
         }
         free(buf);
@@ -875,6 +910,8 @@ private:
         lv_coord_t y = (lv_coord_t)(4 + row * (h + 4));
 
         cw.container = lv_obj_create(_gridArea);
+        cw.cellW = w;
+        cw.cellH = h;
         lv_obj_set_size(cw.container, w, h);
         lv_obj_set_pos(cw.container, x, y);
         lv_obj_set_style_border_color(cw.container, lv_color_hex(NFT_CLR_BORDER), 0);
@@ -920,9 +957,11 @@ private:
         lv_obj_set_style_bg_color(cw.container, lv_color_hex(bgColor), 0);
         lv_obj_set_style_bg_opa(cw.container, LV_OPA_COVER, 0);
 
-        lv_coord_t cw_w, cw_h;
-        cw_w = lv_obj_get_width(cw.container)  - 8;  // minus padding
-        cw_h = lv_obj_get_height(cw.container) - 8;
+        // Use the size recorded at build time: lv_obj_get_width() returns 0
+        // until the first layout pass, which made build-time captions compute
+        // a NEGATIVE label width → invisible names until any later repaint.
+        lv_coord_t cw_w = cw.cellW - 8;   // minus container padding
+        lv_coord_t cw_h = cw.cellH - 8;
 
         // Image placeholder (full-cell canvas colored by tier)
         // If img_pixels is non-null (JPEG decoded), display as lv_img instead.
@@ -1011,40 +1050,40 @@ private:
         // ── Caption band (dedicated dark strip UNDER the artwork): name on
         // the left, floor on the right, SAME baseline row — readable always,
         // never overlaid on the art.
-        // Name: smaller face on the dense 3x3 grid; if the full name STILL
-        // wouldn't fit next to the floor price, drop the trailing "#1234" id.
+        // Name: smaller face on the dense 3x3 grid. Long names stay on ONE
+        // line and marquee sideways slowly (circular scroll) so the full
+        // name — id included — is readable.
         const lv_font_t* nameFont = (_gridSize == 9) ? &lv_font_montserrat_8
                                                      : &lv_font_montserrat_10;
-        char nameBuf[64];
-        snprintf(nameBuf, sizeof(nameBuf), "%s", item.name[0] ? item.name : item.collection);
+        const char* nameTxt = item.name[0] ? item.name : item.collection;
         lv_coord_t nameAvail = (lv_coord_t)(cw_w - 52);   // floor takes ~48 px
-        lv_point_t tsz;
-        lv_txt_get_size(&tsz, nameBuf, nameFont, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        if (tsz.x > nameAvail) {
-            char* hash = strrchr(nameBuf, '#');
-            if (hash && hash > nameBuf) {
-                while (hash > nameBuf && *(hash - 1) == ' ') hash--;
-                *hash = '\0';   // "The Penimals #1946" → "The Penimals"
-            }
-        }
+        if (nameAvail < 20) nameAvail = 20;
 
         cw.nameLbl = lv_label_create(cw.container);
-        lv_label_set_text(cw.nameLbl, nameBuf);
-        lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_DOT);
+        lv_label_set_text(cw.nameLbl, nameTxt);
         lv_obj_set_width(cw.nameLbl, nameAvail);
         lv_obj_set_style_text_font(cw.nameLbl, nameFont, 0);
         lv_obj_set_style_text_color(cw.nameLbl, lv_color_hex(NFT_CLR_TEXT), 0);
+        lv_point_t tsz;
+        lv_txt_get_size(&tsz, nameTxt, nameFont, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (tsz.x > nameAvail) {
+            lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_SCROLL_CIRCULAR);
+            lv_obj_set_style_anim_speed(cw.nameLbl, 12, 0);   // ~12 px/s — slow, readable
+        } else {
+            lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_CLIP);
+        }
         lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -2);
 
         if (item.floor_price_eth > 0) {
             cw.floorLbl = lv_label_create(cw.container);
             char floorBuf[24];
-            // Two decimals to save caption space ("0.005 Ξ" keeps a third so
-            // dust floors don't render as 0.00).
+            // Two decimals to save caption space (three below 0.01 so dust
+            // floors don't render as 0.00). Ξ for ETH, ₿ for Ordinals.
+            const char* sym = item.floor_btc ? "\xE2\x82\xBF" : "\xCE\x9E";
             if (item.floor_price_eth < 0.01f)
-                snprintf(floorBuf, sizeof(floorBuf), "%.3f \xCE\x9E", item.floor_price_eth);
+                snprintf(floorBuf, sizeof(floorBuf), "%.3f %s", item.floor_price_eth, sym);
             else
-                snprintf(floorBuf, sizeof(floorBuf), "%.2f \xCE\x9E", item.floor_price_eth);
+                snprintf(floorBuf, sizeof(floorBuf), "%.2f %s", item.floor_price_eth, sym);
             lv_label_set_text(cw.floorLbl, floorBuf);
             lv_obj_set_style_text_font(cw.floorLbl, ethXiFont10(), 0);
             uint32_t priceColor = item.floor_price_eth >= 1.0f ? NFT_CLR_GOLD :
@@ -1151,13 +1190,27 @@ private:
         if (_slideshowCount > 0) { _slideshowCount--; return; }
         _slideshowCount = slideSecs;
 
-        // Advance all cells together (like a global slide advance)
-        for (int i = 0; i < _cellCount; i++) {
-            if (_cells[i].nftCount > 1) {
-                _cells[i].nftCurrent = (_cells[i].nftCurrent + 1) % _cells[i].nftCount;
-                _refreshCell(i);
+        // Advance ONE cell per interval, round-robin, and only to an item
+        // whose artwork is ALREADY decoded. The old "advance all 9 cells at
+        // once, placeholders included" produced a burst of full-cell repaints
+        // plus placeholder→art double repaints — the 3×3 flicker.
+        static uint8_t rr = 0;
+        int gCls = _gridClass();
+        for (int scan = 0; scan < _cellCount; scan++) {
+            int i = (rr + scan) % _cellCount;
+            CellWidgets& cw = _cells[i];
+            if (!cw.container || cw.nftCount <= 1) continue;
+            for (int step = 1; step < cw.nftCount; step++) {
+                int cand = cw.nftStart + ((cw.nftCurrent + step) % cw.nftCount);
+                if (cand >= 0 && cand < (int)_nftCache.size() && _nftCache[cand].px[gCls]) {
+                    cw.nftCurrent = (cw.nftCurrent + step) % cw.nftCount;
+                    _refreshCell(i);
+                    rr = (uint8_t)((i + 1) % _cellCount);
+                    return;   // one repaint per tick — calm screen
+                }
             }
         }
+        if (_cellCount > 0) rr = (uint8_t)((rr + 1) % _cellCount);
     }
 
     // ── Carousel setting ──────────────────────────────────────────────────────

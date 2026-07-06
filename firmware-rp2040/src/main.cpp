@@ -101,6 +101,7 @@ void sendAck() {
 // ~80 ms conversion never stalls the alarm-tone loop. The S3 polls this. On a
 // base D1 with no sensor plugged in, getSensor() fails and we report "no data".
 AHT20 aht;
+bool sensorPresent = false;   // probed once in setup(); reads skipped when absent
 const int16_t  TEMP_SENTINEL_NO_DATA = (int16_t)0x8000; // -32768 → "no valid reading"
 int16_t  cachedTempCenti = TEMP_SENTINEL_NO_DATA;        // centi-°C, signed
 uint16_t cachedHumCenti  = 0;                            // centi-% RH, unsigned
@@ -203,10 +204,28 @@ void setup() {
     Serial1.begin(UART_BAUD);
 
     // Grove I2C bus for an optional AHT20 temp/humidity sensor.
-    Wire.setSDA(GROVE_I2C_SDA);
-    Wire.setSCL(GROVE_I2C_SCL);
-    Wire.begin();
-    aht.begin();
+    //
+    // CRITICAL: with the Grove port EMPTY the I2C lines FLOAT (the pull-up
+    // resistors live on the sensor module), and the RP2040 core's
+    // Wire.endTransmission() can hang FOREVER on a floating bus. That froze
+    // setup() right here on sensorless devices: the four boot beeps played
+    // (they run before I2C) but loop() never started — so no UART hellos, no
+    // command parsing, no alarm. Fix: weak internal pull-ups so the bus
+    // idles high, then a single probe; if nothing ACKs at 0x38, skip the
+    // sensor entirely.
+    pinMode(GROVE_I2C_SDA, INPUT_PULLUP);
+    pinMode(GROVE_I2C_SCL, INPUT_PULLUP);
+    delay(2);
+    // Belt & braces: if either line still reads LOW with pull-ups on, the
+    // bus is shorted/held — do NOT even initialise I2C (that's the hang).
+    if (digitalRead(GROVE_I2C_SDA) == HIGH && digitalRead(GROVE_I2C_SCL) == HIGH) {
+        Wire.setSDA(GROVE_I2C_SDA);
+        Wire.setSCL(GROVE_I2C_SCL);
+        Wire.begin();
+        Wire.beginTransmission(0x38);      // AHT20 address probe
+        sensorPresent = (Wire.endTransmission() == 0);
+        if (sensorPresent) aht.begin();
+    }
 }
 
 void loop() {
@@ -218,7 +237,9 @@ void loop() {
     // doesn't reboot when the ESP32 is reflashed, so by the time anyone
     // watched the ESP32 serial the hellos were long gone). 3 bytes / 10 s.
     static uint32_t lastHelloAt = 0;
-    if (millis() - lastHelloAt > 10000) {
+    static bool firstHello = true;
+    if (firstHello || millis() - lastHelloAt > 10000) {
+        firstHello = false;
         lastHelloAt = millis();
         uint8_t f[3] = { 0x7E, 0xEE, (uint8_t)(0x7E ^ 0xEE) };
         Serial1.write(f, sizeof(f));
@@ -266,7 +287,7 @@ void loop() {
     // Refresh the cached sensor reading on a slow cadence. Skip while the alarm
     // is sounding so the ~80 ms AHT20 conversion can't glitch the tone pattern;
     // a slightly stale temperature during a 5-minute alarm is harmless.
-    if (!alarmActive && (millis() - lastSensorReadAt > SENSOR_READ_INTERVAL_MS)) {
+    if (sensorPresent && !alarmActive && (millis() - lastSensorReadAt > SENSOR_READ_INTERVAL_MS)) {
         lastSensorReadAt = millis();
         readSensorInto();
     }

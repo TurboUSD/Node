@@ -101,10 +101,43 @@ public:
         ledcWrite(0, 0);                         // backlight off
         gpio_wakeup_enable((gpio_num_t)BTN_USER_GPIO, GPIO_INTR_LOW_LEVEL);
         esp_sleep_enable_gpio_wakeup();
-        esp_light_sleep_start();                 // blocks until the button is pressed
-        // Woken up: restore the screen.
+        // The main loop is FROZEN during light sleep — without a timer wake
+        // the alarm could never fire while "powered off". Arm a wake ~2 s
+        // before the next scheduled alarm so checkAlarmTrigger() catches its
+        // firing window right after resume.
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+        uint64_t usToAlarm = _usUntilNextAlarm();
+        if (usToAlarm > 0) esp_sleep_enable_timer_wakeup(usToAlarm);
+        esp_light_sleep_start();                 // blocks until button press or alarm-time wake
+        // Woken up (button OR alarm timer): restore the screen.
         _screenOn = true;
         applyStoredBrightness();
+    }
+
+    // Microseconds until ~2 s before the next enabled alarm occurrence
+    // (respecting the per-day bitmask), or 0 when no alarm is scheduled /
+    // the clock isn't synced yet.
+    uint64_t _usUntilNextAlarm() {
+        if (!storage.getAlarmEnabled()) return 0;
+        time_t now = time(nullptr);
+        if (now < 1600000000) return 0;          // NTP not synced — can't schedule
+        struct tm t;
+        localtime_r(&now, &t);
+        for (int d = 0; d < 8; d++) {
+            struct tm c = t;
+            c.tm_mday += d;
+            c.tm_hour  = storage.getAlarmHour();
+            c.tm_min   = storage.getAlarmMinute();
+            c.tm_sec   = 0;
+            time_t ct = mktime(&c);              // normalizes day rollover
+            if (ct <= now + 3) continue;         // already passed (or this very moment)
+            struct tm cd;
+            localtime_r(&ct, &cd);
+            if (!storage.isAlarmActiveToday(cd.tm_wday)) continue;
+            uint64_t secs = (uint64_t)(ct - now);
+            return (secs > 2 ? secs - 2 : 1) * 1000000ULL;
+        }
+        return 0;
     }
 
     void showProvisioningScreen() {
@@ -267,6 +300,14 @@ public:
     }
 
     void showAlarmFiringOverlay() {
+        // The alarm must ALWAYS light the screen — wake it from the
+        // button-off state and from the idle-timeout state, and reset the
+        // inactivity timer so it doesn't blank again mid-ring.
+        _screenOn    = true;
+        _screenIsOn  = true;
+        _lastTouchMs = millis();
+        applyStoredBrightness();
+
         lv_obj_t* overlay = lv_obj_create(lv_scr_act());
         lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
         lv_obj_set_style_bg_color(overlay, lv_color_hex(0xe8b339), 0);

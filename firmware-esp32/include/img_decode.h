@@ -138,7 +138,14 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
         for (int x = 0; x < outW; x++) {
             unsigned sx = (unsigned)((uint64_t)x * iw / outW);
             const unsigned char* sp = &rgba[(sy * iw + sx) * 4];
-            lv_color_t c = lv_color_make(sp[0], sp[1], sp[2]);
+            // Composite transparency onto BLACK (the gallery is dark). Many
+            // on-chain PNGs (e.g. NodeMonkes) have a transparent background
+            // with white RGB underneath — ignoring alpha rendered them on a
+            // glaring white sheet.
+            unsigned a = sp[3];
+            lv_color_t c = lv_color_make((uint8_t)((sp[0] * a) / 255),
+                                         (uint8_t)((sp[1] * a) / 255),
+                                         (uint8_t)((sp[2] * a) / 255));
             px[(y * outW + x) * 2 + 0] = c.full & 0xFF;
             px[(y * outW + x) * 2 + 1] = c.full >> 8;
         }
