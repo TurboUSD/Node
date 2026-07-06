@@ -10,6 +10,7 @@
 #include "driver/uart.h"               // raw IDF driver — see begin()
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h"   // USB pad release — see begin()
+#include "soc/rtc_cntl_reg.h"          // RTC-domain USB PHY override — see begin()
 
 enum class Rp2040Command : uint8_t {
     PLAY_ALARM    = 0x01,  // legacy: plays at volume 2 (soft default)
@@ -37,6 +38,17 @@ public:
         // shows up in the serial monitor as "RP-link: ..." lines.
         REG_CLR_BIT(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
         REG_CLR_BIT(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_DP_PULLUP);   // GPIO20's 1.3k USB pull-up off
+        // FULL PHY detach: the RTC domain has an OVERRIDE that can force the
+        // USB pads on regardless of the peripheral bit above. Take the
+        // override and force the pad function + all four PHY pulls OFF —
+        // without this the S3 can keep GPIO19/20 tied to the USB PHY and the
+        // UART matrix routing silently never reaches the physical pins.
+        REG_SET_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_USB_PAD_ENABLE_OVERRIDE);
+        REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_USB_PAD_ENABLE);
+        REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_USB_DP_PULLUP);
+        REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_USB_DP_PULLDOWN);
+        REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_USB_DM_PULLUP);
+        REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_USB_DM_PULLDOWN);
         gpio_hold_dis((gpio_num_t)RP2040_UART_TX_PIN);    // release any sleep/hold latch
         gpio_hold_dis((gpio_num_t)RP2040_UART_RX_PIN);
         gpio_reset_pin((gpio_num_t)RP2040_UART_TX_PIN);   // detach any previous owner

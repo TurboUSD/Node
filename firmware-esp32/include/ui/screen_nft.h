@@ -49,7 +49,8 @@
 #define NFT_CACHE_TTL_MS       (30UL * 60UL * 1000UL)  // 30 minutes
 #define NFT_RATELIMIT_DELAY_MS 300  // ms between OpenSea collection stats calls
 #define NFT_OPENSEA_CHAIN      "ethereum"  // chain for OpenSea v2 NFT lookup
-#define NFT_HEADER_H           36   // height of the grid-size selector strip
+#define NFT_HEADER_H           26   // height of the grid-size selector strip (slimmed for grid space)
+#define NFT_CAPTION_H          16   // black caption band under each artwork (name + floor)
 #define NFT_BODY_H             (480 - 38 - 38)           // 404 px
 #define NFT_GRID_H             (NFT_BODY_H - NFT_HEADER_H) // 368 px
 
@@ -168,7 +169,7 @@ public:
         lv_obj_align(_sizeBar, LV_ALIGN_TOP_MID, 0, 0);
         lv_obj_set_style_bg_color(_sizeBar, lv_color_hex(0x0a0a0a), 0);
         lv_obj_set_style_border_width(_sizeBar, 0, 0);
-        lv_obj_set_style_pad_all(_sizeBar, 4, 0);
+        lv_obj_set_style_pad_all(_sizeBar, 3, 0);
         lv_obj_set_flex_flow(_sizeBar, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(_sizeBar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(_sizeBar, 6, 0);
@@ -203,7 +204,7 @@ public:
         // Carousel toggle; the solid green pill dominated the strip).
         _addWalletBtn = lv_btn_create(_sizeBar);
         lv_obj_add_flag(_addWalletBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_obj_set_size(_addWalletBtn, LV_SIZE_CONTENT, 24);
+        lv_obj_set_size(_addWalletBtn, LV_SIZE_CONTENT, 20);
         lv_obj_align(_addWalletBtn, LV_ALIGN_RIGHT_MID, -6, 0);
         lv_obj_set_style_bg_opa(_addWalletBtn, LV_OPA_0, 0);
         lv_obj_set_style_border_width(_addWalletBtn, 0, 0);
@@ -749,12 +750,15 @@ private:
             // screen shimmer ("interference").
             lv_obj_t* imgObj = lv_img_create(cw.container);
             lv_img_set_src(imgObj, &cw.imgDsc);
-            lv_obj_align(imgObj, LV_ALIGN_CENTER, 0, 0);
+            // Centered within the ART AREA (cell minus the caption band).
+            lv_coord_t artH = cw_h - NFT_CAPTION_H;
+            lv_coord_t yOff = (artH > (lv_coord_t)ph) ? (lv_coord_t)((artH - ph) / 2) : 0;
+            lv_obj_align(imgObj, LV_ALIGN_TOP_MID, 0, yOff);
             lv_obj_clear_flag(imgObj, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
         } else {
             // No decoded image — show a coloured tile with a subtle grid icon
             lv_obj_t* placeholder = lv_obj_create(cw.container);
-            lv_obj_set_size(placeholder, cw_w, cw_h > 60 ? cw_h - 40 : cw_h / 2);
+            lv_obj_set_size(placeholder, cw_w, cw_h - NFT_CAPTION_H);
             lv_obj_align(placeholder, LV_ALIGN_TOP_MID, 0, 0);
             lv_obj_set_style_bg_color(placeholder, lv_color_hex(bgColor == NFT_CLR_GREY ? 0x2a2a2e : bgColor), 0);
             lv_obj_set_style_border_width(placeholder, 0, 0);
@@ -770,19 +774,18 @@ private:
             }
         }
 
-        // Collection name
-        if (cw_h > 30) {
-            cw.nameLbl = lv_label_create(cw.container);
-            lv_label_set_text(cw.nameLbl, item.name[0] ? item.name : item.collection);
-            lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_DOT);
-            lv_obj_set_width(cw.nameLbl, cw_w);
-            lv_obj_set_style_text_font(cw.nameLbl, &lv_font_montserrat_10, 0);
-            lv_obj_set_style_text_color(cw.nameLbl, lv_color_hex(NFT_CLR_TEXT), 0);
-            lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, cw_h > 50 ? -16 : 0);
-        }
+        // ── Caption band (dedicated dark strip UNDER the artwork): name on
+        // the left, floor on the right, SAME baseline row — readable always,
+        // never overlaid on the art.
+        cw.nameLbl = lv_label_create(cw.container);
+        lv_label_set_text(cw.nameLbl, item.name[0] ? item.name : item.collection);
+        lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(cw.nameLbl, (lv_coord_t)(cw_w - 60));   // leave room for the floor
+        lv_obj_set_style_text_font(cw.nameLbl, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(cw.nameLbl, lv_color_hex(NFT_CLR_TEXT), 0);
+        lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -2);
 
-        // Floor price
-        if (cw_h > 50 && item.floor_price_eth > 0) {
+        if (item.floor_price_eth > 0) {
             cw.floorLbl = lv_label_create(cw.container);
             char floorBuf[24];
             // "0.005 \u039E" — the Xi comes from the embedded 1-glyph font.
@@ -795,16 +798,16 @@ private:
             uint32_t priceColor = item.floor_price_eth >= 1.0f ? NFT_CLR_GOLD :
                                   item.floor_price_eth >= 0.1f ? NFT_CLR_BLUE  : NFT_CLR_GREEN;
             lv_obj_set_style_text_color(cw.floorLbl, lv_color_hex(priceColor), 0);
-            lv_obj_align(cw.floorLbl, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+            lv_obj_align(cw.floorLbl, LV_ALIGN_BOTTOM_RIGHT, 0, -2);   // same row as the name
         }
 
-        // Carousel dots (only if there are multiple NFTs in this cell)
+        // Carousel dots — bottom edge of the ART area, above the caption band
         if (cw.nftCount > 1 && cw_h > 40) {
             cw.dotRow = lv_obj_create(cw.container);
             int dots = min(cw.nftCount, 5);
             lv_coord_t dotRowW = (lv_coord_t)(dots * 10);
             lv_obj_set_size(cw.dotRow, dotRowW, 8);
-            lv_obj_align(cw.dotRow, LV_ALIGN_BOTTOM_MID, 0, 0);
+            lv_obj_align(cw.dotRow, LV_ALIGN_BOTTOM_MID, 0, -(NFT_CAPTION_H + 2));
             lv_obj_set_style_bg_opa(cw.dotRow, LV_OPA_0, 0);
             lv_obj_set_style_border_width(cw.dotRow, 0, 0);
             lv_obj_set_style_pad_all(cw.dotRow, 0, 0);
@@ -879,7 +882,7 @@ private:
 
     lv_obj_t* _makeSizeBtn(lv_obj_t* parent, const char* label) {
         lv_obj_t* btn = lv_btn_create(parent);
-        lv_obj_set_size(btn, 50, 26);
+        lv_obj_set_size(btn, 44, 20);
         lv_obj_set_style_bg_color(btn, lv_color_hex(0x141414), 0);
         lv_obj_set_style_border_color(btn, lv_color_hex(NFT_CLR_BORDER), 0);
         lv_obj_set_style_border_width(btn, 1, 0);
@@ -1006,7 +1009,7 @@ private:
     static void _cellInnerFor(int cls, int& wOut, int& hOut) {
         int sd = cls + 1;
         wOut = (480 - 4 - (sd - 1) * 4) / sd - 8;
-        hOut = (NFT_GRID_H - 4 - (sd - 1) * 4) / sd - 8;
+        hOut = (NFT_GRID_H - 4 - (sd - 1) * 4) / sd - 8 - NFT_CAPTION_H;   // artwork area above the caption band
     }
 
     // Whether item `idx` is entitled to keep/get a decoded slot for class

@@ -19,6 +19,7 @@ struct SharedHeaderRefs {
 };
 
 struct SharedFooterRefs {
+    lv_obj_t* nodeSepLabel  = nullptr;  // grey "|" between name and node count
     lv_obj_t* liveDot = nullptr;
     lv_obj_t* nodeNameLabel = nullptr;
     lv_obj_t* nodeCountLabel = nullptr;
@@ -148,11 +149,19 @@ inline SharedFooterRefs buildSharedFooter(lv_obj_t* parent, lv_event_cb_t onQrTa
     lv_obj_set_style_text_font(refs.nodeNameLabel, &lv_font_montserrat_12, 0);
     lv_obj_align_to(refs.nodeNameLabel, refs.liveDot, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
 
+    // Separator as its OWN grey label with symmetric 8 px gaps (baked into
+    // the count string it sat glued to the number and far from the name).
+    refs.nodeSepLabel = lv_label_create(bar);
+    lv_label_set_text(refs.nodeSepLabel, "|");
+    lv_obj_set_style_text_color(refs.nodeSepLabel, lv_color_hex(0x6e7280), 0);
+    lv_obj_set_style_text_font(refs.nodeSepLabel, &lv_font_montserrat_12, 0);
+
     refs.nodeCountLabel = lv_label_create(bar);
-    lv_label_set_text(refs.nodeCountLabel, "| 0 NODES");   // default
+    lv_label_set_text(refs.nodeCountLabel, "0 NODES");   // default
     lv_obj_set_style_text_color(refs.nodeCountLabel, lv_color_hex(0x3aff7a), 0);
     lv_obj_set_style_text_font(refs.nodeCountLabel, &lv_font_montserrat_12, 0);
-    lv_obj_align_to(refs.nodeCountLabel, refs.nodeNameLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+    lv_obj_align_to(refs.nodeSepLabel,   refs.nodeNameLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+    lv_obj_align_to(refs.nodeCountLabel, refs.nodeSepLabel,  LV_ALIGN_OUT_RIGHT_MID, 8, 0);
 
     // Gear icon — tap opens the config popup (shows QR code + display preferences).
     refs.qrIcon = lv_label_create(bar);
@@ -228,13 +237,15 @@ inline void refreshSharedFooter(SharedFooterRefs& refs, const String& nodeName, 
     if (refs.nodeNameLabel)  lv_label_set_text(refs.nodeNameLabel, nodeName.c_str());
     if (refs.nodeCountLabel) {
         char countBuf[24];
-        snprintf(countBuf, sizeof(countBuf), "| %d NODES", onlineNodeCount);
+        snprintf(countBuf, sizeof(countBuf), "%d NODES", onlineNodeCount);
         lv_label_set_text(refs.nodeCountLabel, countBuf);
-        // Re-align to the name's CURRENT width — the build-time align happened
-        // while the name was empty, which made the two labels overlap.
-        if (refs.nodeNameLabel) {
+        // Re-align the [name | count] chain to the name's CURRENT width — the
+        // build-time align happened while the name was empty.
+        if (refs.nodeNameLabel && refs.nodeSepLabel) {
             lv_obj_update_layout(refs.nodeNameLabel);
-            lv_obj_align_to(refs.nodeCountLabel, refs.nodeNameLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+            lv_obj_align_to(refs.nodeSepLabel, refs.nodeNameLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+            lv_obj_update_layout(refs.nodeSepLabel);
+            lv_obj_align_to(refs.nodeCountLabel, refs.nodeSepLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
         }
     }
 }

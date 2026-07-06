@@ -38,41 +38,34 @@ public:
         lv_obj_set_style_pad_all(topRow, 0, 0);
         lv_obj_clear_flag(topRow, LV_OBJ_FLAG_SCROLLABLE);
 
+        // Screen title FIRST and big, the live number to its right, and the
+        // range selector as plain white text + dropdown glyph (same treatment
+        // as the SINCE/RATE pickers) hugging the right edge.
+        lv_obj_t* titleLabel = lv_label_create(topRow);
+        lv_label_set_text(titleLabel, "US TOTAL DEBT");
+        lv_obj_set_style_text_color(titleLabel, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_20, 0);
+        lv_obj_align(titleLabel, LV_ALIGN_LEFT_MID, 0, 0);
+
         totalDebtLabel = lv_label_create(topRow);
         lv_label_set_text(totalDebtLabel, "--");
         lv_obj_set_style_text_color(totalDebtLabel, lv_color_hex(0xff4d4d), 0);
         lv_obj_set_style_text_font(totalDebtLabel, &lv_font_montserrat_32, 0);
-        lv_obj_align(totalDebtLabel, LV_ALIGN_LEFT_MID, 0, 0);
+        // The title text is static, so a one-shot align_to is safe here.
+        lv_obj_align_to(totalDebtLabel, titleLabel, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
 
-        lv_obj_t* rightCol = lv_obj_create(topRow);
-        lv_obj_set_size(rightCol, 140, LV_SIZE_CONTENT);
-        lv_obj_set_style_bg_opa(rightCol, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(rightCol, 0, 0);
-        lv_obj_align(rightCol, LV_ALIGN_RIGHT_MID, 0, 0);
-        lv_obj_set_flex_flow(rightCol, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(rightCol, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-
-        lv_obj_t* titleLabel = lv_label_create(rightCol);
-        lv_label_set_text(titleLabel, "US TOTAL DEBT");
-        lv_obj_set_style_text_color(titleLabel, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_10, 0);
-
-        rangeButton = lv_btn_create(rightCol);
-        lv_obj_set_style_bg_color(rangeButton, lv_color_hex(0x262626), 0);
-        lv_obj_set_style_border_color(rangeButton, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_border_width(rangeButton, 1, 0);
+        rangeButton = lv_btn_create(topRow);
+        lv_obj_set_style_bg_opa(rangeButton, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(rangeButton, 0, 0);
+        lv_obj_set_style_shadow_width(rangeButton, 0, 0);
+        lv_obj_set_style_pad_all(rangeButton, 2, 0);
+        lv_obj_set_ext_click_area(rangeButton, 8);
+        lv_obj_align(rangeButton, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_obj_add_event_cb(rangeButton, onRangeBtnTapped, LV_EVENT_CLICKED, userData);
         rangeButtonLabel = lv_label_create(rangeButton);
-        lv_obj_set_style_text_font(rangeButtonLabel, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(rangeButtonLabel, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(rangeButtonLabel, lv_color_hex(0xe8e8e8), 0);
         lv_label_set_text(rangeButtonLabel, "LAST 50Y \xEF\x81\xB8");
-
-        // Chart heading, so the graph itself is clearly labelled (in addition to
-        // the top-right "US TOTAL DEBT" selector title).
-        chartTitle = lv_label_create(body);
-        lv_label_set_text(chartTitle, "US TOTAL DEBT (USD)");
-        lv_obj_set_style_text_color(chartTitle, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_text_font(chartTitle, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_pad_left(chartTitle, 46, 0);   // over the plot, not the Y labels
 
         // IMPORTANT: LVGL 8 draws PRIMARY_Y tick labels OUTSIDE the chart's
         // left edge (draw_y_ticks uses x_ofs = obj->coords.x1, i.e. the widget
@@ -231,7 +224,6 @@ private:
 
     lv_obj_t* totalDebtLabel = nullptr;
     lv_obj_t* chart = nullptr;
-    lv_obj_t* chartTitle = nullptr;
     lv_obj_t* xYear[X_LABELS] = { nullptr };
     lv_chart_series_t* debtSeries = nullptr;
 
