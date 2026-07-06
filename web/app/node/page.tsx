@@ -306,35 +306,72 @@ export default function NodeProductPage() {
 const DEVICE_RENDER_COUNT = 7
 const DEVICE_RENDER_MS    = 2600
 
+// Approx. rectangle of the device SCREEN within each render (all 7 renders share
+// the same device pose, so a fixed box works). Grab & drag L/R inside it to
+// change the screen — feels like swiping the real touch panel.
+const SCREEN_ZONE = { left: '27%', top: '15%', width: '53%', height: '58%' }
+
 function DeviceRenderCarousel() {
   const [idx, setIdx] = useState(0)
   const N = DEVICE_RENDER_COUNT
+  const autoRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const dragRef = useRef<{ x: number; active: boolean }>({ x: 0, active: false })
 
-  useEffect(() => {
-    const t = setInterval(() => setIdx(i => (i + 1) % N), DEVICE_RENDER_MS)
-    return () => clearInterval(t)
-  }, [N])
+  const stopAuto  = () => { if (autoRef.current) { clearInterval(autoRef.current); autoRef.current = null } }
+  const startAuto = () => { stopAuto(); autoRef.current = setInterval(() => setIdx(i => (i + 1) % N), DEVICE_RENDER_MS) }
+
+  useEffect(() => { startAuto(); return stopAuto }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const go = (dir: number) => setIdx(i => (i + dir + N) % N)
+
+  const onDown = (e: React.PointerEvent) => {
+    dragRef.current = { x: e.clientX, active: true }
+    stopAuto()
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  }
+  const onUp = (e: React.PointerEvent) => {
+    if (!dragRef.current.active) return
+    const dx = e.clientX - dragRef.current.x
+    dragRef.current.active = false
+    if (dx <= -28) go(1)          // swipe left  → next screen
+    else if (dx >= 28) go(-1)     // swipe right → previous screen
+    startAuto()
+  }
 
   return (
     <div style={{ width: '100%', maxWidth: 420 }}>
-      <div style={{ position: 'relative', width: '100%', aspectRatio: '1000 / 981', overflow: 'hidden', borderRadius: 18 }}>
-        <div style={{
-          display: 'flex', width: `${N * 100}%`, height: '100%',
-          transform: `translateX(-${idx * (100 / N)}%)`,
-          transition: 'transform 620ms cubic-bezier(.4,0,.2,1)',
-        }}>
-          {Array.from({ length: N }).map((_, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={i} src={`/device-renders/${i + 1}.webp`} alt="TurboUSD Node screen"
-              loading={i === 0 ? 'eager' : 'lazy'}
-              style={{ width: `${100 / N}%`, height: '100%', objectFit: 'contain', display: 'block' }} />
-          ))}
-        </div>
+      {/* The DEVICE stays put; only the SCREEN changes — the 7 renders are
+          identical except for the panel, so we crossfade the whole image and
+          only the screen visibly changes. */}
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '1000 / 981' }}>
+        {Array.from({ length: N }).map((_, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={i} src={`/device-renders/${i + 1}.webp`} alt="TurboUSD Node screen"
+            loading={i === 0 ? 'eager' : 'lazy'} draggable={false}
+            style={{
+              position: 'absolute', inset: 0, width: '100%', height: '100%',
+              objectFit: 'contain', borderRadius: 18,
+              opacity: i === idx ? 1 : 0, transition: 'opacity 420ms ease',
+              userSelect: 'none', pointerEvents: 'none',
+            }} />
+        ))}
+        {/* Swipe zone over the screen (works with mouse AND touch via Pointer
+            Events; touch-action:none stops the page from scrolling mid-swipe). */}
+        <div
+          onPointerDown={onDown}
+          onPointerUp={onUp}
+          onPointerCancel={() => { dragRef.current.active = false; startAuto() }}
+          style={{
+            position: 'absolute', ...SCREEN_ZONE,
+            cursor: 'grab', touchAction: 'none', borderRadius: '5%',
+          }}
+        />
       </div>
       {/* Position dots */}
       <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 14 }}>
         {Array.from({ length: N }).map((_, i) => (
-          <button key={i} aria-label={`Screen ${i + 1}`} onClick={() => setIdx(i)}
+          <button key={i} aria-label={`Screen ${i + 1}`}
+            onClick={() => { stopAuto(); setIdx(i); startAuto() }}
             style={{
               width: 7, height: 7, borderRadius: '50%', border: 'none', padding: 0, cursor: 'pointer',
               background: i === idx ? C.green : '#3a3a3a', transition: 'background 250ms ease',
