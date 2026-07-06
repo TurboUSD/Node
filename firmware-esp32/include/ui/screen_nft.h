@@ -364,6 +364,7 @@ private:
         lv_obj_t* container = nullptr;
         lv_obj_t* img       = nullptr;   // lv_canvas or lv_img for decoded image
         lv_img_dsc_t imgDsc = {};        // PER-CELL: a shared static dsc made every cell show the same image
+        const uint8_t* shownPx = nullptr; // bitmap currently displayed (repaint only on change)
         lv_obj_t* nameLbl   = nullptr;
         lv_obj_t* floorLbl  = nullptr;
         lv_obj_t* dotRow    = nullptr;   // carousel position dots
@@ -372,6 +373,13 @@ private:
         int       nftCurrent= 0;        // which one is displayed right now
     } _cells[9];
     int _cellCount = 0;
+
+    // One collection group in the (floor-sorted) cache: contiguous run.
+    struct NftGrp {
+        int  start;
+        int  count;
+        char slug[64];
+    };
 
     // Cached NFT data (persists until expired or wallet changes)
     std::vector<NftItem> _nftCache;
@@ -621,10 +629,20 @@ private:
     }
 
     void _pollPending() {
-        // Fresh decoded images → repaint the cells showing them.
+        // Fresh decoded images → repaint ONLY the cells whose artwork changed
+        // (a full 9-cell repaint per decoded image made the screen blink
+        // randomly through the whole loading phase).
         if (_imgDirty) {
             _imgDirty = false;
-            for (int i = 0; i < _cellCount; i++) _refreshCell(i);
+            int gCls = _gridClass();
+            for (int i = 0; i < _cellCount; i++) {
+                CellWidgets& cw = _cells[i];
+                if (!cw.container || cw.nftCount <= 0) continue;
+                int idx = cw.nftStart + (cw.nftCurrent % cw.nftCount);
+                if (idx < 0 || idx >= (int)_nftCache.size()) continue;
+                const uint8_t* want = _nftCache[idx].px[gCls];
+                if (want && want != cw.shownPx) _refreshCell(i);
+            }
         }
 
         // Deferred edit-mode rebuild (reorder/delete/gear ran inside an event
@@ -816,17 +834,23 @@ private:
         lv_coord_t cellH = (lv_coord_t)((NFT_GRID_H - 4 - (side - 1) * 4) / side);
 
         _refreshListBufs();   // pick up manual order + hidden list from NVS
+        _recomputeEntitled();
         int total = (int)_nftCache.size();
         int gStart[9], gCount[9], groups = 0;
         if (n == 1) {
             gStart[0] = 0; gCount[0] = total; groups = 1;
         } else {
-            NftGrp g[NFT_MAX_COLLECTIONS];
-            int gn = _buildGroups(g, NFT_MAX_COLLECTIONS, n);
-            for (int k = 0; k < gn && groups < n; k++) {
-                gStart[groups] = g[k].start;
-                gCount[groups] = g[k].count;
-                groups++;
+            NftGrp* g = (NftGrp*)heap_caps_malloc(sizeof(NftGrp) * NFT_MAX_COLLECTIONS,
+                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!g) g = (NftGrp*)malloc(sizeof(NftGrp) * NFT_MAX_COLLECTIONS);
+            if (g) {
+                int gn = _buildGroups(g, NFT_MAX_COLLECTIONS, n);
+                for (int k = 0; k < gn && groups < n; k++) {
+                    gStart[groups] = g[k].start;
+                    gCount[groups] = g[k].count;
+                    groups++;
+                }
+                free(g);
             }
         }
 
@@ -916,6 +940,7 @@ private:
             }
         }
 
+        cw.shownPx = px;   // may be a stand-in from another grid class, or null
         if (px && pw > 0) {
             // Decoded image available (RGB565 in PSRAM). One dsc PER CELL —
             // a shared static one made every cell display the same image.
@@ -1053,28 +1078,38 @@ private:
 
     // ── Edit-mode actions (persisted to NVS; visual rebuild is DEFERRED via
     // _rebuildReq — these run inside the tapped button's own event) ──
+    NftGrp* _allocGroups() {
+        NftGrp* g = (NftGrp*)heap_caps_malloc(sizeof(NftGrp) * NFT_MAX_COLLECTIONS,
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        return g ? g : (NftGrp*)malloc(sizeof(NftGrp) * NFT_MAX_COLLECTIONS);
+    }
+
     void _moveCollection(int cellIdx, int dir) {
-        NftGrp g[NFT_MAX_COLLECTIONS];
+        NftGrp* g = _allocGroups();
+        if (!g) return;
         _refreshListBufs();
         int n = _buildGroups(g, NFT_MAX_COLLECTIONS, _classCells(_gridClass()));
         int to = cellIdx + dir;
-        if (cellIdx < 0 || cellIdx >= n || to < 0 || to >= n) return;
+        if (cellIdx < 0 || cellIdx >= n || to < 0 || to >= n) { free(g); return; }
         NftGrp t = g[cellIdx]; g[cellIdx] = g[to]; g[to] = t;
         String ord;
         for (int k = 0; k < n; k++) { if (k) ord += ','; ord += g[k].slug; }
+        free(g);
         storage.setNftCollOrder(ord);
         storage.setNftListsDirty(true);   // sync to the web on next heartbeat
         _rebuildReq = true;
     }
 
     void _deleteCollection(int cellIdx) {
-        NftGrp g[NFT_MAX_COLLECTIONS];
+        NftGrp* g = _allocGroups();
+        if (!g) return;
         _refreshListBufs();
         int n = _buildGroups(g, NFT_MAX_COLLECTIONS, _classCells(_gridClass()));
-        if (cellIdx < 0 || cellIdx >= n) return;
+        if (cellIdx < 0 || cellIdx >= n) { free(g); return; }
         String hid = storage.getNftHidden();
         if (hid.length()) hid += ',';
         hid += g[cellIdx].slug;
+        free(g);
         storage.setNftHidden(hid);
         storage.setNftListsDirty(true);   // sync to the web on next heartbeat
         // The freed cell auto-fills with the NEXT collection by floor on the
@@ -1302,13 +1337,6 @@ private:
         hOut = (NFT_GRID_H - 4 - (sd - 1) * 4) / sd - 8 - NFT_CAPTION_H;   // artwork area above the caption band
     }
 
-    // One collection group in the (floor-sorted) cache: contiguous run.
-    struct NftGrp {
-        int  start;
-        int  count;
-        char slug[64];
-    };
-
     static bool _listHas(const char* csv, const char* slug) {
         const char* p = csv;
         size_t sl = strlen(slug);
@@ -1346,25 +1374,26 @@ private:
             i = j;
         }
         if (_ordBuf[0]) {
-            NftGrp tmp[NFT_MAX_COLLECTIONS];
-            bool used[NFT_MAX_COLLECTIONS] = {};
-            int m = 0;
+            // In-place stable reorder (NO temp array: these run on the LVGL
+            // task's 8 KB stack — stack-allocating 2× NftGrp[30] here was a
+            // stack overflow that corrupted whatever ran next, crashing in
+            // innocent NVS reads with wild addresses).
+            int placed = 0;
             const char* p = _ordBuf;
-            while (*p && m < n) {
+            while (*p && placed < n) {
                 const char* c = strchr(p, ',');
                 size_t len = c ? (size_t)(c - p) : strlen(p);
-                for (int k = 0; k < n; k++) {
-                    if (!used[k] && strlen(g[k].slug) == len && strncmp(g[k].slug, p, len) == 0) {
-                        tmp[m++] = g[k];
-                        used[k] = true;
+                for (int k = placed; k < n; k++) {
+                    if (strlen(g[k].slug) == len && strncmp(g[k].slug, p, len) == 0) {
+                        NftGrp moved = g[k];
+                        for (int w = k; w > placed; w--) g[w] = g[w - 1];
+                        g[placed++] = moved;
                         break;
                     }
                 }
                 if (!c) break;
                 p = c + 1;
             }
-            for (int k = 0; k < n; k++) if (!used[k]) tmp[m++] = g[k];
-            memcpy(g, tmp, sizeof(NftGrp) * n);
         }
 
         // Promote pinned groups into the visible window (manual picks must
@@ -1405,14 +1434,31 @@ private:
     // `cls`: everything for the CURRENT grid; for other grids only the cell
     // covers (first item of each collection group, up to that grid's cell
     // count) — those are what make grid switching feel instant.
+    // Precomputed per-item entitlement bits (bit c = item is a visible cell
+    // cover for grid class c). Refreshed by _recomputeEntitled() on every
+    // rebuild; read lock-free from the img worker and the poll timer.
+    uint8_t _entMask[NFT_MAX_ITEMS] = {};
+
+    void _recomputeEntitled() {
+        memset(_entMask, 0, sizeof(_entMask));
+        // Heap, not stack: this runs inside deep LVGL event stacks.
+        NftGrp* g = (NftGrp*)heap_caps_malloc(sizeof(NftGrp) * NFT_MAX_COLLECTIONS,
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!g) g = (NftGrp*)malloc(sizeof(NftGrp) * NFT_MAX_COLLECTIONS);
+        if (!g) return;
+        for (int c = 0; c < 3; c++) {
+            int cells = _classCells(c);
+            int n = _buildGroups(g, NFT_MAX_COLLECTIONS, cells);
+            for (int k = 0; k < n && k < cells; k++)
+                if (g[k].start >= 0 && g[k].start < NFT_MAX_ITEMS)
+                    _entMask[g[k].start] |= (uint8_t)(1u << c);
+        }
+        free(g);
+    }
+
     bool _entitledSlot(int cls, int idx) {
         if (cls == _gridClass()) return true;
-        NftGrp g[NFT_MAX_COLLECTIONS];
-        int cells = _classCells(cls);
-        int n = _buildGroups(g, NFT_MAX_COLLECTIONS, cells);
-        for (int k = 0; k < n && k < cells; k++)
-            if (g[k].start == idx) return true;   // a visible cell's cover
-        return false;
+        return idx >= 0 && idx < NFT_MAX_ITEMS && (_entMask[idx] & (1u << cls));
     }
 
     void _startImageFetch() {
@@ -1427,7 +1473,7 @@ private:
                 if (!it.px[c] && !it.tried[c] && _entitledSlot(c, i)) { anyPending = true; break; }
         }
         if (!anyPending) return;
-        xTaskCreatePinnedToCore(_bgImgFetchFn, "nft_img", 12288, nullptr, 1, (TaskHandle_t*)&_imgTask, 0);
+        xTaskCreatePinnedToCore(_bgImgFetchFn, "nft_img", 16384, nullptr, 1, (TaskHandle_t*)&_imgTask, 0);
     }
 
     static void _bgImgFetchFn(void* /*pvArg*/) {
