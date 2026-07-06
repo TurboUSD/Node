@@ -9,6 +9,16 @@
 #include "AHT20.h"
 #include "board_pins.h"
 
+// Grove I2C temp/humidity probe. DEFAULT OFF: the base D1/D1L have NO sensor, and
+// probing a floating/empty Grove bus was still able to HANG setup() on some units
+// (Wire never returning) → loop() never ran → NO UART heartbeat, NO command
+// parsing, NO alarm, while the pre-I2C boot beep still played (exactly the
+// "1 beep but ping FAILED / no heartbeat" symptom in the /logs capture). Off = the
+// buzzer/alarm link is guaranteed alive. Set to 1 only if a Grove AHT20 is fitted.
+#ifndef TRY_GROVE_SENSOR
+#define TRY_GROVE_SENSOR 0
+#endif
+
 enum class Command : uint8_t {
     PLAY_ALARM   = 0x01,
     STOP_ALARM   = 0x02,
@@ -211,6 +221,7 @@ void setup() {
     // command parsing, no alarm. Fix: weak internal pull-ups so the bus
     // idles high, then a single probe; if nothing ACKs at 0x38, skip the
     // sensor entirely.
+#if TRY_GROVE_SENSOR
     pinMode(GROVE_I2C_SDA, INPUT_PULLUP);
     pinMode(GROVE_I2C_SCL, INPUT_PULLUP);
     delay(2);
@@ -224,6 +235,11 @@ void setup() {
         sensorPresent = (Wire.endTransmission() == 0);
         if (sensorPresent) aht.begin();
     }
+#else
+    // Sensor probe skipped (see TRY_GROVE_SENSOR): guarantees setup() finishes
+    // and loop() runs, so the buzzer/alarm link and heartbeat are always alive.
+    sensorPresent = false;
+#endif
 }
 
 void loop() {

@@ -88,13 +88,13 @@
 // See firmware-rp2040/PROTOCOL.md for the wire format.
 // ---------------------------------------------------------------------
 #define RP2040_UART_BAUD   115200
-// Verified against Seeed SenseCAP Indicator pinout (ESPHome device reference):
-// ESP32-S3 "UART to RP2040": GPIO43 = TX (to RP GP17/RX), GPIO44 = RX (from RP GP16/TX).
-// VERIFIED against ril3y/sensecap-indicator-d1l's reverse-engineered wiring
-// (their UART soundboard WORKS on this hardware). GPIO 19/20 — which several
-// third-party docs wrongly list — are the S3's native USB pads (D-/D+): the
-// web flasher and the serial console live there, and weeks of "dead link"
-// were us talking UART into the USB connector.
+// ESP32-S3 "UART to RP2040": GPIO43 = TX (to RP GP17/RX), GPIO44 = RX (from RP
+// GP16/TX). HARDWARE-VERIFIED (ril3y/sensecap-indicator-d1l) and reconfirmed by
+// the /logs capture: tx_pad=1 AND rx_pad=1 means the RP2040's TX really reaches
+// GP44 — i.e. the link IS on 43/44. GPIO 19/20 that some third-party docs list
+// are the S3's native USB pads (D-/D+), NOT the RP2040 link — don't use them.
+// The "no heartbeat / ping no ACK" symptom is the RP2040's loop() not running
+// (a Grove-I2C hang on sensorless units), NOT the pins — see firmware-rp2040.
 #define RP2040_UART_TX_PIN 43
 #define RP2040_UART_RX_PIN 44
 

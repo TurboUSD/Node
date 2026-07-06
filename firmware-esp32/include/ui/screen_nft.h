@@ -509,6 +509,7 @@ private:
             // NodeMonkes and friends; SVG/webp fall back to the wsrv proxy).
             if (strcmp(e.chain, "ord") == 0) {
                 NftItem& oi = _pendingResult.items[_pendingResult.count++];
+                oi = NftItem{};   // reset the reused slot before populating it
                 snprintf(oi.name, sizeof(oi.name), "Ordinal");   // fallback
                 snprintf(oi.collection, sizeof(oi.collection), "Ordinals");
                 snprintf(oi.slug, sizeof(oi.slug), "ordinals");
@@ -611,11 +612,15 @@ private:
             }
 
             NftItem& item2 = _pendingResult.items[_pendingResult.count++];
+            item2 = NftItem{};   // reset the reused slot — otherwise a slot that
+                                 // previously held an Ordinal leaked floor_btc=true
+                                 // (₿ on an ETH collection) and its bg_color.
             strncpy(item2.name,       name,                        sizeof(item2.name)       - 1);
             strncpy(item2.slug,       slug,                        sizeof(item2.slug)       - 1);
             strncpy(item2.collection, colName[0] ? colName : slug, sizeof(item2.collection) - 1);
             strncpy(item2.image_url,  image_url,                   sizeof(item2.image_url)  - 1);
             item2.floor_price_eth = fp;
+            item2.floor_btc       = false;  // EVM/OpenSea collections are ETH-denominated
             item2.pinned          = true;   // manual pick → always earns a grid cell
 
             delay(NFT_RATELIMIT_DELAY_MS);
@@ -1040,6 +1045,21 @@ private:
                 }
                 free(g);
             }
+        }
+
+        // Diagnostic (visible at /logs): the exact grid group order + each
+        // collection's floor in USD and its currency, so a "wrong cell / repeat"
+        // shows precisely which group landed where and why.
+        {
+            String dbg = "NFT grid: cache=" + String(total) + " groups=" + String(groups) + " | ";
+            for (int k = 0; k < groups; k++) {
+                const NftItem& gi = _nftCache[gStart[k]];
+                dbg += String(k) + ":" + gi.slug + "(x" + String(gCount[k])
+                     + ",usd=" + String((long)_floorUsd(gi))
+                     + (gi.floor_btc ? ",BTC" : ",ETH")
+                     + (gi.pinned ? ",pin" : "") + ") ";
+            }
+            Log.println(dbg);
         }
 
         for (int ci = 0; ci < groups; ci++)
@@ -2050,6 +2070,7 @@ private:
             if (fp <= 0.0f) continue;
 
             NftItem& item = _pendingResult.items[_pendingResult.count++];
+            item = NftItem{};   // reset reused slot (no leaked floor_btc/bg_color)
             strncpy(item.name,       rawNfts[ri].name,      sizeof(item.name)-1);
             strncpy(item.slug,       rawNfts[ri].slug,      sizeof(item.slug)-1);
             strncpy(item.collection, colName[0] ? colName : rawNfts[ri].slug, sizeof(item.collection)-1);

@@ -97,8 +97,14 @@ public:
             Rp2040Command::PLAY_ALARM_V4,
             Rp2040Command::PLAY_ALARM_V5,
         };
-        Log.printf("RP-link: playAlarm(vol=%u) → cmd=0x%02X uart_ok=%d\n",
+        Log.printf("RP-link: playAlarm(vol=%u) → cmd=0x%02X (+legacy 0x01) uart_ok=%d\n",
                       volume, (unsigned)VOL_CMD[volume - 1], (int)_ok);
+        // Send the LEGACY PLAY_ALARM (0x01) FIRST, then the volume-aware command.
+        // An OLD RP2040 firmware (no 0x11–0x15 support, no heartbeat/ACK — exactly
+        // what the /logs "ping FAILED / no heartbeat" symptom shows) only knows
+        // 0x01, so this makes it buzz anyway. New firmware runs 0x01 (vol 2) then
+        // the Vn command overrides it, so the requested volume still wins.
+        sendCommand(Rp2040Command::PLAY_ALARM);
         sendCommand(VOL_CMD[volume - 1]);
     }
     void stopAlarm()  { sendCommand(Rp2040Command::STOP_ALARM); }
