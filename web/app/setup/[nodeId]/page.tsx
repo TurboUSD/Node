@@ -57,6 +57,7 @@ interface NodeConfig {
   nft_grid_size?:         1 | 4 | 9
   nft_carousel_enabled?:  boolean
   nft_show_data?:         boolean
+  ticker_cols?:           1 | 2
   nft_coll_order?:        string | null
   nft_coll_hidden?:       string | null
   nft_collections?:       { slug: string; name: string; floor: number }[] | null
@@ -268,6 +269,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         nft_grid_size:         node.nft_grid_size,
         nft_carousel_enabled:  node.nft_carousel_enabled,
         nft_show_data:         node.nft_show_data ?? true,
+        ticker_cols:           node.ticker_cols ?? 1,
         nft_coll_order:        node.nft_coll_order ?? '',
         nft_coll_hidden:       node.nft_coll_hidden ?? '',
         screen_hidden:         node.screen_hidden ?? '',
@@ -551,6 +553,10 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
 
           {/* Display settings apply to both modes */}
           <div style={{ marginTop: 4 }}>
+            <ToggleRow label="Ticker columns" value={String(node.ticker_cols ?? 1)}
+              options={[['1', '1 column'], ['2', '2 columns']]}
+              onChange={v => setNode({ ...node, ticker_cols: Number(v) as 1 | 2 })}
+            />
             <ToggleRow label="Grid size" value={String(node.nft_grid_size ?? 9)}
               options={[['1', '1×1'], ['4', '2×2'], ['9', '3×3']]}
               onChange={v => setNode({ ...node, nft_grid_size: Number(v) as 1 | 4 | 9 })}

@@ -34,6 +34,7 @@ interface NodeRow {
   total_tusd_earned: number
   blocks_won:        number
   windows_online:    number
+  uptime_seconds:    number | null
   uptime_pct:        number
   created_at:        string
   last_seen_at:      string | null
@@ -84,6 +85,15 @@ function timeSince(iso: string): string {
 
 // windows_online = number of 60-min mining windows the node was online for →
 // approximate real online time ("14h", "3d 2h").
+// Device-reported uptime (seconds since boot) → "22m" / "8h" / "3d 4h" —
+// the SAME figure the device's Network screen shows, so they always agree.
+function fmtUptimeSecs(secs: number): string {
+  if (secs < 60) return `${secs}s`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
+  return `${Math.floor(secs / 86400)}d ${Math.floor((secs % 86400) / 3600)}h`
+}
+
 function fmtOnlineHours(windows: number): string {
   if (windows < 24) return `${windows}h`
   const d = Math.floor(windows / 24), h = windows % 24
@@ -537,8 +547,8 @@ function UnverifiedBadge({ size = 10 }: { size?: number }) {
     >
       ✓
       <span style={{
-        position: 'absolute', left: '-10%', right: '-10%', top: '48%',
-        borderTop: '1.5px solid #6e7280', transform: 'rotate(-45deg)',
+        position: 'absolute', left: '-15%', right: '-15%', top: '48%',
+        borderTop: '2px solid #e5484d', transform: 'rotate(45deg)',
       }} />
     </span>
   )
@@ -818,12 +828,12 @@ function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void 
         {/* Row 2: stats */}
         <div style={{ display: 'flex', gap: 14, marginTop: 5, flexWrap: 'wrap' as const }}>
           <StatChip label="Since" value={firstOnline} />
-          {node.windows_online > 0 && (
-            <StatChip label="Online" value={fmtOnlineHours(node.windows_online)} />
+          {(node.uptime_seconds ?? 0) > 0 && (
+            <StatChip label="Uptime" value={fmtUptimeSecs(node.uptime_seconds!)} />
           )}
           <StatChip label="Blocks" value={String(node.blocks_won)} color={node.blocks_won > 0 ? C.green : undefined} />
           <StatChip label="Earned" value={`₸${node.total_tusd_earned.toFixed(1)}`} color={node.total_tusd_earned > 0 ? C.green : undefined} />
-          {node.uptime_pct > 0 && (
+          {false && (
             <StatChip label="Uptime"
               value={`${node.uptime_pct}%`}
               color={node.uptime_pct >= 90 ? C.green : node.uptime_pct >= 60 ? C.yellow : C.muted}
@@ -984,7 +994,9 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
         <div style={s.detailGrid}>
           <DetailStat label="Total earned" value={`₸${node.total_tusd_earned.toFixed(4)}`} color={C.green}  />
           <DetailStat label="Blocks won"   value={String(node.blocks_won)}                 color={C.blue}   />
-          <DetailStat label="Uptime"       value={`${node.uptime_pct}%`}               color={uptimeColor} />
+          <DetailStat label="Uptime"
+            value={(node.uptime_seconds ?? 0) > 0 ? fmtUptimeSecs(node.uptime_seconds!) : '—'}
+            color={C.green} />
           <DetailStat label="Since"        value={new Date(node.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} color={C.yellow} />
         </div>
 
