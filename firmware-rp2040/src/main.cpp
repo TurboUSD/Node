@@ -188,11 +188,11 @@ void setup() {
     // Boot self-test: FOUR slow beeps, factory drive (plain analogWrite 127,
     // default 1 kHz PWM). Beeps BEFORE any UART/I2C init so a hung peripheral
     // can never silence them.
-    //   • FOUR well-separated beeps = THIS firmware generation (UART hello
-    //     sender + RX-blip diagnostic). Fewer = an older UF2 is still
-    //     flashed. The old 3×120 ms marker blurred into "two" by ear.
+    //   • FIVE well-separated beeps = THIS generation (I2C-hang fix: the
+    //     4-beep build could freeze forever in Wire on sensorless units).
+    //     FOUR beeps = the frozen-loop build. Fewer = even older.
     //   • No beep at power-on → buzzer pin/drive problem.
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         analogWrite(BUZZER_PIN, 127);     // EXACTLY factory beep_on()
         delay(150);
         analogWrite(BUZZER_PIN, 0);

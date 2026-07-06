@@ -69,7 +69,8 @@ static inline uint8_t* _alloc(size_t n) {
 // returned via outW/outH. Does NOT free `body`. NULL on failure.
 static uint8_t* _decodeScale(const uint8_t* body, size_t len,
                              int maxW, int maxH, const char* tag,
-                             uint16_t* outWp, uint16_t* outHp) {
+                             uint16_t* outWp, uint16_t* outHp,
+                             uint32_t bgColor) {
     unsigned char* rgba = nullptr;
     unsigned iw = 0, ih = 0;
     bool rgbaFromLvMem = false;
@@ -138,14 +139,18 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
         for (int x = 0; x < outW; x++) {
             unsigned sx = (unsigned)((uint64_t)x * iw / outW);
             const unsigned char* sp = &rgba[(sy * iw + sx) * 4];
-            // Composite transparency onto BLACK (the gallery is dark). Many
-            // on-chain PNGs (e.g. NodeMonkes) have a transparent background
-            // with white RGB underneath — ignoring alpha rendered them on a
-            // glaring white sheet.
-            unsigned a = sp[3];
-            lv_color_t c = lv_color_make((uint8_t)((sp[0] * a) / 255),
-                                         (uint8_t)((sp[1] * a) / 255),
-                                         (uint8_t)((sp[2] * a) / 255));
+            // Composite transparency onto bgColor (per-image — e.g. a
+            // NodeMonke's Background trait orange; default black for the dark
+            // gallery). Ignoring alpha used to render transparent-background
+            // on-chain PNGs on a glaring white sheet.
+            unsigned a  = sp[3];
+            unsigned ia = 255 - a;
+            uint8_t br = (uint8_t)((bgColor >> 16) & 0xFF);
+            uint8_t bgc = (uint8_t)((bgColor >> 8) & 0xFF);
+            uint8_t bb = (uint8_t)(bgColor & 0xFF);
+            lv_color_t c = lv_color_make((uint8_t)((sp[0] * a + br  * ia) / 255),
+                                         (uint8_t)((sp[1] * a + bgc * ia) / 255),
+                                         (uint8_t)((sp[2] * a + bb  * ia) / 255));
             px[(y * outW + x) * 2 + 0] = c.full & 0xFF;
             px[(y * outW + x) * 2 + 1] = c.full >> 8;
         }
@@ -161,7 +166,8 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
 // produce an outW×outH RGB565 bitmap. `tag` is only for serial logs.
 static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
                             const char* tag, const char* cacheKey = nullptr,
-                            uint16_t* outWp = nullptr, uint16_t* outHp = nullptr) {
+                            uint16_t* outWp = nullptr, uint16_t* outHp = nullptr,
+                            uint32_t bgColor = 0x000000) {
     uint8_t* body    = nullptr;
     size_t   len     = 0;
     bool     fromDisk = false;
@@ -213,7 +219,7 @@ static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
         Serial.printf("img[%s] %u bytes, magic %02X%02X\n", tag, (unsigned)len, body[0], body[1]);
     }
 
-    uint8_t* px = _decodeScale(body, len, maxW, maxH, tag, outWp, outHp);
+    uint8_t* px = _decodeScale(body, len, maxW, maxH, tag, outWp, outHp, bgColor);
     if (px && cacheKey && !fromDisk)  diskcache::save("img", cacheKey, body, len);
     if (!px && cacheKey && fromDisk)  diskcache::remove("img", cacheKey);   // corrupt/stale entry
     free(body);

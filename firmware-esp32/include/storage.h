@@ -168,6 +168,10 @@ public:
     bool   getNftCarousel()             { return prefs.getBool(NVS_KEY_NFT_CAROUSEL, true); }
     void   setNftCarousel(bool on)      { prefs.putBool(NVS_KEY_NFT_CAROUSEL, on); }
 
+    // Ticker screen layout: 1 or 2 columns of cards.
+    uint8_t getTickerCols()             { uint8_t c = prefs.getUChar("tick_cols", 1); return c == 2 ? 2 : 1; }
+    void    setTickerCols(uint8_t c)    { prefs.putUChar("tick_cols", c == 2 ? 2 : 1); }
+
     // "Data" caption toggle: show collection name + floor under each artwork.
     bool   getNftShowData()             { return prefs.getBool("nft_showdata", true); }
     void   setNftShowData(bool on)      { prefs.putBool("nft_showdata", on); }

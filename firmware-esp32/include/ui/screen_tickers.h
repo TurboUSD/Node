@@ -212,8 +212,16 @@ public:
         lv_obj_t* addLbl = lv_label_create(_addBtn);
         lv_label_set_text(addLbl, "+ Add");
         lv_obj_set_style_text_font(addLbl, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(addLbl, lv_color_hex(CLR_GREEN), 0);
+        lv_obj_set_style_text_color(addLbl, lv_color_hex(0xd8d8dc), 0);   // matches the NFT bar's active tone
         lv_obj_center(addLbl);
+
+        // 1-col / 2-col layout toggle (NFT-style pair of small buttons).
+        _cols = storage.getTickerCols();
+        _col1Btn = _makeColsBtn("1", 1);
+        lv_obj_align(_col1Btn, LV_ALIGN_RIGHT_MID, -128, 0);
+        _col2Btn = _makeColsBtn("2", 2);
+        lv_obj_align(_col2Btn, LV_ALIGN_RIGHT_MID, -98, 0);
+        _refreshColsBtns();
 
         // Gear button → toggles edit mode (reorder ▲▼ + delete on each card).
         _editBtn = lv_btn_create(_titleRow);
@@ -254,6 +262,8 @@ public:
     // Call this when the screen becomes visible (nav switched to this screen).
     void onShow(const char* nodeCode) {
         strncpy(_nodeCode, nodeCode, sizeof(_nodeCode) - 1);
+        uint8_t cols = storage.getTickerCols();   // may have changed from the web
+        if ((int)cols != _cols) { _cols = cols; _refreshColsBtns(); }
         _rebuildTickerCards();   // instant: cached entries render immediately
         // QUEUED, not direct: a direct dispatch was silently dropped whenever
         // the worker was still busy (charts/logos take a while with 6
@@ -283,6 +293,10 @@ private:
     lv_obj_t*        _editBtn     = nullptr;
     lv_obj_t*        _editBtnLabel= nullptr;
     lv_obj_t*        _emptyLabel  = nullptr;
+    lv_obj_t*        _col1Btn     = nullptr;
+    lv_obj_t*        _col2Btn     = nullptr;
+    int              _cols        = 1;       // 1 or 2 card columns (persisted)
+    lv_coord_t       _savedScrollY = 0;      // view position restored across rebuilds/visits
     lv_obj_t*        _spinner     = nullptr;
     void*            _userData    = nullptr;
     char             _nodeCode[8] = {};
@@ -352,6 +366,43 @@ private:
 
     // ── Card building ─────────────────────────────────────────────────────────
 
+    lv_obj_t* _makeColsBtn(const char* txt, int cols) {
+        lv_obj_t* btn = lv_btn_create(_titleRow);
+        lv_obj_set_size(btn, 26, 22);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_SURFACE), 0);
+        lv_obj_set_style_border_color(btn, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_border_width(btn, 1, 0);
+        lv_obj_set_style_radius(btn, 6, 0);
+        lv_obj_set_style_pad_all(btn, 2, 0);
+        lv_obj_set_user_data(btn, (void*)(intptr_t)cols);
+        lv_obj_add_event_cb(btn, [](lv_event_t* e) {
+            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+            int cols = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e));
+            if (!self || self->_cols == cols) return;
+            self->_cols = cols;
+            storage.setTickerCols((uint8_t)cols);
+            self->_refreshColsBtns();
+            self->_rebuildRequested = true;   // deferred — we're inside the button's event
+        }, LV_EVENT_CLICKED, this);
+        lv_obj_t* l = lv_label_create(btn);
+        lv_label_set_text(l, txt);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
+        lv_obj_center(l);
+        return btn;
+    }
+
+    void _refreshColsBtns() {
+        lv_obj_t* btns[2] = { _col1Btn, _col2Btn };
+        for (int k = 0; k < 2; k++) {
+            if (!btns[k]) continue;
+            bool active = (_cols == k + 1);
+            lv_obj_set_style_bg_color(btns[k], lv_color_hex(active ? 0x26262c : CLR_SURFACE), 0);
+            lv_obj_set_style_border_color(btns[k], lv_color_hex(active ? 0x8a8a92 : CLR_BORDER), 0);
+            lv_obj_t* l = lv_obj_get_child(btns[k], 0);
+            if (l) lv_obj_set_style_text_color(l, lv_color_hex(active ? 0xd8d8dc : CLR_MUTED), 0);
+        }
+    }
+
     void _rebuildTickerCards() {
         // Delete all existing ticker card objects.
         // NOTE: only ever called from timer/init context (pollPending, onShow),
@@ -371,6 +422,11 @@ private:
             lv_obj_clear_flag(_emptyLabel, LV_OBJ_FLAG_HIDDEN);
         }
 
+        // 1 column: classic full-width stack. 2 columns: row-wrap grid — the
+        // full-width title row keeps its own line, cards pair up below it.
+        lv_obj_set_flex_flow(_body, _cols == 2 ? LV_FLEX_FLOW_ROW_WRAP : LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_column(_body, 6, 0);
+
         for (int i = 0; i < _tickerCount; i++) {
             _buildCard(i);
         }
@@ -381,6 +437,11 @@ private:
         } else {
             lv_obj_clear_flag(_addBtn, LV_OBJ_FLAG_HIDDEN);
         }
+
+        // Restore the view position (someone parked an expanded chart mid-list
+        // and expects to find the screen exactly there on return).
+        lv_obj_update_layout(_body);
+        lv_obj_scroll_to_y(_body, _savedScrollY, LV_ANIM_OFF);
     }
 
     void _buildCard(int idx) {
@@ -393,7 +454,7 @@ private:
         // Card container. Border deliberately LIGHTER than CLR_BORDER so the
         // card outline reads clearly against the black background.
         w.container = lv_obj_create(_body);
-        lv_obj_set_size(w.container, LV_PCT(100), cardH);
+        lv_obj_set_size(w.container, _cols == 2 ? LV_PCT(49) : LV_PCT(100), cardH);
         lv_obj_set_style_bg_color(w.container, lv_color_hex(CLR_CARD), 0);
         lv_obj_set_style_border_color(w.container, lv_color_hex(0x3a3a42), 0);
         lv_obj_set_style_border_width(w.container, 1, 0);
@@ -489,7 +550,14 @@ private:
         lv_label_set_text(w.nameLabel, t.base_name);
         lv_obj_set_style_text_font(w.nameLabel, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(w.nameLabel, lv_color_hex(CLR_TEXT), 0);
-        lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_DOT);
+        if (_cols == 2) {
+            // Narrow cards: long names marquee slowly on one line (CIRCULAR
+            // only animates when the text doesn't fit).
+            lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_SCROLL_CIRCULAR);
+            lv_obj_set_style_anim_speed(w.nameLabel, 12, 0);
+        } else {
+            lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_DOT);
+        }
         lv_obj_set_width(w.nameLabel, LV_PCT(100));
 
         // Symbol · FDV · change% on second line
@@ -529,6 +597,8 @@ private:
             _makeCardActionBtn(w.container, LV_SYMBOL_UP,    CLR_TEXT, idx, _onMoveUpTapped);
             _makeCardActionBtn(w.container, LV_SYMBOL_DOWN,  CLR_TEXT, idx, _onMoveDownTapped);
             _makeCardActionBtn(w.container, LV_SYMBOL_TRASH, CLR_RED,  idx, _onDeleteTapped);
+        } else if (_cols == 2) {
+            // Two-column cards have no room for the sparkline — skip it.
         } else {
             // Mini sparkline chart (right side, 70px wide)
             w.chart = lv_chart_create(w.container);
@@ -607,7 +677,12 @@ private:
         lv_label_set_text(w.nameLabel, t.base_name);
         lv_obj_set_style_text_font(w.nameLabel, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(w.nameLabel, lv_color_hex(CLR_TEXT), 0);
-        lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_DOT);
+        if (_cols == 2) {
+            lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_SCROLL_CIRCULAR);
+            lv_obj_set_style_anim_speed(w.nameLabel, 12, 0);
+        } else {
+            lv_label_set_long_mode(w.nameLabel, LV_LABEL_LONG_DOT);
+        }
         lv_obj_set_width(w.nameLabel, LV_PCT(100));
 
         lv_obj_t* chainLbl = lv_label_create(nameCol);
@@ -622,7 +697,7 @@ private:
         lv_obj_t* tfDd = lv_dropdown_create(topRow);
         lv_dropdown_set_options_static(tfDd, "1D\n1W\n1M");
         lv_dropdown_set_selected(tfDd, _chartTf);
-        lv_obj_set_size(tfDd, 62, 36);
+        lv_obj_set_size(tfDd, _cols == 2 ? 54 : 62, 36);
         lv_obj_set_style_bg_color(tfDd, lv_color_hex(CLR_SURFACE), 0);
         lv_obj_set_style_border_color(tfDd, lv_color_hex(CLR_BORDER), 0);
         lv_obj_set_style_border_width(tfDd, 1, 0);
@@ -698,7 +773,7 @@ private:
         lv_obj_set_style_bg_opa(chartWrap, LV_OPA_0, 0);
         lv_obj_set_style_border_width(chartWrap, 0, 0);
         lv_obj_set_style_pad_all(chartWrap, 0, 0);
-        lv_obj_set_style_pad_left(chartWrap, 56, 0);   // ← Y tick labels live here
+        lv_obj_set_style_pad_left(chartWrap, _cols == 2 ? 42 : 56, 0);   // ← Y tick labels live here (tighter in 2-col)
         lv_obj_set_style_pad_top(chartWrap, 7, 0);     // edge tick labels are centered on the first/last
         lv_obj_set_style_pad_bottom(chartWrap, 7, 0);  // tick — reserve space or they clip in half
         lv_obj_clear_flag(chartWrap, LV_OBJ_FLAG_SCROLLABLE);
@@ -713,7 +788,7 @@ private:
         lv_obj_set_style_border_width(w.chart, 0, 0);
         lv_obj_clear_flag(w.chart, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
         lv_chart_set_div_line_count(w.chart, 3, 0);   // vdiv MUST be 0 or >= 2 (LVGL div-by-zero)
-        lv_chart_set_axis_tick(w.chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, 52);
+        lv_chart_set_axis_tick(w.chart, LV_CHART_AXIS_PRIMARY_Y, 4, 0, 4, 1, true, _cols == 2 ? 38 : 52);
         lv_obj_set_style_line_color(w.chart, lv_color_hex(CLR_BORDER), LV_PART_MAIN);
         lv_obj_set_user_data(w.chart, (void*)(intptr_t)idx);
         lv_obj_add_event_cb(w.chart, _candleDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
@@ -1187,8 +1262,8 @@ private:
                         // Carry over the cached entry for this pool, if any.
                         for (int j = 0; j < oldCount; j++) {
                             if (strcasecmp(oldEntries[j].pool_address, pool) == 0) {
-                                te = oldEntries[j];
-                                te.is_expanded = false;   // cards rebuild collapsed
+                                te = oldEntries[j];   // keeps is_expanded too —
+                                // several charts may stay open at once now
                                 break;
                             }
                         }
@@ -1965,6 +2040,11 @@ private:
     // acquiring the LVGL mutex. Pattern: lv_timer_create(_pollPending, 100, this)
 public:
     static void pollPending(lv_timer_t* timer) {
+        {
+            auto* s0 = static_cast<TickerScreen*>(timer->user_data);
+            if (s0 && s0->_body && !s0->_rebuildRequested)
+                s0->_savedScrollY = lv_obj_get_scroll_y(s0->_body);
+        }
         auto* self = static_cast<TickerScreen*>(timer->user_data);
         if (!self) return;
 

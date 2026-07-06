@@ -148,8 +148,10 @@ public:
         lv_obj_set_flex_align(bottomRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(bottomRow, LV_OBJ_FLAG_SCROLLABLE);
 
-        makeMetricColumn(bottomRow, "SINCE", &sinceButton, &sinceButtonLabel, &sinceValueLabel, onSinceBtnTapped, userData, false);
-        makeMetricColumn(bottomRow, "RATE",  &rateButton,  &rateButtonLabel,  &rateValueLabel,  onRateBtnTapped,  userData, true);
+        makeMetricColumn(bottomRow, "SINCE", &sinceButton, "1H\n24H\n7D\n30D\nNODE ON", 4,
+                          &sinceValueLabel, onSinceBtnTapped, userData, false);
+        makeMetricColumn(bottomRow, "RATE",  &rateButton,  "SEC\nMIN\nHOUR\nDAY", 0,
+                          &rateValueLabel,  onRateBtnTapped,  userData, true);
 
         return body;
     }
@@ -189,8 +191,6 @@ public:
         }
         lv_label_set_text(rateValueLabel, buf);
     }
-    void setSinceButtonLabel(const String& text) { lv_label_set_text(sinceButtonLabel, text.c_str()); }
-    void setRateButtonLabel(const String& text) { lv_label_set_text(rateButtonLabel, text.c_str()); }
 
     lv_chart_series_t* getSeries() { return debtSeries; }
     lv_obj_t* getChart() { return chart; }
@@ -243,14 +243,13 @@ private:
 
     lv_obj_t* rangeButton = nullptr;
     lv_obj_t* sinceButton = nullptr;
-    lv_obj_t* sinceButtonLabel = nullptr;
     lv_obj_t* sinceValueLabel = nullptr;
     lv_obj_t* rateButton = nullptr;
-    lv_obj_t* rateButtonLabel = nullptr;
     lv_obj_t* rateValueLabel = nullptr;
 
-    lv_obj_t* makeMetricColumn(lv_obj_t* parent, const char* title, lv_obj_t** btnOut, lv_obj_t** btnLabelOut,
-                                lv_obj_t** valueOut, lv_event_cb_t onTap, void* userData, bool alignRight) {
+    lv_obj_t* makeMetricColumn(lv_obj_t* parent, const char* title, lv_obj_t** btnOut,
+                                const char* ddOptions, uint16_t ddSelected,
+                                lv_obj_t** valueOut, lv_event_cb_t onChanged, void* userData, bool alignRight) {
         lv_obj_t* col = lv_obj_create(parent);
         // SIZE_CONTENT height + identical fixed-height INTERNALS (title row 28,
         // value below): both columns measure the same, so they stay aligned —
@@ -283,18 +282,27 @@ private:
         lv_obj_set_style_text_color(titleLabel, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_10, 0);
 
-        // Plain tappable text (white, with the dropdown glyph) — the boxed
-        // button chrome pulled too much attention for what is a tiny selector.
-        *btnOut = lv_btn_create(row);
-        lv_obj_set_style_bg_opa(*btnOut, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(*btnOut, 0, 0);
-        lv_obj_set_style_shadow_width(*btnOut, 0, 0);
-        lv_obj_set_style_pad_all(*btnOut, 2, 0);
-        lv_obj_set_ext_click_area(*btnOut, 8);
-        lv_obj_add_event_cb(*btnOut, onTap, LV_EVENT_CLICKED, userData);
-        *btnLabelOut = lv_label_create(*btnOut);
-        lv_obj_set_style_text_font(*btnLabelOut, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(*btnLabelOut, lv_color_hex(0xe8e8e8), 0);
+        // SAME dropdown widget/format as the chart's range selector. These
+        // sit near the BOTTOM of the screen, so the list opens UPWARD —
+        // otherwise most options would fall off-screen.
+        *btnOut = lv_dropdown_create(row);
+        lv_dropdown_set_options_static(*btnOut, ddOptions);
+        lv_dropdown_set_selected(*btnOut, ddSelected);
+        lv_dropdown_set_dir(*btnOut, LV_DIR_TOP);
+        lv_dropdown_set_symbol(*btnOut, LV_SYMBOL_UP);
+        lv_obj_set_size(*btnOut, 96, 32);
+        lv_obj_set_style_bg_color(*btnOut, lv_color_hex(0x1a1a1e), 0);
+        lv_obj_set_style_border_color(*btnOut, lv_color_hex(0x3a3a42), 0);
+        lv_obj_set_style_border_width(*btnOut, 1, 0);
+        lv_obj_set_style_radius(*btnOut, 6, 0);
+        lv_obj_set_style_pad_all(*btnOut, 7, 0);
+        lv_obj_set_style_text_font(*btnOut, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(*btnOut, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_t* ddList = lv_dropdown_get_list(*btnOut);
+        lv_obj_set_style_bg_color(ddList, lv_color_hex(0x1a1a1e), 0);
+        lv_obj_set_style_text_color(ddList, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_set_style_text_font(ddList, &lv_font_montserrat_12, 0);
+        lv_obj_add_event_cb(*btnOut, onChanged, LV_EVENT_VALUE_CHANGED, userData);
 
         *valueOut = lv_label_create(col);
         lv_obj_set_style_text_color(*valueOut, lv_color_hex(0xff4d4d), 0);

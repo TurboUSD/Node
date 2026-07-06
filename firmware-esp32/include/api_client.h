@@ -684,6 +684,7 @@ private:
         // NFT Gallery settings
         if (!cfg["nft_wallet_address"].isNull()) storage.setNftWallet(cfg["nft_wallet_address"].as<String>());
         if (!cfg["nft_grid_size"].isNull())      storage.setNftGridSize(cfg["nft_grid_size"].as<uint8_t>());
+        if (!cfg["ticker_cols"].isNull())       storage.setTickerCols(cfg["ticker_cols"].as<uint8_t>());
         if (!cfg["nft_carousel_enabled"].isNull()) storage.setNftCarousel(cfg["nft_carousel_enabled"].as<bool>());
         if (!cfg["nft_slideshow_secs"].isNull()) storage.setNftSlideshowSecs(cfg["nft_slideshow_secs"].as<uint8_t>());
         if (!cfg["nft_pinlist"].isNull())        storage.setNftPinlist(cfg["nft_pinlist"].as<String>());

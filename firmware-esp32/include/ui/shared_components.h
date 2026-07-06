@@ -157,8 +157,8 @@ inline SharedFooterRefs buildSharedFooter(lv_obj_t* parent, lv_event_cb_t onQrTa
     lv_obj_set_style_text_font(refs.nodeSepLabel, &lv_font_montserrat_12, 0);
 
     refs.nodeCountLabel = lv_label_create(bar);
-    lv_label_set_text(refs.nodeCountLabel, "0 NODES");   // default
-    lv_obj_set_style_text_color(refs.nodeCountLabel, lv_color_hex(0x3aff7a), 0);
+    lv_label_set_text(refs.nodeCountLabel, "Network: 0 Nodes");   // default
+    lv_obj_set_style_text_color(refs.nodeCountLabel, lv_color_hex(0x9a9a9e), 0);   // same tone as the name
     lv_obj_set_style_text_font(refs.nodeCountLabel, &lv_font_montserrat_12, 0);
     lv_obj_align_to(refs.nodeSepLabel,   refs.nodeNameLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
     lv_obj_align_to(refs.nodeCountLabel, refs.nodeSepLabel,  LV_ALIGN_OUT_RIGHT_MID, 8, 0);
@@ -167,7 +167,7 @@ inline SharedFooterRefs buildSharedFooter(lv_obj_t* parent, lv_event_cb_t onQrTa
     refs.qrIcon = lv_label_create(bar);
     lv_label_set_text(refs.qrIcon, LV_SYMBOL_SETTINGS);
     lv_obj_set_style_text_font(refs.qrIcon, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(refs.qrIcon, lv_color_hex(0x3aff7a), 0);
+    lv_obj_set_style_text_color(refs.qrIcon, lv_color_hex(0x6e7280), 0);
     lv_obj_align(refs.qrIcon, LV_ALIGN_RIGHT_MID, -2, 0);
     lv_obj_add_flag(refs.qrIcon, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_ext_click_area(refs.qrIcon, 6);
@@ -237,7 +237,7 @@ inline void refreshSharedFooter(SharedFooterRefs& refs, const String& nodeName, 
     if (refs.nodeNameLabel)  lv_label_set_text(refs.nodeNameLabel, nodeName.c_str());
     if (refs.nodeCountLabel) {
         char countBuf[24];
-        snprintf(countBuf, sizeof(countBuf), "%d NODE%s", onlineNodeCount, onlineNodeCount == 1 ? "" : "S");
+        snprintf(countBuf, sizeof(countBuf), "Network: %d Node%s", onlineNodeCount, onlineNodeCount == 1 ? "" : "s");
         lv_label_set_text(refs.nodeCountLabel, countBuf);
         // Re-align the [name | count] chain to the name's CURRENT width — the
         // build-time align happened while the name was empty.

@@ -108,6 +108,16 @@ public:
         verifyBadge = lv_label_create(nameRow);
         lv_label_set_text(verifyBadge, "");
         lv_obj_set_style_text_font(verifyBadge, &lv_font_montserrat_16, 0);
+        // Diagonal strike drawn OVER the check for the "pending" state
+        // (grey crossed-out check instead of the old hourglass).
+        static lv_point_t strikePts[2] = { {0, 0}, {18, 16} };   // ↘ diagonal
+        verifyStrike = lv_line_create(nameRow);
+        lv_line_set_points(verifyStrike, strikePts, 2);
+        lv_obj_set_style_line_width(verifyStrike, 3, 0);
+        lv_obj_set_style_line_color(verifyStrike, lv_color_hex(0xe5484d), 0);   // red — unmistakably "not yet"
+        lv_obj_set_style_line_rounded(verifyStrike, true, 0);
+        lv_obj_add_flag(verifyStrike, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(verifyStrike, LV_OBJ_FLAG_IGNORE_LAYOUT);
         lv_obj_add_flag(verifyBadge, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_ext_click_area(verifyBadge, 12);
         lv_obj_add_event_cb(verifyBadge, onVerifyBadgeTapped, LV_EVENT_CLICKED, userData);
@@ -254,8 +264,19 @@ public:
     void setNodeName(const String& name) { lv_label_set_text(nodeNameLabel, name.c_str()); }
 
     void setVerified(bool verified) {
-        lv_label_set_text(verifyBadge, verified ? "\xEF\x80\x8C" : "\xEF\x80\xA1");
-        lv_obj_set_style_text_color(verifyBadge, verified ? lv_color_hex(0x1d9bf0) : lv_color_hex(0xe8b339), 0);
+        // Same CHECK glyph both ways: blue when verified, grey + diagonal
+        // strike while verification is pending.
+        lv_label_set_text(verifyBadge, "\xEF\x80\x8C");
+        lv_obj_set_style_text_color(verifyBadge,
+            verified ? lv_color_hex(0x1d9bf0) : lv_color_hex(0x6e7280), 0);
+        if (verifyStrike) {
+            if (verified) {
+                lv_obj_add_flag(verifyStrike, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_clear_flag(verifyStrike, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_align_to(verifyStrike, verifyBadge, LV_ALIGN_CENTER, 0, 0);
+            }
+        }
     }
 
     void setUptime(const String& text) { lv_label_set_text(uptimeValueLabel, text.c_str()); }
@@ -339,9 +360,8 @@ public:
         char tbuf[12];
         snprintf(tbuf, sizeof(tbuf), "%02ld:%02ld", secondsLeft / 60, secondsLeft % 60);
         lv_label_set_text(countdownLabel, tbuf);
-        char rbuf[24];
-        snprintf(rbuf, sizeof(rbuf), "-> %d TUSD", (int)rewardTusd);
-        lv_label_set_text(countdownRewardLabel, rbuf);
+        (void)rewardTusd;
+        if (countdownRewardLabel) lv_label_set_text(countdownRewardLabel, "");   // reward tag removed by request
     }
 
 public:
@@ -350,6 +370,7 @@ public:
 
 private:
     lv_obj_t* nodeNameLabel = nullptr;
+    lv_obj_t* verifyStrike = nullptr;
     lv_obj_t* verifyBadge = nullptr;
     lv_obj_t* uptimeValueLabel = nullptr;
     lv_obj_t* rewardsLabel = nullptr;

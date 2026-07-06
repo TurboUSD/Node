@@ -64,6 +64,7 @@
 #define NFT_CLR_TEXT    0xe8e8e8
 #define NFT_CLR_MUTED   0x6e7280
 #define NFT_CLR_GREEN   0x43e397
+#define NFT_CLR_ACTIVE  0xd8d8dc   // active-control tone (bright grey — green stole the show)
 
 // ── Data structures ───────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ struct NftItem {
     float floor_price_eth  = 0.0f;
     bool  pinned           = false;   // manual pick — ALWAYS earns a grid cell
     bool  floor_btc        = false;   // floor denominated in BTC (Ordinals) instead of ETH
+    uint32_t bg_color      = 0;       // transparency composite colour (0 = black)
     // Decoded artwork, ONE SLOT PER GRID CLASS (0=1x1, 1=2x2, 2=3x3) so
     // switching grid sizes can show something instantly. RGB565 in PSRAM,
     // produced by the nft_img bg task via img_decode.h. Retention: the
@@ -191,7 +193,7 @@ public:
         // Carousel toggle — a subtle tappable WORD, not a big switch (the
         // switch dominated the strip). Lit green when on, muted grey when off.
         _carouselSwitch = lv_label_create(_sizeBar);
-        lv_label_set_text(_carouselSwitch, "Carousel");
+        lv_label_set_text(_carouselSwitch, LV_SYMBOL_LOOP);   // carousel = cycle icon
         lv_obj_set_style_text_font(_carouselSwitch, &lv_font_montserrat_12, 0);
         lv_obj_set_style_pad_left(_carouselSwitch, 8, 0);
         lv_obj_add_flag(_carouselSwitch, LV_OBJ_FLAG_CLICKABLE);
@@ -208,7 +210,7 @@ public:
         // "Data" toggle — same treatment as Carousel: green word = captions
         // (collection name + floor) shown, grey = hidden. Default ON.
         _dataSwitch = lv_label_create(_sizeBar);
-        lv_label_set_text(_dataSwitch, "Data");
+        lv_label_set_text(_dataSwitch, LV_SYMBOL_LIST);       // data captions = list icon
         lv_obj_set_style_text_font(_dataSwitch, &lv_font_montserrat_12, 0);
         lv_obj_set_style_pad_left(_dataSwitch, 8, 0);
         lv_obj_add_flag(_dataSwitch, LV_OBJ_FLAG_CLICKABLE);
@@ -258,7 +260,7 @@ public:
         lv_obj_t* awLbl = lv_label_create(_addWalletBtn);
         lv_label_set_text(awLbl, "Wallet");
         lv_obj_set_style_text_font(awLbl, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(awLbl, lv_color_hex(NFT_CLR_GREEN), 0);
+        lv_obj_set_style_text_color(awLbl, lv_color_hex(NFT_CLR_ACTIVE), 0);
         lv_obj_center(awLbl);
         lv_obj_add_event_cb(_addWalletBtn, [](lv_event_t* e) {
             NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
@@ -372,6 +374,7 @@ private:
         lv_obj_t* container = nullptr;
         lv_obj_t* img       = nullptr;   // lv_canvas or lv_img for decoded image
         lv_img_dsc_t imgDsc = {};        // PER-CELL: a shared static dsc made every cell show the same image
+        uint32_t dotsAt = 0;             // when the carousel dots were last revealed (tap)
         const uint8_t* shownPx = nullptr; // bitmap currently displayed (repaint only on change)
         lv_coord_t cellW = 0, cellH = 0;  // set at build — lv_obj_get_width() reads 0 pre-layout
         lv_obj_t* nameLbl   = nullptr;
@@ -394,6 +397,7 @@ private:
     std::vector<NftItem> _nftCache;
     uint32_t _cacheTimestamp = 0;
     bool     _snapshotOnly   = false;   // cache came from disk → still needs a live refresh
+    String   _lastListSig;              // change detector: skip rebuilds on identical refreshes
 
     // Slideshow state
     uint8_t _slideshowSecs  = 10;
@@ -511,8 +515,12 @@ private:
                         if (deserializeJson(od, ho.getStream()) == DeserializationError::Ok) {
                             const char* nm = od["results"][0]["name"] | "";
                             if (nm[0]) snprintf(oi.name, sizeof(oi.name), "%s", nm);
+                            const char* cl = od["results"][0]["collection"] | "";
+                            if (cl[0]) snprintf(oi.collection, sizeof(oi.collection), "%s", cl);
                             double fb = od["results"][0]["floor_btc"] | 0.0;
                             if (fb > 0) { oi.floor_price_eth = (float)fb; oi.floor_btc = true; }
+                            const char* bg = od["results"][0]["bg"] | "";
+                            if (bg[0] == '#') oi.bg_color = (uint32_t)strtoul(bg + 1, nullptr, 16);
                         }
                     }
                     ho.end();
@@ -677,6 +685,15 @@ private:
             }
         }
 
+        // Auto-hide the carousel dots ~2.5 s after a tap.
+        for (int i = 0; i < _cellCount; i++) {
+            CellWidgets& cwD = _cells[i];
+            if (cwD.dotRow && cwD.dotsAt && millis() - cwD.dotsAt >= 2500) {
+                cwD.dotsAt = 0;
+                lv_obj_add_flag(cwD.dotRow, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+
         // Deferred edit-mode rebuild (reorder/delete/gear ran inside an event
         // callback of a widget the rebuild would delete).
         if (_rebuildReq) {
@@ -730,6 +747,14 @@ private:
         for (auto& prev : oldCache)
             for (int c = 0; c < 3; c++)
                 if (prev.px[c]) free(prev.px[c]);   // no longer in the wallet
+        // Signature of the refreshed list: if nothing actually changed,
+        // skip the full grid rebuild (it repainted all 9 cells every 30-min
+        // background refresh — a periodic full-screen flicker for nothing).
+        String sig;
+        for (auto& it2 : _nftCache) { sig += it2.image_url; sig += ':'; sig += String(it2.floor_price_eth, 4); sig += ';'; }
+        bool listChanged = (sig != _lastListSig);
+        _lastListSig = sig;
+
         _imgGen++;                                        // indices changed → stale workers abort
         _cacheTimestamp = millis();
         _snapshotOnly   = false;
@@ -762,7 +787,8 @@ private:
                 Serial.println("NFT: collections report unchanged");
             }
         }
-        _rebuildGrid();
+        if (listChanged) _rebuildGrid();
+        else             _startImageFetch();   // still top up any missing art
     }
 
     // ── Disk snapshot of the NFT list ────────────────────────────────────────
@@ -777,6 +803,7 @@ private:
         float floor;
         uint8_t pinned;
         uint8_t floor_btc;
+        uint32_t bg_color;
     };
 
     void _saveSnapshot() {
@@ -796,6 +823,7 @@ private:
             r[i].floor  = _nftCache[i].floor_price_eth;
             r[i].pinned    = _nftCache[i].pinned ? 1 : 0;
             r[i].floor_btc = _nftCache[i].floor_btc ? 1 : 0;
+            r[i].bg_color  = _nftCache[i].bg_color;
         }
         diskcache::save("meta", "nft_list", buf, sz);
         free(buf);
@@ -819,11 +847,40 @@ private:
             it.floor_price_eth = r[i].floor;
             it.pinned          = r[i].pinned != 0;
             it.floor_btc       = r[i].floor_btc != 0;
+            it.bg_color        = r[i].bg_color;
             _nftCache.push_back(it);
         }
         free(buf);
         _snapshotOnly = true;   // display now, but still refresh from OpenSea
-        Serial.printf("NFT: %u items restored from disk snapshot\n", (unsigned)n);
+
+        // Preload persisted DECODED covers (classes 1+2): the very first grid
+        // paint after boot then shows real artwork with zero decode work.
+        _refreshListBufs();
+        int loaded = 0;
+        for (int i = 0; i < (int)_nftCache.size(); i++) {
+            for (int cls = 1; cls <= 2; cls++) {
+                if (!_entitledSlot(cls, i)) continue;
+                size_t blobLen = 0;
+                uint8_t* blob = diskcache::loadAlloc("dec", _decKey(_nftCache[i].image_url, cls).c_str(), &blobLen);
+                if (!blob) continue;
+                uint16_t w = 0, h = 0;
+                if (blobLen > 4) { memcpy(&w, blob, 2); memcpy(&h, blob + 2, 2); }
+                if (w > 0 && h > 0 && blobLen == 4 + (size_t)w * h * 2) {
+                    uint8_t* px = (uint8_t*)heap_caps_malloc((size_t)w * h * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (px) {
+                        memcpy(px, blob + 4, (size_t)w * h * 2);
+                        _nftCache[i].px[cls] = px;
+                        _nftCache[i].pw[cls] = w;
+                        _nftCache[i].ph[cls] = h;
+                        _nftCache[i].tried[cls] = true;
+                        loaded++;
+                    }
+                }
+                free(blob);
+            }
+        }
+        Serial.printf("NFT: %u items + %d decoded covers restored from disk\n",
+                      (unsigned)n, loaded);
         return true;
     }
 
@@ -1092,8 +1149,10 @@ private:
             lv_obj_align(cw.floorLbl, LV_ALIGN_BOTTOM_RIGHT, 0, -2);   // same row as the name
         }
 
-        // Carousel dots — bottom edge of the ART area, above the caption band
-        if (cw.nftCount > 1 && cw_h > 40) {
+        // Carousel dots — bottom edge of the ART area. Hidden by default
+        // (they were visual noise); they appear for a moment after a tap.
+        bool dotsVisible = cw.dotsAt && (millis() - cw.dotsAt < 2500);
+        if (dotsVisible && cw.nftCount > 1 && cw_h > 40) {
             cw.dotRow = lv_obj_create(cw.container);
             int dots = min(cw.nftCount, 5);
             lv_coord_t dotRowW = (lv_coord_t)(dots * 10);
@@ -1170,6 +1229,7 @@ private:
         CellWidgets& cw = _cells[idx];
         if (cw.nftCount <= 1) return;
         cw.nftCurrent = (cw.nftCurrent + 1) % cw.nftCount;
+        cw.dotsAt = millis();   // reveal the position dots briefly
         _refreshCell(idx);
         // The first NFT_IMG_MAX_FETCH images load eagerly; anything beyond
         // that gets fetched the moment the carousel reaches it.
@@ -1220,14 +1280,14 @@ private:
         if (!_carouselSwitch) return;
         bool on = storage.getNftCarousel();
         lv_obj_set_style_text_color(_carouselSwitch,
-            lv_color_hex(on ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
+            lv_color_hex(on ? NFT_CLR_ACTIVE : NFT_CLR_MUTED), 0);
         lv_obj_set_style_text_opa(_carouselSwitch, on ? LV_OPA_COVER : LV_OPA_70, 0);
     }
 
     void _refreshDataLabel() {
         if (!_dataSwitch) return;
         bool on = storage.getNftShowData();
-        lv_obj_set_style_text_color(_dataSwitch, lv_color_hex(on ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
+        lv_obj_set_style_text_color(_dataSwitch, lv_color_hex(on ? NFT_CLR_ACTIVE : NFT_CLR_MUTED), 0);
         lv_obj_set_style_text_opa(_dataSwitch, on ? LV_OPA_COVER : LV_OPA_70, 0);
     }
 
@@ -1282,10 +1342,10 @@ private:
 
     void _applyBtnStyle(lv_obj_t* btn, bool active) {
         if (!btn) return;
-        lv_obj_set_style_bg_color(btn, lv_color_hex(active ? 0x1a2a1a : 0x141414), 0);
-        lv_obj_set_style_border_color(btn, lv_color_hex(active ? NFT_CLR_GREEN : NFT_CLR_BORDER), 0);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(active ? 0x26262c : 0x141414), 0);
+        lv_obj_set_style_border_color(btn, lv_color_hex(active ? 0x8a8a92 : NFT_CLR_BORDER), 0);
         lv_obj_t* lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(active ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
+        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(active ? NFT_CLR_ACTIVE : NFT_CLR_MUTED), 0);
     }
 
     // ── Wallet entry dialog ───────────────────────────────────────────────────
@@ -1362,6 +1422,11 @@ private:
     // on the RGB panel, which caused visible shimmer/"interference". When the
     // grid size changes, pixels are re-decoded from the disk cache (fast).
     #define NFT_IMG_MAX_FETCH 12   // per run — carousel taps re-trigger for the rest
+
+    // Decoded-bitmap disk key: url + grid class (dims embedded in the blob).
+    static String _decKey(const char* url, int cls) {
+        return String(url) + "|dec" + String(cls);
+    }
 
     static String _urlEncode(const char* src) {
         String out;
@@ -1581,8 +1646,8 @@ private:
                     bool fromDisk = diskcache::has("img", it.image_url);
                     uint16_t w = 0, h = 0;
                     uint8_t* px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
-                                                      boxW, boxH, it.name, it.image_url, &w, &h);
-                    if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h);
+                                                      boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
+                    if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                     if (!px) {
                         // Last resort for formats the chip can't decode (SVG —
                         // e.g. on-chain Checks —, webp, gif): the wsrv.nl image
@@ -1590,7 +1655,7 @@ private:
                         // reached when both direct attempts failed, and the
                         // JPEG result lands in the disk cache like any other.
                         String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=jpg";
-                        px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, it.image_url, &w, &h);
+                        px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                     }
 
                     if (myGen != self->_imgGen) {
@@ -1608,6 +1673,20 @@ private:
                         it.ph[cls] = h;
                         if (cls == g) self->_imgDirty = true;   // poll timer repaints
                         fetched++;
+                        // Persist DECODED cover bitmaps (2x2/3x3 classes are
+                        // small: ~20-50 KB) so a reboot paints instantly with
+                        // zero decode. 1x1 (~200 KB) isn't worth the flash.
+                        if (cls >= 1 && self->_entitledSlot(cls, idx)) {
+                            size_t blobLen = 4 + (size_t)w * h * 2;
+                            uint8_t* blob = (uint8_t*)heap_caps_malloc(blobLen, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                            if (blob) {
+                                memcpy(blob, &w, 2);
+                                memcpy(blob + 2, &h, 2);
+                                memcpy(blob + 4, px, (size_t)w * h * 2);
+                                diskcache::save("dec", _decKey(it.image_url, cls).c_str(), blob, blobLen);
+                                free(blob);
+                            }
+                        }
                     }
                     // Rate-limit only real CDN hits — disk-cache re-decodes fly.
                     if (!fromDisk) delay(NFT_RATELIMIT_DELAY_MS);

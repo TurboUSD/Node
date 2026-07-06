@@ -1175,8 +1175,16 @@ private:
         self->debtYearsRangeIndex = (int)lv_dropdown_get_selected(lv_event_get_current_target(e));
         self->_debtRangeDirty = true;   // deferred 1-2 s refetch (updateClockIfNeeded)
     }
-    static void onSinceBtnTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openSincePeriodPicker(); }
-    static void onRateBtnTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openRateUnitPicker(); }
+    static void onSinceBtnTapped(lv_event_t* e) {
+        UiManager* self = (UiManager*)lv_event_get_user_data(e);
+        self->sincePeriodIndex = (int)lv_dropdown_get_selected(lv_event_get_current_target(e));
+        self->_computeDebtDerived();
+    }
+    static void onRateBtnTapped(lv_event_t* e) {
+        UiManager* self = (UiManager*)lv_event_get_user_data(e);
+        self->rateUnitIndex = (int)lv_dropdown_get_selected(lv_event_get_current_target(e));
+        self->_computeDebtDerived();
+    }
     static void onGameYearsTapped(lv_event_t* e) {
         UiManager* self = (UiManager*)lv_event_get_user_data(e);
         self->gameYearsIndex = (int)lv_dropdown_get_selected(lv_event_get_current_target(e));
@@ -1558,45 +1566,13 @@ private:
                                             : (long)(millis() / 1000);          // "NODE ON" ≈ uptime
         debtScreen.updateSinceValue(_debtPerSecond * secs);
 
-        static const char* sinceOpts[] = {"1H", "24H", "7D", "30D", "NODE ON"};
-        static const char* rateOpts[]  = {"SEC", "MIN", "HOUR", "DAY"};
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%s \xEF\x81\xB8", sinceOpts[sincePeriodIndex % 5]);
-        debtScreen.setSinceButtonLabel(buf);
-        snprintf(buf, sizeof(buf), "%s \xEF\x81\xB8", rateOpts[rateUnitIndex % 4]);
-        debtScreen.setRateButtonLabel(buf);
+        // (Dropdowns render their own selected option — no label plumbing.)
     }
 
     // NOTE on both pickers below: the selection applies LIVE as the roller
     // moves (VALUE_CHANGED), not only on SAVE — users closed the modal with
     // the X expecting their pick to stick, and it silently reverted.
-    void openSincePeriodPicker() {
-        static const char* options = "1H\n24H\n7D\n30D\nNODE ON";
-        lv_obj_t* card = openModal(lv_scr_act());
-        lv_obj_t* roller = addOptionPicker(card, options, sincePeriodIndex);
-        lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
-        static lv_obj_t* sCard;    sCard = card;
-        static UiManager* sSelf;   sSelf = this;
-        lv_obj_add_event_cb(roller, [](lv_event_t* e) {
-            sSelf->sincePeriodIndex = lv_roller_get_selected(lv_event_get_target(e));
-            sSelf->_computeDebtDerived();
-        }, LV_EVENT_VALUE_CHANGED, nullptr);
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
-    }
 
-    void openRateUnitPicker() {
-        static const char* options = "SEC\nMIN\nHOUR\nDAY";
-        lv_obj_t* card = openModal(lv_scr_act());
-        lv_obj_t* roller = addOptionPicker(card, options, rateUnitIndex);
-        lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
-        static lv_obj_t* sCard;    sCard = card;
-        static UiManager* sSelf;   sSelf = this;
-        lv_obj_add_event_cb(roller, [](lv_event_t* e) {
-            sSelf->rateUnitIndex = lv_roller_get_selected(lv_event_get_target(e));
-            sSelf->_computeDebtDerived();
-        }, LV_EVENT_VALUE_CHANGED, nullptr);
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
-    }
 
     // Recompute the inflation-game projection ($10,000 eroded by the real annual
     // debasement rate over the selected horizon) and redraw its chart + labels.
