@@ -431,6 +431,16 @@ private:
     }
 
     void _rebuildTickerCards() {
+        // Permanent diagnostic: every rebuild logs which cards are expanded.
+        // If a chart ever "collapses on its own", the serial log shows whether
+        // the STATE was lost (flag flips between rebuilds) or a stray
+        // tap/collapse event fired (those log separately above).
+        {
+            char em[TICKER_MAX + 1];
+            for (int i = 0; i < _tickerCount && i < TICKER_MAX; i++) em[i] = _tickers[i].is_expanded ? 'E' : '.';
+            em[min(_tickerCount, (int)TICKER_MAX)] = '\0';
+            Serial.printf("tickers: rebuild n=%d expanded=[%s]\n", _tickerCount, em);
+        }
         // Delete all existing ticker card objects.
         // NOTE: only ever called from timer/init context (pollPending, onShow),
         // never from inside a card's own event callback — see _rebuildRequested.
@@ -1959,6 +1969,8 @@ private:
 
         self->_tickers[idx].is_expanded = !self->_tickers[idx].is_expanded;
         self->_setExpandedPool(self->_tickers[idx].pool_address, self->_tickers[idx].is_expanded);
+        Serial.printf("tickers: tap %s -> %s\n", self->_tickers[idx].base_symbol,
+                      self->_tickers[idx].is_expanded ? "EXPAND" : "collapse");
         if (self->_tickers[idx].is_expanded && !self->_tickers[idx].chart_loaded) {
             self->_chartLoadRequestIdx = idx;   // fetched after the rebuild
         }
@@ -1989,6 +2001,7 @@ private:
         if (!self || idx < 0 || idx >= self->_tickerCount) return;
         self->_tickers[idx].is_expanded = false;
         self->_setExpandedPool(self->_tickers[idx].pool_address, false);
+        Serial.printf("tickers: X-collapse %s\n", self->_tickers[idx].base_symbol);
         self->_rebuildRequested = true;
     }
 

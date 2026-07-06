@@ -757,7 +757,10 @@ private:
         // skip the full grid rebuild (it repainted all 9 cells every 30-min
         // background refresh — a periodic full-screen flicker for nothing).
         String sig;
-        for (auto& it2 : _nftCache) { sig += it2.image_url; sig += ':'; sig += String(it2.floor_price_eth, 4); sig += ';'; }
+        // Name is part of the signature: a refresh that only improves the
+        // caption (e.g. resolve-ordinal finally returning "NodeMonke #9343"
+        // with the floor still unknown) must NOT be skipped as "identical".
+        for (auto& it2 : _nftCache) { sig += it2.image_url; sig += ':'; sig += it2.name; sig += ':'; sig += String(it2.floor_price_eth, 4); sig += ';'; }
         bool listChanged = (sig != _lastListSig);
         _lastListSig = sig;
 

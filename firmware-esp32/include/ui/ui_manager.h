@@ -1569,9 +1569,8 @@ private:
         debtScreen.updateRateValue(_debtPerSecond * unitSec[rateUnitIndex % 4]);
         long secs = (sincePeriodIndex < 4) ? periodSec[sincePeriodIndex]
                                             : (long)(millis() / 1000);          // "NODE ON" ≈ uptime
-        // NODE ON renders in $k with two decimals (the cents-of-a-thousand
-        // digits change every second — you can watch the debt climb live).
-        debtScreen.updateSinceValue(_debtPerSecond * secs, sincePeriodIndex == 4);
+        // Full comma-separated figure; recomputed every second so it climbs live.
+        debtScreen.updateSinceValue(_debtPerSecond * secs);
 
         // (Dropdowns render their own selected option — no label plumbing.)
     }

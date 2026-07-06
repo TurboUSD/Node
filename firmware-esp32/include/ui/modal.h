@@ -136,7 +136,9 @@ inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t
     static const char* hourOptions =
         "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23";
     refs.hourRoller = lv_roller_create(row);
-    lv_roller_set_options(refs.hourRoller, hourOptions, LV_ROLLER_MODE_INFINITE);   // 23 wraps to 00
+    // NORMAL mode (finite list). INFINITE was tried and reverted: even with
+    // the selected-band line-space fix the wheel misbehaved on hardware.
+    lv_roller_set_options(refs.hourRoller, hourOptions, LV_ROLLER_MODE_NORMAL);
     lv_roller_set_selected(refs.hourRoller, initialHour, LV_ANIM_OFF);
     lv_obj_set_style_text_color(refs.hourRoller, lv_color_hex(0xe8b339), LV_PART_SELECTED);
     lv_obj_set_style_bg_color(refs.hourRoller, lv_color_hex(0x1a1a1a), LV_PART_SELECTED);
@@ -157,7 +159,7 @@ inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t
         if (m < 59) strcat(minuteOptions, "\n");
     }
     refs.minuteRoller = lv_roller_create(row);
-    lv_roller_set_options(refs.minuteRoller, minuteOptions, LV_ROLLER_MODE_INFINITE); // 59 wraps to 00
+    lv_roller_set_options(refs.minuteRoller, minuteOptions, LV_ROLLER_MODE_NORMAL);  // finite, like the hours
     lv_roller_set_selected(refs.minuteRoller, initialMinute, LV_ANIM_OFF);
     lv_obj_set_style_text_color(refs.minuteRoller, lv_color_hex(0xe8b339), LV_PART_SELECTED);
     lv_obj_set_style_bg_color(refs.minuteRoller, lv_color_hex(0x1a1a1a), LV_PART_SELECTED);

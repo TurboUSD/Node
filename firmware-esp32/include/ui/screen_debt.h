@@ -162,28 +162,22 @@ public:
         lv_label_set_text(totalDebtLabel, buf);
     }
 
-    void updateSinceValue(double valueUsd, bool asThousands = false) {
-        char buf[28];
-        if (asThousands) {
-            // NODE ON: "+$115,342.53k" — k with two LIVE decimals (they move
-            // every second, so the climb is watchable), commas for the rest.
-            char digits[20];
-            snprintf(digits, sizeof(digits), "%.2f", valueUsd / 1e3);
-            const char* dot = strchr(digits, '.');
-            int intLen = dot ? (int)(dot - digits) : (int)strlen(digits);
-            size_t o = 0;
-            buf[o++] = '+'; buf[o++] = '$';
-            for (int i = 0; digits[i] && o < sizeof(buf) - 2; i++) {
-                buf[o++] = digits[i];
-                int rem = intLen - 1 - i;
-                if (i < intLen && rem > 0 && rem % 3 == 0) buf[o++] = ',';
-            }
-            buf[o++] = 'k';
-            buf[o] = '\0';
+    void updateSinceValue(double valueUsd) {
+        // FULL figure for every timeframe — "+$7,711,260", no k/M/B, no
+        // decimals. Long is fine (there's room) and the whole number visibly
+        // climbs on the 1-second recompute tick.
+        char digits[24];
+        snprintf(digits, sizeof(digits), "%.0f", valueUsd);
+        int n = (int)strlen(digits);
+        char buf[36];
+        size_t o = 0;
+        buf[o++] = '+'; buf[o++] = '$';
+        for (int i = 0; i < n && o < sizeof(buf) - 2; i++) {
+            buf[o++] = digits[i];
+            int rem = n - 1 - i;
+            if (rem > 0 && rem % 3 == 0) buf[o++] = ',';
         }
-        // "+$142.56M" reads far more impressive than "+$0.14B".
-        else if (valueUsd >= 1e9) snprintf(buf, sizeof(buf), "+$%.2fB", valueUsd / 1e9);
-        else                      snprintf(buf, sizeof(buf), "+$%.2fM", valueUsd / 1e6);
+        buf[o] = '\0';
         lv_label_set_text(sinceValueLabel, buf);
     }
 
