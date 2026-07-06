@@ -1,8 +1,9 @@
 import type { Metadata } from 'next'
+import SiteFooter from '@/components/SiteFooter'
 
 export const metadata: Metadata = {
   title: 'TurboUSD Network',
-  description: 'TurboUSD node network — mining dashboard, live stats, and node setup.',
+  description: 'TurboUSD node network: mining dashboard, live stats, and node setup.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -29,7 +30,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="icon" href="https://turbousd.com/wp-content/uploads/2026/04/cropped-TurboUSD_tc-192x192.png" sizes="192x192" />
         <link rel="apple-touch-icon" href="https://turbousd.com/wp-content/uploads/2026/04/cropped-TurboUSD_tc-180x180.png" />
       </head>
-      <body style={{ margin: 0 }}>{children}</body>
+      <body style={{ margin: 0, background: '#000' }}>
+        {children}
+        {/* Shared on every page: turbousd.com link + socials */}
+        <SiteFooter />
+      </body>
     </html>
   )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-// app/block/[blockNumber]/page.tsx — network.turbousd.com/block/142
+// app/block/[blockNumber]/page.tsx, network.turbousd.com/block/142
 //
 // Block explorer: shows full details for one mined block.
 // Etherscan-style: timestamp, winner, randomness source, candidate count.
@@ -101,7 +101,7 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
           <div style={{ ...s.card, textAlign: 'center', padding: 40 }}>
             <div style={{ fontSize: 28, marginBottom: 12 }}>⏳</div>
             <div style={{ fontSize: 18, fontWeight: 'bold', color: C.yellow, marginBottom: 8 }}>
-              Block #{blockNum} — Mining in progress
+              Block #{blockNum}: Mining in progress
             </div>
             <p style={s.dim}>This block hasn't been mined yet. Check back soon.</p>
           </div>

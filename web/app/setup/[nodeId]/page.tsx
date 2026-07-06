@@ -52,7 +52,7 @@ interface NodeConfig {
   screen_brightness:      number   // 1–5, default 5 (full)
   screen_always_on:       boolean  // default true
   screen_timeout_mins:    number   // 1 | 5 | 10 | 30, default 10
-  // NFT Gallery (optional — requires DB migration)
+  // NFT Gallery (optional, requires DB migration)
   nft_wallet_address?:    string | null
   nft_grid_size?:         1 | 4 | 9
   nft_carousel_enabled?:  boolean
@@ -63,10 +63,10 @@ interface NodeConfig {
   nft_collections?:       { slug: string; name: string; floor: number }[] | null
   screen_hidden?:         string | null
   nft_slideshow_secs?:    number
-  // Screen order (optional — requires DB migration)
+  // Screen order (optional, requires DB migration)
   // Comma-separated ScreenId integers, e.g. "0,1,2,3,4,5,6". Position 0 is always Home.
   screen_order?:          string | null
-  // Manual NFT pinlist (optional — requires DB migration)
+  // Manual NFT pinlist (optional, requires DB migration)
   // Comma-separated "chain:contract:tokenId" items, max 20. Takes priority over nft_wallet_address on device.
   nft_pinlist?:           string | null
 }
@@ -78,7 +78,7 @@ interface NodeStats {
   total_tusd_earned: number
 }
 
-// ISO 3166-1 alpha-2 country list (abbreviated — add more as needed)
+// ISO 3166-1 alpha-2 country list (abbreviated, add more as needed)
 const COUNTRIES: [string, string][] = [
   ['', 'Select country…'],
   ['AR', '🇦🇷 Argentina'], ['AU', '🇦🇺 Australia'], ['AT', '🇦🇹 Austria'],
@@ -142,7 +142,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
     // Owner-gated load: the config comes from the get-node-setup Edge
     // Function, which requires the per-device setup token (?t=… from the QR
     // in the device's Settings). This also stops "column … does not exist"
-    // schema drift from masquerading as "no node found" — the function
+    // schema drift from masquerading as "no node found", the function
     // selects * server-side.
     setupTokenRef.current = new URLSearchParams(window.location.search).get('t') ?? ''
     callFunction<{ node: NodeConfig }>('get-node-setup', {
@@ -165,7 +165,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
       })
   }, [nodeCode])
 
-  // Parse nft_pinlist from DB into PinItem[] — once, when node first loads
+  // Parse nft_pinlist from DB into PinItem[], once, when node first loads
   useEffect(() => {
     if (!node || pinlistInitRef.current) return
     pinlistInitRef.current = true
@@ -178,7 +178,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         chain:    raw.slice(0, firstColon),
         contract: raw.slice(firstColon + 1, secondColon),
         tokenId:  raw.slice(secondColon + 1),
-        // name / image_url not stored in DB — shown as plain IDs until user re-adds via UI
+        // name / image_url not stored in DB, shown as plain IDs until user re-adds via UI
       }]
     })
     if (items.length > 0) {
@@ -226,7 +226,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
                 : pI
             }))
           })
-          .catch(() => { /* thumbnails stay as plain IDs — non-fatal */ })
+          .catch(() => { /* thumbnails stay as plain IDs, non-fatal */ })
       }
     }
   }, [node])
@@ -238,7 +238,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
     setSaveMsg(null)
     try {
       // If the NFT wallet is still an unresolved ENS name (e.g. the user hit
-      // Save without leaving the field), resolve it now — the backend only
+      // Save without leaving the field), resolve it now, the backend only
       // accepts 0x addresses.
       if (node.nft_wallet_address && /\.eth$/i.test(node.nft_wallet_address.trim())) {
         const addr = await resolveEns(node.nft_wallet_address)
@@ -298,7 +298,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         tweet_url:  tweetUrl,
         wallet_address: node?.wallet_address ?? '',
       })
-      setVerifyMsg({ text: 'Submitted! We review manually — usually within a couple of days.', ok: true })
+      setVerifyMsg({ text: 'Submitted! We review manually, usually within a couple of days.', ok: true })
     } catch (err) {
       setVerifyMsg({ text: err instanceof Error ? err.message : 'Something went wrong.', ok: false })
     } finally {
@@ -323,7 +323,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
           <Section title="Profile" accent={C.green}>
             {!isProfileComplete && (
               <Banner color={C.yellow}>
-                Complete your profile to start receiving ₸USD rewards — wallet address is required for payouts.
+                Complete your profile to start receiving ₸USD rewards, wallet address is required for payouts.
               </Banner>
             )}
             <Field label="Node name" hint="Shown on your device and the public network page. Max 24 chars.">
@@ -371,7 +371,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
             </Field>
             <Field
               label="X / Twitter handle"
-              hint="Without the @ — used for reward notifications and the verified badge."
+              hint="Without the @, used for reward notifications and the verified badge."
             >
               <div style={{ position: 'relative' }}>
                 <span style={s.atSign}>@</span>
@@ -470,7 +470,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               </label>
             </div>
 
-            {/* Turn off after — only visible when always-on is OFF */}
+            {/* Turn off after, only visible when always-on is OFF */}
             {!(node.screen_always_on ?? true) && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: `1px solid ${C.border}` }}>
                 <span style={{ fontSize: 14, color: C.text }}>Turn off after</span>
@@ -515,12 +515,12 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         <Section title="NFT Gallery" accent={C.blue}>
           <p style={s.bodyText}>
             Your device auto-detects NFTs from a wallet, and you can add hand-picked NFTs
-            (or Bitcoin Ordinals) on top. Manual picks are ALWAYS shown in the grid — each
+            (or Bitcoin Ordinals) on top. Manual picks are ALWAYS shown in the grid, each
             one takes the cell of the lowest-floor wallet collection.
             Data is fetched from OpenSea and cached 30 minutes on device.
           </p>
 
-          <Field label="NFT wallet address" hint="EVM address (0x…) or ENS name (yourname.eth — resolved automatically). Can differ from your reward wallet. Spam NFTs (floor price = 0) are filtered automatically.">
+          <Field label="NFT wallet address" hint="EVM address (0x…) or ENS name (yourname.eth, resolved automatically). Can differ from your reward wallet. Spam NFTs (floor price = 0) are filtered automatically.">
             <input style={s.input} placeholder="0x… or yourname.eth (defaults to reward wallet if empty)" maxLength={64}
               value={node.nft_wallet_address ?? ''}
               onChange={e => { setEnsMsg(null); setNode({ ...node, nft_wallet_address: e.target.value || null }) }}
@@ -533,7 +533,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
                   setNode(n => n ? { ...n, nft_wallet_address: addr } : n)
                   setEnsMsg(`${v} → ${addr.slice(0, 6)}…${addr.slice(-4)}`)
                 } else {
-                  setEnsMsg(`Could not resolve ${v} — check the name.`)
+                  setEnsMsg(`Could not resolve ${v}, check the name.`)
                 }
               }}
             />
@@ -602,7 +602,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         </Section>
 
           {/* One Save button for EVERYTHING above (profile, alarm, display,
-              NFT gallery, screen order) — the NFT/order sections used to sit
+              NFT gallery, screen order), the NFT/order sections used to sit
               outside the form with no way to save them. */}
           <button type="submit" disabled={saving} style={s.primaryBtn}>
             {saving ? 'Saving…' : 'Save changes'}
@@ -612,7 +612,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
           )}
         </form>
 
-        {/* ── Token screener — same left-accent treatment as the other sections ── */}
+        {/* ── Token screener, same left-accent treatment as the other sections ── */}
         <div style={{ ...s.section, borderLeftColor: C.green, marginTop: 36 }}>
           <TickerBoard nodeCode={nodeCode} isOwner={true} />
         </div>
@@ -626,7 +626,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               <p style={s.bodyText}>
                 To get the <strong style={{ color: C.green }}>✓</strong> badge and start receiving rewards:
                 post a short video on X tagging <strong style={{ color: C.green }}>@turbousd</strong> showing
-                your device screen with your node name — then submit the X link below.
+                your device screen with your node name, then submit the X link below.
                 Make sure your wallet address is saved first.
               </p>
               <form onSubmit={handleVerifySubmit}>
@@ -654,13 +654,13 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
           </p>
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 14, color: C.muted, lineHeight: 1.6 }}>
             <li>
-              <strong style={{ color: C.text }}>Top button</strong> — short press turns the screen
+              <strong style={{ color: C.text }}>Top button</strong>: short press turns the screen
               off/on (the node keeps mining in the background); hold 3 seconds to put it to sleep,
               press again to wake. It <strong style={{ color: C.text }}>won&apos;t</strong> erase your
-              firmware — there&apos;s no reset shortcut, on purpose.
+              firmware, there&apos;s no reset shortcut, on purpose.
             </li>
             <li style={{ marginTop: 4 }}>
-              <strong style={{ color: C.text }}>Bottom pinhole</strong> (next to USB-C) — only used when
+              <strong style={{ color: C.text }}>Bottom pinhole</strong> (next to USB-C), only used when
               re-flashing the sensor chip; you press it with a paperclip during setup.
             </li>
           </ul>
@@ -724,7 +724,7 @@ function NotFound({ nodeCode }: { nodeCode: string }) {
         <p style={{ color: C.muted, fontSize: 15, textAlign: 'center', marginBottom: 24, lineHeight: 1.6 }}>
           No node found with code <strong style={{ color: C.text }}>{nodeCode}</strong>.<br />
           Open <strong style={{ color: C.text }}>Settings</strong> on your device (tap the QR icon in the footer) and
-          scan the QR code — or type the exact URL shown right below it.
+          scan the QR code, or type the exact URL shown right below it.
         </p>
         <a href="/setup" style={{
           padding: '11px 24px', background: 'transparent', color: C.text,
@@ -750,7 +750,7 @@ function AccessDenied({ nodeCode }: { nodeCode: string }) {
         <p style={{ color: C.muted, fontSize: 15, textAlign: 'center', marginBottom: 24, lineHeight: 1.6, maxWidth: 420 }}>
           This setup link is missing its <strong style={{ color: C.text }}>owner access token</strong>, so it can't be opened.<br /><br />
           Only the person holding the device can edit it: open <strong style={{ color: C.text }}>Settings</strong> on
-          your device (tap the QR icon in the footer) and <strong style={{ color: C.text }}>scan the QR code</strong> —
+          your device (tap the QR icon in the footer) and <strong style={{ color: C.text }}>scan the QR code</strong>,
           it opens this page with the correct token. You can also type the exact URL shown right below the QR.
         </p>
         <a href={`/node/${nodeCode}`} style={{
@@ -820,7 +820,7 @@ function ToggleRow({ label, value, options, onChange }: {
 // Keys are ScreenId enum values from firmware ui_manager.h.
 // Default swipe order: Home → TurboStats → Tickers → Debt → Inflation → NFT → My Node
 const SCREEN_LABELS: Record<number, string> = {
-  0: 'Home',        // CLOCK — always fixed first
+  0: 'Home',        // CLOCK, always fixed first
   1: 'TurboStats',  // TURBO_STATS
   2: 'US Debt',     // DEBT
   3: 'Inflation',   // INFLATION_GAME
@@ -841,7 +841,7 @@ function parseOrder(raw: string | null): number[] {
   return DEFAULT_ORDER
 }
 
-// ── NFT collections board — one row per collection the DEVICE detected in
+// ── NFT collections board, one row per collection the DEVICE detected in
 // the wallet (reported on each heartbeat). Checkbox = shown on the device;
 // arrows reorder; the first 9 checked rows fill the 3×3 grid (4 for 2×2,
 // 1 for 1×1). Order/hidden are stored as comma-joined slug lists.
@@ -860,7 +860,7 @@ function NftCollectionsBoard({ collections, order, hidden, onChange }: {
   if (!collections || collections.length === 0) {
     return (
       <p style={{ fontSize: 12, color: C.muted, margin: '10px 0' }}>
-        No collections reported yet — the device sends the detected list a few
+        No collections reported yet, the device sends the detected list a few
         minutes after it loads the gallery for the first time.
       </p>
     )
@@ -890,7 +890,7 @@ function NftCollectionsBoard({ collections, order, hidden, onChange }: {
   return (
     <div style={{ marginTop: 6, marginBottom: 12 }}>
       <p style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
-        Collections detected in the wallet — check to show on the device, reorder
+        Collections detected in the wallet, check to show on the device, reorder
         with the arrows. The first <strong style={{ color: C.text }}>9 checked</strong> fill
         the grid (top-left first).
       </p>
@@ -1033,7 +1033,7 @@ function ScreenOrderSection({ value, hidden, onChange, onHiddenChange }: {
             {/* eye: visible / hidden on the device (Home can't be hidden) */}
             {!isHome && (
               <button type="button" onClick={() => toggleHidden(screenId)}
-                title={hiddenSet.has(String(screenId)) ? 'Hidden on device — click to show' : 'Shown on device — click to hide'}
+                title={hiddenSet.has(String(screenId)) ? 'Hidden on device (click to show' : 'Shown on device) click to hide'}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   fontSize: 15, lineHeight: 1, flexShrink: 0, padding: '0 2px',
@@ -1173,7 +1173,7 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
   return (
     <div style={{ marginBottom: 4 }}>
       <p style={{ ...s.hint, marginBottom: 10, opacity: 1 }}>
-        Paste an OpenSea link — or an Ordinals inscription URL/id — to add NFTs one by one. Picks are ALWAYS shown on the device, alongside your wallet collections. </p>
+        Paste an OpenSea link (or an Ordinals inscription URL/id) to add NFTs one by one. Picks are ALWAYS shown on the device, alongside your wallet collections. </p>
 
       {/* URL input + Add button */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
@@ -1247,7 +1247,7 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
             </div>
           ))}
           <p style={{ ...s.hint, marginTop: 2 }}>
-            {items.length}/20 NFTs · Picks merge with the wallet scan — remove one and that
+            {items.length}/20 NFTs · Picks merge with the wallet scan, remove one and that
             grid cell returns to the wallet collections.
           </p>
         </div>

@@ -1,4 +1,4 @@
-// app/node/[nodeCode]/page.tsx — PUBLIC, read-only node profile.
+// app/node/[nodeCode]/page.tsx, PUBLIC, read-only node profile.
 //
 // This is what the on-device QR code and the network dashboard's node-name /
 // "View profile" links point to. It shows the owner-set identity (name, bio,

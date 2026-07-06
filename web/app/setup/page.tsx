@@ -1,6 +1,6 @@
 'use client'
 
-// app/setup/page.tsx — network.turbousd.com/setup
+// app/setup/page.tsx, network.turbousd.com/setup
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -34,7 +34,7 @@ export default function SetupPage() {
   const router = useRouter()
 
   // Pull the newest published release straight from GitHub so this page always
-  // reflects what's actually downloadable — no version numbers baked into the
+  // reflects what's actually downloadable, no version numbers baked into the
   // markup that silently go stale. Both the ESP32 (via esp-web-tools) and the
   // RP2040 .uf2 are served from the release's /latest/ URLs regardless, so this
   // is purely to *show* the version and link the correctly-named .uf2 asset.
@@ -69,7 +69,7 @@ export default function SetupPage() {
     e.preventDefault()
     const code = nodeCode.trim().toUpperCase()
     // The code alone can't open the owner setup page anymore (it needs the
-    // secret ?t= token from the device's QR) — send it to the public profile.
+    // secret ?t= token from the device's QR), send it to the public profile.
     if (code.length >= 4) router.push(`/node/${code}`)
   }
 
@@ -98,7 +98,7 @@ export default function SetupPage() {
         <StepCard number="1" title="Flash the firmware" accent={C.green}>
           <p style={s.stepBody}>
             Connect your SenseCAP D1 (the physical device) to your computer via USB-C, then click the
-            button below. Your browser will ask you to select a device — pick the one named{' '}
+            button below. Your browser will ask you to select a device, pick the one named{' '}
             <strong style={{ color: C.text }}>“USB Serial” / “CP210x”</strong>,{' '}
             <strong style={{ color: C.text }}>not</strong> the one named “RP2040 / INDICATOR” (that&apos;s the
             other chip and the flash will time out). The flash takes about 30 seconds.
@@ -166,7 +166,7 @@ export default function SetupPage() {
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: C.muted, lineHeight: 1.55 }}>
               <li>
                 <strong style={{ color: C.text }}>First time on a brand-new device</strong> (still on the
-                factory firmware): <strong style={{ color: C.text }}>erase</strong> — it clears the old
+                factory firmware): <strong style={{ color: C.text }}>erase</strong>: it clears the old
                 factory data for a clean start.
               </li>
               <li style={{ marginTop: 4 }}>
@@ -198,12 +198,12 @@ export default function SetupPage() {
           {/* ── RP2040 sub-chip flash ── */}
           <div style={{ marginTop: 20, padding: '16px', background: 'rgba(255,255,255,0.04)', borderRadius: 10, border: `1px solid ${C.border}` }}>
             <p style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>
-              🔔 Also flash the buzzer chip — one-time, takes 30 seconds
+              🔔 Also flash the buzzer chip, one-time, takes 30 seconds
             </p>
             <p style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>
               The SenseCAP D1 has a second chip (the RP2040) that drives the{' '}
               <strong style={{ color: C.text }}>alarm buzzer</strong>.
-              Until you flash it, the alarm stays silent. It can&apos;t be flashed via browser — you
+              Until you flash it, the alarm stays silent. It can&apos;t be flashed via browser, you
               need to drag a file onto it like a USB drive.
             </p>
             <ol style={{ ...s.ol, marginBottom: 12 }}>
@@ -224,7 +224,7 @@ export default function SetupPage() {
               </li>
               <li>
                 Download the file below and <strong style={{ color: C.text }}>drag it onto the RPI-RP2 drive</strong>.
-                The drive will disappear and the device restarts automatically — that means it worked.
+                The drive will disappear and the device restarts automatically, that means it worked.
               </li>
             </ol>
             <a
@@ -265,23 +265,23 @@ export default function SetupPage() {
           <p style={s.stepBody}>
             Once online, your node appears in the{' '}
             <a href="/network" style={s.link}>TurboUSD Network</a>{' '}
-            with a temporary name. Scan the QR code on your device screen (on the footer) —
+            with a temporary name. Scan the QR code on your device screen (on the footer),
             it opens your personal setup page directly, no code needed.
           </p>
           <div style={s.stepList}>
-            <Step icon="✏️" text="Set a name and bio — shown on the public network page." />
-            <Step icon="💳" text="Add your wallet address (Base network) — required to receive ₸USD mining rewards." />
+            <Step icon="✏️" text="Set a name and bio, shown on the public network page." />
+            <Step icon="💳" text="Add your wallet address (Base network), required to receive ₸USD mining rewards." />
             <Step icon="🌍" text="Set your country and optional city." />
-            <Step icon="🏆" text="Submit for verification: post a video on X tagging @turbousd and showing your node's home screen — it must match your node ID — to earn the ✓ badge and start receiving rewards." />
+            <Step icon="🏆" text="Submit for verification: post a video on X tagging @turbousd and showing your node's home screen (it must match your node ID) to earn the ✓ badge and start receiving rewards." />
           </div>
         </StepCard>
 
-        {/* Returning user shortcut — below step 3 */}
+        {/* Returning user shortcut, below step 3 */}
         <div style={s.returnCard}>
           <div style={s.returnLabel}>Already flashed and connected your node to WiFi?</div>
           <p style={s.returnDesc}>
             Open <strong style={{ color: '#e8e8e8' }}>Settings</strong> on your device (tap the QR icon in the
-            footer) and <strong style={{ color: '#e8e8e8' }}>scan the QR code</strong> — it opens your private
+            footer) and <strong style={{ color: '#e8e8e8' }}>scan the QR code</strong>: it opens your private
             setup page directly. Your setup link includes a secret owner token, so only whoever holds the
             device can edit your node. Can&apos;t scan? Type the exact URL shown right below the QR instead.
           </p>

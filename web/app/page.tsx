@@ -122,6 +122,40 @@ function fmtCountdown(ms: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+// ── Drag-to-scroll for the mined-blocks lane ──────────────────────────────────
+// Mouse users grab the lane and drag it sideways (touch scrolls natively).
+// The pending block sits OUTSIDE the lane, so it never moves. A real drag
+// (>5 px) marks the lane so the click that fires on release doesn't open the
+// block link under the cursor.
+function laneDragStart(e: React.MouseEvent<HTMLDivElement>) {
+  const el = e.currentTarget
+  const startX = e.clientX
+  const startScroll = el.scrollLeft
+  el.dataset.dragged = ''
+  const move = (ev: MouseEvent) => {
+    const dx = ev.clientX - startX
+    if (Math.abs(dx) > 5) el.dataset.dragged = '1'
+    el.scrollLeft = startScroll - dx
+    ev.preventDefault()
+  }
+  const up = () => {
+    window.removeEventListener('mousemove', move)
+    window.removeEventListener('mouseup', up)
+  }
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+  e.preventDefault()
+}
+
+function laneSuppressClickAfterDrag(e: React.MouseEvent<HTMLDivElement>) {
+  const el = e.currentTarget
+  if (el.dataset.dragged === '1') {
+    el.dataset.dragged = ''
+    e.preventDefault()
+    e.stopPropagation()
+  }
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function NetworkPage() {
   const [nodes,        setNodes]        = useState<NodeRow[]>([])
@@ -302,12 +336,17 @@ export default function NetworkPage() {
       )}
 
       {/* ── Block ticker: mined lane (left) | dashed divider | pending (fixed right) ── */}
+      {/* Hidden-scrollbar rule for the drag-scrollable mined lane (WebKit
+          needs a real stylesheet — no inline ::-webkit-scrollbar). */}
+      <style>{`.tusd-lane::-webkit-scrollbar{display:none}`}</style>
       <div style={s.tickerWrap} aria-hidden="true">
         <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}>
-          <div style={s.tickerMinedLane}
+          <div style={s.tickerMinedLane} className="tusd-lane"
+            onMouseDown={laneDragStart}
+            onClickCapture={laneSuppressClickAfterDrag}
             ref={el => { if (el && el.dataset.autoscrolled !== String(minedOldestFirst.length)) { el.scrollLeft = el.scrollWidth; el.dataset.autoscrolled = String(minedOldestFirst.length) } }}>
             {minedOldestFirst.length === 0
-              ? <span style={{ alignSelf: 'center', color: C.muted, fontSize: 11, whiteSpace: 'nowrap' }}>No blocks mined yet — first one below ↓</span>
+              ? <span style={{ alignSelf: 'center', color: C.muted, fontSize: 11, whiteSpace: 'nowrap' }}>No blocks mined yet, first one below ↓</span>
               : minedOldestFirst.map(b => (
                   <div key={b.block_number} style={{ animation: 'blockIn .6s ease', flexShrink: 0 }}>
                     <BlockTile block={b} circlePct={circlePct} minsLeft={minsLeft} />
@@ -435,7 +474,7 @@ export default function NetworkPage() {
             <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
               {isIos
                 ? 'Tap Share 📤 → "Add to Home Screen" for the full app'
-                : 'Install for quick access — works offline too'}
+                : 'Install for quick access, works offline too'}
             </div>
           </div>
           {!isIos && (
@@ -547,7 +586,7 @@ const VERIFY_HELP =
 
 const GENESIS_HELP =
   'Genesis node ⚡\n\nOne of the founding nodes that joined the TurboUSD network at launch. ' +
-  'The lightning badge is permanent — it marks the earliest supporters of the network.'
+  'The lightning badge is permanent. It marks the earliest supporters of the network.'
 
 // Dark, centered info modal (the native alert() was a white browser popup
 // pinned to the top — ugly on desktop, worse on mobile).
@@ -586,7 +625,7 @@ function UnverifiedBadge({ size = 10 }: { size?: number }) {
   return (
     <>
       <span
-        title="Verification pending — tap for how to get verified"
+        title="Verification pending. Tap for how to get verified"
         onClick={e => { e.stopPropagation(); e.preventDefault(); setOpen(true) }}
         style={{
           position: 'relative', display: 'inline-block', fontSize: size,
@@ -610,7 +649,7 @@ function GenesisChip() {
   return (
     <>
       <span
-        title="Genesis node — tap to learn more"
+        title="Genesis node. Tap to learn more"
         onClick={e => { e.stopPropagation(); setOpen(true) }}
         style={{ fontSize: 12, color: C.yellow, fontWeight: 'bold', cursor: 'help' }}
       >⚡ genesis</span>
@@ -624,7 +663,7 @@ function GenesisBadge({ size = 11 }: { size?: number }) {
   return (
     <>
       <span
-        title="Genesis node — tap to learn more"
+        title="Genesis node. Tap to learn more"
         onClick={e => { e.stopPropagation(); e.preventDefault(); setOpen(true) }}
         style={{ fontSize: size, flexShrink: 0, cursor: 'help' }}
       >⚡</span>
@@ -663,7 +702,7 @@ function GetNotifiedBanner() {
         <div style={{ fontSize: 12, fontWeight: 'bold', color: C.text }}>
           Mining alerts on Telegram{' '}
           <span style={{ fontWeight: 'normal', color: C.muted }}>
-            — DM <a href="https://t.me/ami9000_bot" target="_blank" rel="noreferrer" style={{ color: C.blue, fontWeight: 'bold', textDecoration: 'none' }}>@ami9000_bot</a>:{' '}
+            DM <a href="https://t.me/ami9000_bot" target="_blank" rel="noreferrer" style={{ color: C.blue, fontWeight: 'bold', textDecoration: 'none' }}>@ami9000_bot</a>:{' '}
             <code style={{ background: C.surface, padding: '1px 4px', borderRadius: 4, fontSize: 10 }}>/mynode YOUR_CODE</code>
           </span>
         </div>
@@ -832,7 +871,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         style={{ height: 380, borderRadius: 12, overflow: 'hidden', border: `1px solid ${C.border}` }}
       />
       <p style={{ fontSize: 11, color: C.muted, marginTop: 8, opacity: 0.7 }}>
-        Location is auto-detected from each device&apos;s IP and blurred to country level — markers are intentionally NOT exact.
+        Location is auto-detected from each device&apos;s IP and blurred to country level. Markers are intentionally NOT exact.
       </p>
     </section>
   )
@@ -1162,7 +1201,14 @@ const s: Record<string, React.CSSProperties> = {
   // No flex:1 — the lane shrinks to its content so the whole strip (mined +
   // divider + pending) sits CENTERED; when it grows past ~70% width it clips
   // on the left, keeping the newest blocks visible next to the divider.
-  tickerMinedLane: { display: 'flex', gap: 8, padding: '12px 8px', overflowX: 'auto' as const, overflowY: 'hidden' as const, minWidth: 0, maxWidth: 'calc(100% - 180px)', scrollbarWidth: 'thin' as const },
+  tickerMinedLane: {
+    display: 'flex', gap: 8, padding: '12px 8px', overflowX: 'auto' as const, overflowY: 'hidden' as const,
+    minWidth: 0, maxWidth: 'calc(100% - 180px)',
+    // Scrollbar hidden — the lane drag-scrolls with the mouse (see
+    // laneDragStart) and swipes natively on touch.
+    scrollbarWidth: 'none' as const, msOverflowStyle: 'none' as const,
+    cursor: 'grab', userSelect: 'none' as const,
+  },
   tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '10px 16px', opacity: 0.75 },
 
   block: {
