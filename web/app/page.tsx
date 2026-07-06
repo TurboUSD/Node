@@ -516,6 +516,34 @@ function StatPill({ label, value, color }: { label: string; value: number; color
   )
 }
 
+
+const VERIFY_HELP =
+  'Verification pending.\n\nTo get verified:\n' +
+  '1. Post a video on X showing this node running, tagging @turbousd\n' +
+  '2. Write your node name on paper, show it matches your screen\n' +
+  '3. Include the wallet holding your TUSD\n' +
+  '4. We manually review and whitelist your node'
+
+function UnverifiedBadge({ size = 10 }: { size?: number }) {
+  return (
+    <span
+      title={VERIFY_HELP}
+      onClick={e => { e.stopPropagation(); e.preventDefault(); alert(VERIFY_HELP) }}
+      style={{
+        position: 'relative', display: 'inline-block', fontSize: size,
+        color: '#6e7280', fontWeight: 700, flexShrink: 0, cursor: 'help',
+        lineHeight: 1, padding: '0 1px',
+      }}
+    >
+      ✓
+      <span style={{
+        position: 'absolute', left: '-10%', right: '-10%', top: '48%',
+        borderTop: '1.5px solid #6e7280', transform: 'rotate(-45deg)',
+      }} />
+    </span>
+  )
+}
+
 function GetNotifiedBanner() {
   // Dismissal persists 7 days (localStorage timestamp). Start hidden and
   // decide in an effect so SSR/hydration never disagree about the DOM.
@@ -779,9 +807,9 @@ function OnlineNodeCard({ node, onClick }: { node: NodeRow; onClick: () => void 
           <span style={{ ...s.nodeName, color: C.text }}>
             {node.display_name || `Node #${node.node_code}`}
           </span>
-          {node.is_verified && (
-            <span style={{ fontSize: 11, color: '#1d9bf0', fontWeight: 700 }}>✓</span>
-          )}
+          {node.is_verified
+            ? <span style={{ fontSize: 11, color: '#1d9bf0', fontWeight: 700 }}>✓</span>
+            : <UnverifiedBadge size={11} />}
           {node.is_genesis && (
             <span style={{ fontSize: 11 }}>⚡</span>
           )}
@@ -839,7 +867,9 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
               <a href={`/node/${node.node_code}`} onClick={e => e.stopPropagation()} style={{ fontSize: 12, fontWeight: 600, color: C.text, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {node.display_name || `Node #${node.node_code}`}
               </a>
-              {node.is_verified && <span style={{ fontSize: 10, color: '#1d9bf0', fontWeight: 700, flexShrink: 0 }}>✓</span>}
+              {node.is_verified
+                ? <span style={{ fontSize: 10, color: '#1d9bf0', fontWeight: 700, flexShrink: 0 }}>✓</span>
+                : <UnverifiedBadge size={10} />}
               {node.is_genesis  && <span style={{ fontSize: 10, flexShrink: 0 }}>⚡</span>}
             </div>
           </div>
@@ -870,7 +900,7 @@ function NodeRowCard({ node, right, prefix, onClick }: {
           <span style={{ color: C.text, fontWeight: 600 }}>
             {node.display_name || `Node #${node.node_code}`}
           </span>
-          {node.is_verified && <span style={s.verifiedBadge}>✓</span>}
+          {node.is_verified ? <span style={s.verifiedBadge}>✓</span> : <UnverifiedBadge size={11} />}
           {node.is_genesis  && <span style={s.genesisBadge}>⚡</span>}
           {node.display_name && <span style={s.nodeCode}>#{node.node_code}</span>}
         </div>
