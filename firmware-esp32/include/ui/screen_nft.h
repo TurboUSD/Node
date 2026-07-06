@@ -73,6 +73,7 @@ struct NftItem {
     char slug[64]          = {};  // OpenSea collection slug
     char image_url[256]    = {};
     float floor_price_eth  = 0.0f;
+    bool  pinned           = false;   // manual pick — ALWAYS earns a grid cell
     // Decoded artwork, ONE SLOT PER GRID CLASS (0=1x1, 1=2x2, 2=3x3) so
     // switching grid sizes can show something instantly. RGB565 in PSRAM,
     // produced by the nft_img bg task via img_decode.h. Retention: the
@@ -196,6 +197,41 @@ public:
             self->_applyCarouselSetting(on);
         }, LV_EVENT_CLICKED, this);
 
+        // "Data" toggle — same treatment as Carousel: green word = captions
+        // (collection name + floor) shown, grey = hidden. Default ON.
+        _dataSwitch = lv_label_create(_sizeBar);
+        lv_label_set_text(_dataSwitch, "Data");
+        lv_obj_set_style_text_font(_dataSwitch, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_pad_left(_dataSwitch, 8, 0);
+        lv_obj_add_flag(_dataSwitch, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(_dataSwitch, 10);
+        _refreshDataLabel();
+        lv_obj_add_event_cb(_dataSwitch, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            storage.setNftShowData(!storage.getNftShowData());
+            storage.setNftListsDirty(true);   // sync to the web on next heartbeat
+            self->_refreshDataLabel();
+            for (int i = 0; i < self->_cellCount; i++) self->_refreshCell(i);
+        }, LV_EVENT_CLICKED, this);
+
+        // Gear — edit mode (reorder arrows + delete on each cell), mirrors the
+        // tickers screen's gear. Sits just left of the Wallet word.
+        _editBtn = lv_label_create(_sizeBar);
+        lv_obj_add_flag(_editBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_label_set_text(_editBtn, LV_SYMBOL_SETTINGS);
+        lv_obj_set_style_text_font(_editBtn, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(_editBtn, lv_color_hex(NFT_CLR_MUTED), 0);
+        lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, -62, 0);
+        lv_obj_add_flag(_editBtn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(_editBtn, 10);
+        lv_obj_add_event_cb(_editBtn, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            self->_editMode = !self->_editMode;
+            lv_obj_set_style_text_color(self->_editBtn,
+                lv_color_hex(self->_editMode ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
+            self->_rebuildReq = true;   // cells gain/lose their edit overlays
+        }, LV_EVENT_CLICKED, this);
+
         // ── "+ Wallet" button (floats at the right of the strip) ──────────────
         // Dedicated target for entering/changing the NFT wallet, so the grid
         // never has to be tappable (which used to fire on swipe-in). IGNORE_LAYOUT
@@ -271,8 +307,14 @@ public:
 
     // Called from ui_manager when this screen becomes visible.
     void onShow() {
-        if (storage.hasNftPinlist()) {
-            // Manual pinlist takes priority over wallet-based fetch
+        // Instant display from the disk snapshot on the first show after boot
+        // (images come from the LittleFS art cache); a live refresh follows.
+        if (_nftCache.empty() && (storage.hasNftPinlist() || storage.hasNftWallet())) {
+            if (_loadSnapshot()) _rebuildGrid();
+        }
+
+        if (storage.hasNftPinlist() && !storage.hasNftWallet()) {
+            // Picks only (no wallet configured)
             if (_cacheExpired()) _startPinlistFetch();
             else                 _rebuildGrid();
         } else if (!storage.hasNftWallet()) {
@@ -308,6 +350,14 @@ private:
 
     int        _gridSize       = 9;    // 1, 4, or 9
     bool       _fetching       = false;
+    bool       _editMode       = false;   // gear: reorder/delete overlays on cells
+    volatile bool _rebuildReq  = false;   // deferred rebuild (set inside event cbs)
+    lv_obj_t*  _dataSwitch     = nullptr; // "Data" caption toggle word
+    lv_obj_t*  _editBtn        = nullptr; // gear button
+    // UI-thread copies of the NVS order/hidden lists (the img worker reads
+    // these from core 0 — plain char buffers, no String tearing).
+    char _ordBuf[384] = {};
+    char _hidBuf[384] = {};
 
     // Cells (max 9 for 3×3 grid)
     struct CellWidgets {
@@ -326,6 +376,7 @@ private:
     // Cached NFT data (persists until expired or wallet changes)
     std::vector<NftItem> _nftCache;
     uint32_t _cacheTimestamp = 0;
+    bool     _snapshotOnly   = false;   // cache came from disk → still needs a live refresh
 
     // Slideshow state
     uint8_t _slideshowSecs  = 10;
@@ -342,6 +393,7 @@ private:
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     bool _cacheExpired() {
+        if (_snapshotOnly) return true;   // disk snapshot displays, but refresh anyway
         if (_nftCache.empty()) return true;
         return (millis() - _cacheTimestamp) > NFT_CACHE_TTL_MS;
     }
@@ -357,36 +409,30 @@ private:
         _pendingResult.error = false;
         _pendingResult.count = 0;
 
-        lv_label_set_text(_loadingLabel, "Loading pinlisted NFTs...");
-        lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
-        for (int i = 0; i < _cellCount; i++) {
-            if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
+        // Only blank the screen when there's nothing to show — with a disk
+        // snapshot on display this refresh is silent.
+        if (_nftCache.empty()) {
+            lv_label_set_text(_loadingLabel, "Loading pinlisted NFTs...");
+            lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
+            for (int i = 0; i < _cellCount; i++)
+                if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
         }
 
         if (_bgTask) { _fetching = false; return; }   // never vTaskDelete — see _startFetch
         xTaskCreatePinnedToCore(_bgPinlistFetchFn, "nft_pin", 16384, nullptr, 1, (TaskHandle_t*)&_bgTask, 0);
     }
 
-    static void _bgPinlistFetchFn(void* /*pvArg*/) {
-        NftScreen* self = s_instance;
-        if (!self) { vTaskDelete(nullptr); return; }
-        netLock();   // exclusive TLS ownership — see net_lock.h
-
+    // Parses the stored pinlist and APPENDS each pick to _pendingResult
+    // (pinned=true, deduped by image URL). Used by the pinlist-only task AND
+    // by the wallet task so manual picks merge into the wallet scan.
+    static void _appendPinlistItems() {
         String pinlist = storage.getNftPinlist();
-        if (pinlist.length() == 0) {
-            snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "Pinlist is empty.");
-            _pendingResult.error = true;
-            _pendingResult.ready = true;
-            netUnlock();
-        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
-            vTaskDelete(nullptr);
-            return;
-        }
+        if (pinlist.length() == 0) return;
 
         // ── Parse "chain:contract:tokenId,…" ─────────────────────────────────
         struct PinEntry {
             char chain[16]    = {};
-            char contract[43] = {};
+            char contract[72] = {};   // EVM 0x… (42) or Ordinals inscription id (66)
             char tokenId[24]  = {};
         };
 
@@ -413,21 +459,27 @@ private:
             }
         }
 
-        if (entryCount == 0) {
-            snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "No valid pinlist entries.");
-            _pendingResult.error = true;
-            _pendingResult.ready = true;
-            netUnlock();
-        if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
-            vTaskDelete(nullptr);
-            return;
-        }
+        if (entryCount == 0) return;
 
         // ── Fetch each NFT individually from OpenSea ──────────────────────────
-        _pendingResult.count = 0;
 
         for (int ei = 0; ei < entryCount && _pendingResult.count < NFT_MAX_ITEMS; ei++) {
             PinEntry& e = entries[ei];
+
+            // Bitcoin Ordinals ("ord:<inscriptionId>:0"): no OpenSea metadata —
+            // the artwork is served straight by ordinals.com/content/ (PNG for
+            // NodeMonkes and friends; SVG/webp fall back to the wsrv proxy).
+            if (strcmp(e.chain, "ord") == 0) {
+                NftItem& oi = _pendingResult.items[_pendingResult.count++];
+                snprintf(oi.name, sizeof(oi.name), "Ordinal %.8s", e.contract);
+                snprintf(oi.collection, sizeof(oi.collection), "Ordinals");
+                snprintf(oi.slug, sizeof(oi.slug), "ordinals");
+                snprintf(oi.image_url, sizeof(oi.image_url),
+                         "https://ordinals.com/content/%s", e.contract);
+                oi.floor_price_eth = 0.0f;
+                oi.pinned = true;
+                continue;
+            }
 
             // GET /api/v2/chain/{chain}/contract/{contract}/nfts/{tokenId}
             String url = String(ENDPOINT_OPENSEA_BASE)
@@ -484,8 +536,42 @@ private:
             strncpy(item2.collection, colName[0] ? colName : slug, sizeof(item2.collection) - 1);
             strncpy(item2.image_url,  image_url,                   sizeof(item2.image_url)  - 1);
             item2.floor_price_eth = fp;
+            item2.pinned          = true;   // manual pick → always earns a grid cell
 
             delay(NFT_RATELIMIT_DELAY_MS);
+        }
+
+
+        // Dedupe: a pick that also came in via the wallet scan keeps ONE entry
+        // (the pinned one — mark the wallet copy pinned and drop the extra).
+        for (int a = 0; a < _pendingResult.count; a++) {
+            for (int b = a + 1; b < _pendingResult.count; b++) {
+                if (strcmp(_pendingResult.items[a].image_url, _pendingResult.items[b].image_url) != 0) continue;
+                _pendingResult.items[a].pinned = _pendingResult.items[a].pinned || _pendingResult.items[b].pinned;
+                for (int c = b; c + 1 < _pendingResult.count; c++)
+                    _pendingResult.items[c] = _pendingResult.items[c + 1];
+                _pendingResult.count--;
+                b--;
+            }
+        }
+    }
+
+    static void _bgPinlistFetchFn(void* /*pvArg*/) {
+        NftScreen* self = s_instance;
+        if (!self) { vTaskDelete(nullptr); return; }
+        netLock();   // exclusive TLS ownership — see net_lock.h
+
+
+        _pendingResult.count = 0;
+        _appendPinlistItems();
+        if (_pendingResult.count == 0) {
+            snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "No valid pinlist entries.");
+            _pendingResult.error = true;
+            _pendingResult.ready = true;
+            netUnlock();
+            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+            vTaskDelete(nullptr);
+            return;
         }
 
         _sortByFloor();   // most valuable collection first, same as wallet mode
@@ -516,12 +602,13 @@ private:
         _pendingResult.error = false;
         _pendingResult.count = 0;
 
-        // Show spinner
-        lv_label_set_text(_loadingLabel, "Fetching your NFTs...");
-        lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
-        // Hide existing cells
-        for (int i = 0; i < _cellCount; i++) {
-            if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
+        // Spinner + blank grid only when there's nothing on screen yet —
+        // with a snapshot showing, this is a silent background refresh.
+        if (_nftCache.empty()) {
+            lv_label_set_text(_loadingLabel, "Fetching your NFTs...");
+            lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
+            for (int i = 0; i < _cellCount; i++)
+                if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
         }
 
         // NEVER vTaskDelete here: error exits inside _bgFetchFn used to leave
@@ -538,6 +625,13 @@ private:
         if (_imgDirty) {
             _imgDirty = false;
             for (int i = 0; i < _cellCount; i++) _refreshCell(i);
+        }
+
+        // Deferred edit-mode rebuild (reorder/delete/gear ran inside an event
+        // callback of a widget the rebuild would delete).
+        if (_rebuildReq) {
+            _rebuildReq = false;
+            _rebuildGrid();
         }
 
         // Auto-kick: whenever no worker is running but images are still
@@ -588,7 +682,96 @@ private:
                 if (prev.px[c]) free(prev.px[c]);   // no longer in the wallet
         _imgGen++;                                        // indices changed → stale workers abort
         _cacheTimestamp = millis();
+        _snapshotOnly   = false;
+        _saveSnapshot();                                  // reboots restore instantly from disk
+
+        // Report the detected collections (ALL of them, hidden included) so
+        // the web setup page can render the collections board.
+        {
+            String rep = "[";
+            int total = (int)_nftCache.size();
+            bool first = true;
+            for (int i = 0; i < total; ) {
+                int j = i;
+                while (j < total && strcmp(_nftCache[j].slug, _nftCache[i].slug) == 0) j++;
+                String nm = _nftCache[i].collection;
+                nm.replace("\\", ""); nm.replace("\"", "");   // keep the JSON valid
+                if (!first) rep += ',';
+                first = false;
+                rep += "{\"slug\":\"" + String(_nftCache[i].slug) + "\",\"name\":\"" + nm +
+                       "\",\"floor\":" + String(_nftCache[i].floor_price_eth, 4) + "}";
+                i = j;
+            }
+            rep += "]";
+            if (rep != storage.getNftCollsReport()) {
+                storage.setNftCollsReport(rep);
+                storage.setNftCollsDirty(true);   // next heartbeat pushes it up
+                Serial.printf("NFT: collections report updated (%u bytes) — will push on next heartbeat\n",
+                              (unsigned)rep.length());
+            } else {
+                Serial.println("NFT: collections report unchanged");
+            }
+        }
         _rebuildGrid();
+    }
+
+    // ── Disk snapshot of the NFT list ────────────────────────────────────────
+    // Metadata only (names, slugs, image URLs, floors) — with the compressed
+    // images already on LittleFS this makes a reboot show the full gallery in
+    // ~2 s with zero network, while a silent OpenSea refresh runs behind.
+    struct NftSnapRec {
+        char  name[64];
+        char  collection[64];
+        char  slug[64];
+        char  image_url[256];
+        float floor;
+        uint8_t pinned;
+    };
+
+    void _saveSnapshot() {
+        uint32_t n = (uint32_t)min((size_t)NFT_MAX_ITEMS, _nftCache.size());
+        if (n == 0) return;
+        size_t sz = 4 + n * sizeof(NftSnapRec);
+        uint8_t* buf = (uint8_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!buf) return;
+        memcpy(buf, &n, 4);
+        NftSnapRec* r = (NftSnapRec*)(buf + 4);
+        for (uint32_t i = 0; i < n; i++) {
+            memset(&r[i], 0, sizeof(NftSnapRec));
+            strncpy(r[i].name,       _nftCache[i].name,       sizeof(r[i].name) - 1);
+            strncpy(r[i].collection, _nftCache[i].collection, sizeof(r[i].collection) - 1);
+            strncpy(r[i].slug,       _nftCache[i].slug,       sizeof(r[i].slug) - 1);
+            strncpy(r[i].image_url,  _nftCache[i].image_url,  sizeof(r[i].image_url) - 1);
+            r[i].floor  = _nftCache[i].floor_price_eth;
+            r[i].pinned = _nftCache[i].pinned ? 1 : 0;
+        }
+        diskcache::save("meta", "nft_list", buf, sz);
+        free(buf);
+    }
+
+    bool _loadSnapshot() {
+        size_t len = 0;
+        uint8_t* buf = diskcache::loadAlloc("meta", "nft_list", &len);
+        if (!buf) return false;
+        uint32_t n = 0;
+        if (len >= 4) memcpy(&n, buf, 4);
+        if (n == 0 || n > NFT_MAX_ITEMS || len != 4 + n * sizeof(NftSnapRec)) { free(buf); return false; }
+        NftSnapRec* r = (NftSnapRec*)(buf + 4);
+        _nftCache.clear();
+        for (uint32_t i = 0; i < n; i++) {
+            NftItem it;
+            strncpy(it.name,       r[i].name,       sizeof(it.name) - 1);
+            strncpy(it.collection, r[i].collection, sizeof(it.collection) - 1);
+            strncpy(it.slug,       r[i].slug,       sizeof(it.slug) - 1);
+            strncpy(it.image_url,  r[i].image_url,  sizeof(it.image_url) - 1);
+            it.floor_price_eth = r[i].floor;
+            it.pinned          = r[i].pinned != 0;
+            _nftCache.push_back(it);
+        }
+        free(buf);
+        _snapshotOnly = true;   // display now, but still refresh from OpenSea
+        Serial.printf("NFT: %u items restored from disk snapshot\n", (unsigned)n);
+        return true;
     }
 
     // ── Grid builder ──────────────────────────────────────────────────────────
@@ -632,18 +815,18 @@ private:
         lv_coord_t cellW = (lv_coord_t)((480 - 4 - (side - 1) * 4) / side);
         lv_coord_t cellH = (lv_coord_t)((NFT_GRID_H - 4 - (side - 1) * 4) / side);
 
+        _refreshListBufs();   // pick up manual order + hidden list from NVS
         int total = (int)_nftCache.size();
         int gStart[9], gCount[9], groups = 0;
         if (n == 1) {
             gStart[0] = 0; gCount[0] = total; groups = 1;
         } else {
-            for (int i = 0; i < total && groups < n; ) {
-                int j = i;
-                while (j < total && strcmp(_nftCache[j].slug, _nftCache[i].slug) == 0) j++;
-                gStart[groups] = i;
-                gCount[groups] = j - i;
+            NftGrp g[NFT_MAX_COLLECTIONS];
+            int gn = _buildGroups(g, NFT_MAX_COLLECTIONS, n);
+            for (int k = 0; k < gn && groups < n; k++) {
+                gStart[groups] = g[k].start;
+                gCount[groups] = g[k].count;
                 groups++;
-                i = j;
             }
         }
 
@@ -750,8 +933,9 @@ private:
             // screen shimmer ("interference").
             lv_obj_t* imgObj = lv_img_create(cw.container);
             lv_img_set_src(imgObj, &cw.imgDsc);
-            // Centered within the ART AREA (cell minus the caption band).
-            lv_coord_t artH = cw_h - NFT_CAPTION_H;
+            // Centered within the ART AREA (cell minus the caption band —
+            // or the whole cell when the Data captions are toggled off).
+            lv_coord_t artH = storage.getNftShowData() ? (lv_coord_t)(cw_h - NFT_CAPTION_H) : cw_h;
             lv_coord_t yOff = (artH > (lv_coord_t)ph) ? (lv_coord_t)((artH - ph) / 2) : 0;
             lv_obj_align(imgObj, LV_ALIGN_TOP_MID, 0, yOff);
             lv_obj_clear_flag(imgObj, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
@@ -774,25 +958,68 @@ private:
             }
         }
 
+        // ── Edit-mode overlay: [◀] [✕] [▶] reorder/delete controls ──
+        if (_editMode && _gridSize != 1) {
+            static const char* glyphs[3] = { LV_SYMBOL_LEFT, LV_SYMBOL_CLOSE, LV_SYMBOL_RIGHT };
+            static lv_event_cb_t cbs[3]  = { _onCellMoveLeft, _onCellDelete, _onCellMoveRight };
+            for (int b = 0; b < 3; b++) {
+                lv_obj_t* btn = lv_btn_create(cw.container);
+                lv_obj_set_size(btn, 34, 30);
+                lv_obj_set_style_bg_color(btn, lv_color_hex(0x000000), 0);
+                lv_obj_set_style_bg_opa(btn, LV_OPA_70, 0);
+                lv_obj_set_style_border_color(btn, lv_color_hex(0x3a3a42), 0);
+                lv_obj_set_style_border_width(btn, 1, 0);
+                lv_obj_set_style_radius(btn, 6, 0);
+                lv_obj_align(btn, LV_ALIGN_CENTER, (lv_coord_t)((b - 1) * 42), 0);
+                lv_obj_set_user_data(btn, (void*)(intptr_t)idx);
+                lv_obj_add_event_cb(btn, cbs[b], LV_EVENT_CLICKED, nullptr);
+                lv_obj_t* l = lv_label_create(btn);
+                lv_label_set_text(l, glyphs[b]);
+                lv_obj_set_style_text_color(l, lv_color_hex(b == 1 ? 0xff4d4d : NFT_CLR_TEXT), 0);
+                lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+                lv_obj_center(l);
+            }
+        }
+
+        if (!storage.getNftShowData()) return;   // "Data" toggle off → no captions
+
         // ── Caption band (dedicated dark strip UNDER the artwork): name on
         // the left, floor on the right, SAME baseline row — readable always,
         // never overlaid on the art.
+        // Name: smaller face on the dense 3x3 grid; if the full name STILL
+        // wouldn't fit next to the floor price, drop the trailing "#1234" id.
+        const lv_font_t* nameFont = (_gridSize == 9) ? &lv_font_montserrat_8
+                                                     : &lv_font_montserrat_10;
+        char nameBuf[64];
+        snprintf(nameBuf, sizeof(nameBuf), "%s", item.name[0] ? item.name : item.collection);
+        lv_coord_t nameAvail = (lv_coord_t)(cw_w - 52);   // floor takes ~48 px
+        lv_point_t tsz;
+        lv_txt_get_size(&tsz, nameBuf, nameFont, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (tsz.x > nameAvail) {
+            char* hash = strrchr(nameBuf, '#');
+            if (hash && hash > nameBuf) {
+                while (hash > nameBuf && *(hash - 1) == ' ') hash--;
+                *hash = '\0';   // "The Penimals #1946" → "The Penimals"
+            }
+        }
+
         cw.nameLbl = lv_label_create(cw.container);
-        lv_label_set_text(cw.nameLbl, item.name[0] ? item.name : item.collection);
+        lv_label_set_text(cw.nameLbl, nameBuf);
         lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(cw.nameLbl, (lv_coord_t)(cw_w - 60));   // leave room for the floor
-        lv_obj_set_style_text_font(cw.nameLbl, &lv_font_montserrat_10, 0);
+        lv_obj_set_width(cw.nameLbl, nameAvail);
+        lv_obj_set_style_text_font(cw.nameLbl, nameFont, 0);
         lv_obj_set_style_text_color(cw.nameLbl, lv_color_hex(NFT_CLR_TEXT), 0);
         lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -2);
 
         if (item.floor_price_eth > 0) {
             cw.floorLbl = lv_label_create(cw.container);
             char floorBuf[24];
-            // "0.005 \u039E" — the Xi comes from the embedded 1-glyph font.
-            if (item.floor_price_eth < 0.001f)
-                snprintf(floorBuf, sizeof(floorBuf), "%.4f \xCE\x9E", item.floor_price_eth);
-            else
+            // Two decimals to save caption space ("0.005 Ξ" keeps a third so
+            // dust floors don't render as 0.00).
+            if (item.floor_price_eth < 0.01f)
                 snprintf(floorBuf, sizeof(floorBuf), "%.3f \xCE\x9E", item.floor_price_eth);
+            else
+                snprintf(floorBuf, sizeof(floorBuf), "%.2f \xCE\x9E", item.floor_price_eth);
             lv_label_set_text(cw.floorLbl, floorBuf);
             lv_obj_set_style_text_font(cw.floorLbl, ethXiFont10(), 0);
             uint32_t priceColor = item.floor_price_eth >= 1.0f ? NFT_CLR_GOLD :
@@ -822,6 +1049,47 @@ private:
                 lv_obj_set_style_bg_color(dot, lv_color_hex(active ? NFT_CLR_GREEN : 0x444448), 0);
             }
         }
+    }
+
+    // ── Edit-mode actions (persisted to NVS; visual rebuild is DEFERRED via
+    // _rebuildReq — these run inside the tapped button's own event) ──
+    void _moveCollection(int cellIdx, int dir) {
+        NftGrp g[NFT_MAX_COLLECTIONS];
+        _refreshListBufs();
+        int n = _buildGroups(g, NFT_MAX_COLLECTIONS, _classCells(_gridClass()));
+        int to = cellIdx + dir;
+        if (cellIdx < 0 || cellIdx >= n || to < 0 || to >= n) return;
+        NftGrp t = g[cellIdx]; g[cellIdx] = g[to]; g[to] = t;
+        String ord;
+        for (int k = 0; k < n; k++) { if (k) ord += ','; ord += g[k].slug; }
+        storage.setNftCollOrder(ord);
+        storage.setNftListsDirty(true);   // sync to the web on next heartbeat
+        _rebuildReq = true;
+    }
+
+    void _deleteCollection(int cellIdx) {
+        NftGrp g[NFT_MAX_COLLECTIONS];
+        _refreshListBufs();
+        int n = _buildGroups(g, NFT_MAX_COLLECTIONS, _classCells(_gridClass()));
+        if (cellIdx < 0 || cellIdx >= n) return;
+        String hid = storage.getNftHidden();
+        if (hid.length()) hid += ',';
+        hid += g[cellIdx].slug;
+        storage.setNftHidden(hid);
+        storage.setNftListsDirty(true);   // sync to the web on next heartbeat
+        // The freed cell auto-fills with the NEXT collection by floor on the
+        // deferred rebuild (the group walk simply skips hidden slugs).
+        _rebuildReq = true;
+    }
+
+    static void _onCellMoveLeft(lv_event_t* e)  {
+        if (s_instance) s_instance->_moveCollection((int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e)), -1);
+    }
+    static void _onCellMoveRight(lv_event_t* e) {
+        if (s_instance) s_instance->_moveCollection((int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e)), +1);
+    }
+    static void _onCellDelete(lv_event_t* e)    {
+        if (s_instance) s_instance->_deleteCollection((int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e)));
     }
 
     void _advanceCell(int idx) {
@@ -866,6 +1134,13 @@ private:
         lv_obj_set_style_text_color(_carouselSwitch,
             lv_color_hex(on ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
         lv_obj_set_style_text_opa(_carouselSwitch, on ? LV_OPA_COVER : LV_OPA_70, 0);
+    }
+
+    void _refreshDataLabel() {
+        if (!_dataSwitch) return;
+        bool on = storage.getNftShowData();
+        lv_obj_set_style_text_color(_dataSwitch, lv_color_hex(on ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
+        lv_obj_set_style_text_opa(_dataSwitch, on ? LV_OPA_COVER : LV_OPA_70, 0);
     }
 
     void _applyCarouselSetting(bool /*on*/) {
@@ -1000,6 +1275,21 @@ private:
     // grid size changes, pixels are re-decoded from the disk cache (fast).
     #define NFT_IMG_MAX_FETCH 12   // per run — carousel taps re-trigger for the rest
 
+    static String _urlEncode(const char* src) {
+        String out;
+        for (const char* p = src; *p; p++) {
+            char c = *p;
+            if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') {
+                out += c;
+            } else {
+                char b[4];
+                snprintf(b, sizeof(b), "%%%02X", (unsigned char)c);
+                out += b;
+            }
+        }
+        return out;
+    }
+
     // Grid class: 0 = 1x1, 1 = 2x2, 2 = 3x3.
     int _gridClass() const { return _gridSize == 1 ? 0 : (_gridSize == 4 ? 1 : 2); }
     static int _classCells(int cls) { return cls == 0 ? 1 : (cls == 1 ? 4 : 9); }
@@ -1012,22 +1302,116 @@ private:
         hOut = (NFT_GRID_H - 4 - (sd - 1) * 4) / sd - 8 - NFT_CAPTION_H;   // artwork area above the caption band
     }
 
+    // One collection group in the (floor-sorted) cache: contiguous run.
+    struct NftGrp {
+        int  start;
+        int  count;
+        char slug[64];
+    };
+
+    static bool _listHas(const char* csv, const char* slug) {
+        const char* p = csv;
+        size_t sl = strlen(slug);
+        while (*p) {
+            const char* c = strchr(p, ',');
+            size_t len = c ? (size_t)(c - p) : strlen(p);
+            if (len == sl && strncmp(p, slug, sl) == 0) return true;
+            if (!c) break;
+            p = c + 1;
+        }
+        return false;
+    }
+
+    // Effective collection list: contiguous runs of the floor-sorted cache,
+    // minus hidden ("deleted") collections, re-ordered by the user's manual
+    // order (unlisted collections keep their floor-desc position after the
+    // listed ones' relative order is applied). Deleting a collection simply
+    // lets the NEXT collection by floor take the freed cell.
+    // `visCells` = how many cells the caller will show: every group holding a
+    // MANUAL PICK is promoted into that window (displacing the lowest wallet
+    // collections), then the whole visible set keeps floor-desc order.
+    int _buildGroups(NftGrp* g, int maxG, int visCells = 9) {
+        int total = (int)_nftCache.size();
+        int n = 0;
+        for (int i = 0; i < total && n < maxG; ) {
+            int j = i;
+            while (j < total && strcmp(_nftCache[j].slug, _nftCache[i].slug) == 0) j++;
+            if (!_listHas(_hidBuf, _nftCache[i].slug)) {
+                g[n].start = i;
+                g[n].count = j - i;
+                strncpy(g[n].slug, _nftCache[i].slug, sizeof(g[n].slug) - 1);
+                g[n].slug[sizeof(g[n].slug) - 1] = 0;
+                n++;
+            }
+            i = j;
+        }
+        if (_ordBuf[0]) {
+            NftGrp tmp[NFT_MAX_COLLECTIONS];
+            bool used[NFT_MAX_COLLECTIONS] = {};
+            int m = 0;
+            const char* p = _ordBuf;
+            while (*p && m < n) {
+                const char* c = strchr(p, ',');
+                size_t len = c ? (size_t)(c - p) : strlen(p);
+                for (int k = 0; k < n; k++) {
+                    if (!used[k] && strlen(g[k].slug) == len && strncmp(g[k].slug, p, len) == 0) {
+                        tmp[m++] = g[k];
+                        used[k] = true;
+                        break;
+                    }
+                }
+                if (!c) break;
+                p = c + 1;
+            }
+            for (int k = 0; k < n; k++) if (!used[k]) tmp[m++] = g[k];
+            memcpy(g, tmp, sizeof(NftGrp) * n);
+        }
+
+        // Promote pinned groups into the visible window (manual picks must
+        // ALWAYS make the grid). Scan beyond the window; each pinned group
+        // found outside is moved to the last in-window position, pushing the
+        // lowest unpinned collection out. Relative floor order is preserved.
+        if (visCells > 0 && n > visCells) {
+            for (int k = visCells; k < n; k++) {
+                bool grpPinned = false;
+                for (int q = 0; q < g[k].count; q++)
+                    if (_nftCache[g[k].start + q].pinned) { grpPinned = true; break; }
+                if (!grpPinned) continue;
+                // find the lowest unpinned group inside the window to evict
+                int evict = -1;
+                for (int w = visCells - 1; w >= 0; w--) {
+                    bool wPinned = false;
+                    for (int q = 0; q < g[w].count; q++)
+                        if (_nftCache[g[w].start + q].pinned) { wPinned = true; break; }
+                    if (!wPinned) { evict = w; break; }
+                }
+                if (evict < 0) break;   // window is all picks already
+                NftGrp moved = g[k];
+                for (int w = k; w > evict; w--) g[w] = g[w - 1];
+                g[evict] = moved;
+            }
+        }
+        return n;
+    }
+
+    void _refreshListBufs() {
+        String o = storage.getNftCollOrder();
+        String h = storage.getNftHidden();
+        strncpy(_ordBuf, o.c_str(), sizeof(_ordBuf) - 1);
+        strncpy(_hidBuf, h.c_str(), sizeof(_hidBuf) - 1);
+    }
+
     // Whether item `idx` is entitled to keep/get a decoded slot for class
     // `cls`: everything for the CURRENT grid; for other grids only the cell
     // covers (first item of each collection group, up to that grid's cell
     // count) — those are what make grid switching feel instant.
     bool _entitledSlot(int cls, int idx) {
         if (cls == _gridClass()) return true;
+        NftGrp g[NFT_MAX_COLLECTIONS];
         int cells = _classCells(cls);
-        int total = (int)_nftCache.size(), rank = 0, i = 0;
-        while (i < total && rank < cells) {
-            int j = i;
-            while (j < total && strcmp(_nftCache[j].slug, _nftCache[i].slug) == 0) j++;
-            if (idx == i) return true;        // group cover within top `cells`
-            if (idx > i && idx < j) return false;
-            rank++;
-            i = j;
-        }
+        int n = _buildGroups(g, NFT_MAX_COLLECTIONS, cells);
+        for (int k = 0; k < n && k < cells; k++)
+            if (g[k].start == idx) return true;   // a visible cell's cover
         return false;
     }
 
@@ -1100,6 +1484,15 @@ private:
                     uint8_t* px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
                                                       boxW, boxH, it.name, it.image_url, &w, &h);
                     if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h);
+                    if (!px) {
+                        // Last resort for formats the chip can't decode (SVG —
+                        // e.g. on-chain Checks —, webp, gif): the wsrv.nl image
+                        // proxy rasterizes/transcodes ANYTHING to JPEG. Only
+                        // reached when both direct attempts failed, and the
+                        // JPEG result lands in the disk cache like any other.
+                        String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=jpg";
+                        px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, it.image_url, &w, &h);
+                    }
 
                     if (myGen != self->_imgGen) {
                         // Grid/cache changed mid-decode: wrong size or wrong
@@ -1374,8 +1767,13 @@ private:
         // Sort by floor price descending, tie-broken by slug so items of the
         // SAME collection stay contiguous — the grid walks these as groups
         // (one collection per cell). Bubble sort — small N.
+        // Manual picks MERGE into the wallet scan (dedup by image URL) — a
+        // pick always earns a grid cell via the pinned-promotion in
+        // _buildGroups(), displacing the lowest wallet collection if needed.
+        _appendPinlistItems();
+
         _sortByFloor();
-        Serial.printf("NFT: %d items after spam filter (sorted by floor desc)\n", _pendingResult.count);
+        Serial.printf("NFT: %d items after spam filter + picks (sorted by floor desc)\n", _pendingResult.count);
 
         _pendingResult.ready = true;
 

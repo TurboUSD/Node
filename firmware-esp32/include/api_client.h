@@ -212,6 +212,24 @@ public:
             reqDoc["alarm_enabled"] = storage.getAlarmEnabled();
             reqDoc["alarm_days"]    = storage.getAlarmDays();
         }
+
+        // NFT gallery edited ON THE DEVICE (gear mode / Data toggle) → push up.
+        bool nftListsWereDirty = storage.getNftListsDirty();
+        if (nftListsWereDirty) {
+            reqDoc["nft_coll_order"]  = storage.getNftCollOrder();
+            reqDoc["nft_coll_hidden"] = storage.getNftHidden();
+            reqDoc["nft_show_data"]   = storage.getNftShowData();
+        }
+        // Detected collections list changed → report it (feeds the web board).
+        bool collsWereDirty = storage.getNftCollsDirty();
+        if (collsWereDirty) {
+            String rep = storage.getNftCollsReport();
+            if (rep.length()) {
+                reqDoc["nft_collections"] = serialized(rep);
+                Serial.printf("heartbeat: pushing NFT collections report (%u bytes)\n",
+                              (unsigned)rep.length());
+            }
+        }
         String payload;
         serializeJson(reqDoc, payload);
 
@@ -227,11 +245,14 @@ public:
         if (deserializeJson(respDoc, http.getStream()) == DeserializationError::Ok) {
             JsonObjectConst cfg = respDoc["config"];
             if (!cfg.isNull()) {
-                applyServerConfig(cfg, /*skipAlarm=*/alarmWasDirty);
+                applyServerConfig(cfg, /*skipAlarm=*/alarmWasDirty,
+                                  /*skipNftLists=*/nftListsWereDirty);
             }
         }
         http.end();
-        if (alarmWasDirty) storage.clearAlarmDirty();   // pushed successfully
+        if (alarmWasDirty)    storage.clearAlarmDirty();       // pushed successfully
+        if (nftListsWereDirty) storage.setNftListsDirty(false);
+        if (collsWereDirty)    storage.setNftCollsDirty(false);
         return true;
     }
 
@@ -591,7 +612,7 @@ private:
     // skipAlarm: true while a device-side alarm change is being pushed up —
     // the server copy is (at best) what we just sent, and applying it back
     // could race/revert the local value.
-    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false) {
+    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false, bool skipNftLists = false) {
         // Node identity (Node & Network screen headline)
         if (!cfg["display_name"].isNull())      storage.setDisplayName(cfg["display_name"].as<String>());
         if (!cfg["is_verified"].isNull())       storage.setIsVerified(cfg["is_verified"].as<bool>());
@@ -668,7 +689,13 @@ private:
         if (!cfg["nft_pinlist"].isNull())        storage.setNftPinlist(cfg["nft_pinlist"].as<String>());
 
         // Screen order
-        if (!cfg["screen_order"].isNull()) storage.setScreenOrder(cfg["screen_order"].as<String>());
+        if (!cfg["screen_order"].isNull())  storage.setScreenOrder(cfg["screen_order"].as<String>());
+        if (!cfg["screen_hidden"].isNull()) storage.setScreenHidden(cfg["screen_hidden"].as<String>());
+        if (!skipNftLists) {
+            if (!cfg["nft_show_data"].isNull())   storage.setNftShowData(cfg["nft_show_data"].as<bool>());
+            if (!cfg["nft_coll_order"].isNull())  storage.setNftCollOrder(cfg["nft_coll_order"].as<String>());
+            if (!cfg["nft_coll_hidden"].isNull()) storage.setNftHidden(cfg["nft_coll_hidden"].as<String>());
+        }
     }
 };
 

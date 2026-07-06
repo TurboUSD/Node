@@ -237,7 +237,7 @@ inline void refreshSharedFooter(SharedFooterRefs& refs, const String& nodeName, 
     if (refs.nodeNameLabel)  lv_label_set_text(refs.nodeNameLabel, nodeName.c_str());
     if (refs.nodeCountLabel) {
         char countBuf[24];
-        snprintf(countBuf, sizeof(countBuf), "%d NODES", onlineNodeCount);
+        snprintf(countBuf, sizeof(countBuf), "%d NODE%s", onlineNodeCount, onlineNodeCount == 1 ? "" : "S");
         lv_label_set_text(refs.nodeCountLabel, countBuf);
         // Re-align the [name | count] chain to the name's CURRENT width — the
         // build-time align happened while the name was empty.

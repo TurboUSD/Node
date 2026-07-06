@@ -214,8 +214,11 @@ void loop() {
     // [0x7E][0xEE][checksum] hello every 5 s. The ESP32 logs it ("RP2040
     // heartbeat RECEIVED"), which proves the RP→ESP wire and that THIS
     // firmware is running, without opening the RP2040's USB port.
+    // PERMANENT (the first version stopped after 2 minutes — but the RP2040
+    // doesn't reboot when the ESP32 is reflashed, so by the time anyone
+    // watched the ESP32 serial the hellos were long gone). 3 bytes / 10 s.
     static uint32_t lastHelloAt = 0;
-    if (millis() < 120000 && millis() - lastHelloAt > 5000) {
+    if (millis() - lastHelloAt > 10000) {
         lastHelloAt = millis();
         uint8_t f[3] = { 0x7E, 0xEE, (uint8_t)(0x7E ^ 0xEE) };
         Serial1.write(f, sizeof(f));
@@ -238,7 +241,8 @@ void loop() {
         //   2 boot beeps + silence           → no bytes ever arrive from the
         //     ESP32 → electrical/pin-level problem, not firmware.
         static uint32_t lastBlipAt = 0;
-        if (millis() < 120000 && millis() - lastBlipAt > 3000) {
+        uint32_t blipEvery = millis() < 120000 ? 3000 : 10000;   // always-on diagnostic
+        if (millis() - lastBlipAt > blipEvery) {
             lastBlipAt = millis();
             analogWrite(BUZZER_PIN, 60);
             delay(35);

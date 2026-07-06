@@ -11,6 +11,7 @@
 #include "driver/gpio.h"
 #include "soc/usb_serial_jtag_reg.h"   // USB pad release — see begin()
 #include "soc/rtc_cntl_reg.h"          // RTC-domain USB PHY override — see begin()
+#include "soc/io_mux_reg.h"            // PIN_INPUT_ENABLE — pad level read-back diagnostic
 
 enum class Rp2040Command : uint8_t {
     PLAY_ALARM    = 0x01,  // legacy: plays at volume 2 (soft default)
@@ -66,6 +67,13 @@ public:
         _e2 = uart_param_config(LINK_UART, &cfg);
         _e3 = uart_set_pin(LINK_UART, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN,
                            UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        // Enable the INPUT BUFFER on both pads (doesn't disturb the matrix
+        // routing) so printStatus() can read back the physical line levels.
+        // UART idles HIGH: tx_pad=1 → our pad is really driving; rx_pad=1 →
+        // the RP2040's TX is really reaching us. Any 0 = that line is dead
+        // at the electrical level and no firmware can fix it.
+        PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[RP2040_UART_TX_PIN]);
+        PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[RP2040_UART_RX_PIN]);
         printStatus();
         _ok = (_e1 == ESP_OK && _e2 == ESP_OK && _e3 == ESP_OK);
         if (!_ok) Serial.println("RP-link: INIT FAILED — alarm commands cannot reach the RP2040");
@@ -77,8 +85,14 @@ public:
     // handshake needs ~45 KB contiguous — if maxblk sits below that, that's
     // the whole "-32512 SSL memory" story in one number).
     void printStatus() {
-        Serial.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d) | heap=%u maxblk=%u\n",
+        uint32_t baud = 0;
+        uart_get_baudrate(LINK_UART, &baud);
+        Serial.printf("RP-link: install=%d config=%d set_pin=%d (TX=%d RX=%d, UART%d, %lu baud) | "
+                      "tx_pad=%d rx_pad=%d | heap=%u maxblk=%u\n",
                       (int)_e1, (int)_e2, (int)_e3, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN, (int)LINK_UART,
+                      (unsigned long)baud,
+                      gpio_get_level((gpio_num_t)RP2040_UART_TX_PIN),
+                      gpio_get_level((gpio_num_t)RP2040_UART_RX_PIN),
                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     }

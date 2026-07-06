@@ -81,15 +81,25 @@ public:
         projectionSeries = lv_chart_add_series(chart, lv_color_hex(0xff4d4d), LV_CHART_AXIS_PRIMARY_Y);
         lv_obj_add_event_cb(chart, _axisDrawCb, LV_EVENT_DRAW_PART_BEGIN, this);
 
-        yearsButton = lv_btn_create(chart);
-        lv_obj_set_style_bg_color(yearsButton, lv_color_hex(0x262626), 0);
-        lv_obj_set_style_border_color(yearsButton, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_border_width(yearsButton, 1, 0);
+        // Horizon selector: SAME widget/format as the turbo chart's timeframe
+        // dropdown. VALUE_CHANGED fires onYearsBtnTapped(userData).
+        yearsButton = lv_dropdown_create(chart);
+        lv_dropdown_set_options_static(yearsButton, "REAL TIME\n1Y\n3Y\n5Y\n10Y\n20Y\n30Y\n50Y\n75Y\n100Y");
+        lv_dropdown_set_selected(yearsButton, 0);   // REAL TIME default
+        lv_obj_set_size(yearsButton, 118, 32);
         lv_obj_align(yearsButton, LV_ALIGN_TOP_RIGHT, -4, 4);
-        lv_obj_add_event_cb(yearsButton, onYearsBtnTapped, LV_EVENT_CLICKED, userData);
-        yearsButtonLabel = lv_label_create(yearsButton);
-        lv_obj_set_style_text_font(yearsButtonLabel, &lv_font_montserrat_10, 0);
-        lv_label_set_text(yearsButtonLabel, "REAL TIME \xEF\x81\xB8");
+        lv_obj_set_style_bg_color(yearsButton, lv_color_hex(0x1a1a1e), 0);
+        lv_obj_set_style_border_color(yearsButton, lv_color_hex(0x3a3a42), 0);
+        lv_obj_set_style_border_width(yearsButton, 1, 0);
+        lv_obj_set_style_radius(yearsButton, 6, 0);
+        lv_obj_set_style_pad_all(yearsButton, 7, 0);
+        lv_obj_set_style_text_font(yearsButton, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(yearsButton, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_t* yearsList = lv_dropdown_get_list(yearsButton);
+        lv_obj_set_style_bg_color(yearsList, lv_color_hex(0x1a1a1e), 0);
+        lv_obj_set_style_text_color(yearsList, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_set_style_text_font(yearsList, &lv_font_montserrat_12, 0);
+        lv_obj_add_event_cb(yearsButton, onYearsBtnTapped, LV_EVENT_VALUE_CHANGED, userData);
 
         // X-axis: real calendar years ("now", 2027, 2028…) spread across the
         // plot width, filled by setXAxisYears() whenever the horizon changes.
@@ -179,7 +189,6 @@ public:
         }
     }
 
-    void setYearsButtonLabel(const String& text) { lv_label_set_text(yearsButtonLabel, text.c_str()); }
     // Kept for API compatibility; the horizon now feeds the X-axis year labels.
     void setHorizonLabel(int years) { _refreshXAxis(years); }
     lv_chart_series_t* getSeries() { return projectionSeries; }
@@ -198,7 +207,6 @@ private:
     lv_obj_t* chart = nullptr;
     lv_chart_series_t* projectionSeries = nullptr;
     lv_obj_t* yearsButton = nullptr;
-    lv_obj_t* yearsButtonLabel = nullptr;
     lv_obj_t* xLabels[X_LABELS] = { nullptr };
     bool   _rtMode     = false;   // real-time mode: Y ticks = dollar fraction
     double _rtBaseline = 0.0;     // dollar value that chart-unit 0 maps to

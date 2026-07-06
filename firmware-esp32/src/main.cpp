@@ -266,12 +266,15 @@ void loop() {
         rp2040Link.playChime();   // three attempts → three chances to hear the link
     }
 
-    // One explicit round-trip test at 30 s: sends PING and waits for the
-    // RP2040's ACK byte. The result line tells us whether the problem is the
-    // TX direction, the RX direction, or neither.
-    static bool linkPinged = false;
-    if (!linkPinged && millis() > 30000) {
-        linkPinged = true;
+    // Round-trip test every 30 s, FOREVER (the old one-shot at t=30s was
+    // usually missed: serial monitors attach late and the two chips don't
+    // reboot together). Every line is decisive:
+    //   ping OK        → link alive both ways
+    //   heartbeat RECEIVED (from pollRx) but ping FAILED → ESP→RP dead
+    //   neither, ever  → RP→ESP dead too (electrical / pad level)
+    static uint32_t lastPingAt = 0;
+    if (millis() - lastPingAt > 30000) {
+        lastPingAt = millis();
         bool ok = rp2040Link.ping(300);
         Serial.printf("RP-link: ping %s\n", ok ? "OK — link is ALIVE both ways" : "FAILED — no ACK from RP2040");
     }
@@ -326,6 +329,7 @@ void loop() {
         // Heartbeat response may have updated screen_brightness in NVS via
         // applyServerConfig(); apply it now so the change is immediate.
         uiManager.applyStoredBrightness();
+        uiManager.reloadScreenOrder();   // screen order/visibility too
         lastHeartbeatAt = now;
     }
 
@@ -339,9 +343,14 @@ void loop() {
         lastTreasuryRefreshAt = now;
     }
 
-    if (lastDebtRefreshAt == 0 || now - lastDebtRefreshAt > US_DEBT_REFRESH_MS) {
+    // Until the first SUCCESSFUL debt fetch, retry every minute — a failed
+    // boot-time fetch used to leave "--" on screen for a whole hour.
+    static bool debtLive = false;
+    if (lastDebtRefreshAt == 0 ||
+        now - lastDebtRefreshAt > (debtLive ? US_DEBT_REFRESH_MS : 60000UL)) {
         DebtData data = apiClient.fetchUsDebt();
-        if (data.valid) uiManager.updateDebtData(data);
+        if (data.valid) { uiManager.updateDebtData(data); debtLive = true; }
+        else Serial.println("fetchUsDebt: no data, retrying in 60 s");
         lastDebtRefreshAt = now;
     }
 

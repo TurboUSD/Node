@@ -219,6 +219,10 @@ public:
         }
     }
 
+    // Re-apply screen order/visibility after a heartbeat config sync (the
+    // web's eye toggles otherwise only took effect after a reboot).
+    void reloadScreenOrder() { _loadScreenOrder(); }
+
     void updateLeaderboard(LeaderboardEntry* entries, int count) {
         nodeScreen.updateLeaderboard(entries, count);
         // The footers' "| N NODES" counter feeds off the same directory data
@@ -334,6 +338,7 @@ private:
     //   pos 6 → NODE_NETWORK(4) Node status     ← last
     // Can be overridden per-device from NVS (set via web setup page). Position 0 is always CLOCK.
     uint8_t _swipeOrder[(int)ScreenId::COUNT] = { 0, 1, 6, 2, 3, 5, 4 };
+    int     _swipeCount = (int)ScreenId::COUNT;   // visible screens (hidden ones filtered out)
     int     _currentSwipePos = 0;
 
     TurboScreen  turboScreen;
@@ -417,6 +422,33 @@ private:
         if (pos == (int)ScreenId::COUNT && tmp[0] == (uint8_t)ScreenId::CLOCK) {
             memcpy(_swipeOrder, tmp, sizeof(_swipeOrder));
         }
+        _applyHiddenScreens();
+    }
+
+    // Drop hidden screens (web setup "eye" toggles / screen_hidden CSV) from
+    // the rotation. Home/CLOCK can never be hidden.
+    void _applyHiddenScreens() {
+        String hid = storage.getScreenHidden();
+        uint8_t filtered[(int)ScreenId::COUNT];
+        int fc = 0;
+        for (int i = 0; i < (int)ScreenId::COUNT; i++) {
+            uint8_t id = _swipeOrder[i];
+            bool hidden = false;
+            if (id != (uint8_t)ScreenId::CLOCK && hid.length()) {
+                int idx2 = 0, len = hid.length();
+                while (idx2 < len) {
+                    int sep = hid.indexOf(',', idx2);
+                    if (sep < 0) sep = len;
+                    if (hid.substring(idx2, sep).toInt() == (int)id) { hidden = true; break; }
+                    idx2 = sep + 1;
+                }
+            }
+            if (!hidden) filtered[fc++] = id;
+        }
+        if (fc < 1) { filtered[0] = (uint8_t)ScreenId::CLOCK; fc = 1; }
+        memcpy(_swipeOrder, filtered, fc);
+        _swipeCount = fc;
+        if (_currentSwipePos >= _swipeCount) _currentSwipePos = 0;
     }
 
     // ── TCA9535 helpers ──────────────────────────────────────────────────────
@@ -1074,10 +1106,18 @@ private:
     static void onLogoTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->showScreen(ScreenId::CLOCK); }
     static void onDateTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openCalendarPopup(); }
     static void onQrTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openConfigPopup(); }
-    static void onDebtRangeTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openDebtRangePicker(); }
+    static void onDebtRangeTapped(lv_event_t* e) {
+        UiManager* self = (UiManager*)lv_event_get_user_data(e);
+        self->debtYearsRangeIndex = (int)lv_dropdown_get_selected(lv_event_get_current_target(e));
+        self->_debtRangeDirty = true;   // deferred 1-2 s refetch (updateClockIfNeeded)
+    }
     static void onSinceBtnTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openSincePeriodPicker(); }
     static void onRateBtnTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openRateUnitPicker(); }
-    static void onGameYearsTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openGameYearsPicker(); }
+    static void onGameYearsTapped(lv_event_t* e) {
+        UiManager* self = (UiManager*)lv_event_get_user_data(e);
+        self->gameYearsIndex = (int)lv_dropdown_get_selected(lv_event_get_current_target(e));
+        self->_updateGameProjection();
+    }
     static void onVerifyBadgeTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openVerifyTooltip(); }
 
     void openAlarmPicker() {
@@ -1386,27 +1426,6 @@ private:
         lv_obj_set_style_text_color(label, lv_color_hex(0x9a9a9e), 0);
     }
 
-    void openDebtRangePicker() {
-        static const char* options = "5Y\n10Y\n20Y\n30Y\n50Y\n75Y";
-        static const int yearValues[] = {5, 10, 20, 30, 50, 75};
-        lv_obj_t* card = openModal(lv_scr_act());
-        lv_obj_t* roller = addOptionPicker(card, options, debtYearsRangeIndex);
-        lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
-        static lv_obj_t* sCard; sCard = card;
-        static UiManager* sSelf; sSelf = this;
-        // Live-apply: scrolling the roller updates the selection + button label
-        // immediately (closing with the X used to silently discard the pick).
-        // The actual history refetch is DEFERRED via _debtRangeDirty — it's a
-        // 1-2 s HTTPS call, too heavy to run per scroll detent.
-        lv_obj_add_event_cb(roller, [](lv_event_t* e) {
-            sSelf->debtYearsRangeIndex = lv_roller_get_selected(lv_event_get_target(e));
-            int years = yearValues[sSelf->debtYearsRangeIndex % 6];
-            char btnLabel[12]; snprintf(btnLabel, sizeof(btnLabel), "LAST %dY \xEF\x81\xB8", years);
-            sSelf->debtScreen.setRangeButtonLabel(btnLabel);
-            sSelf->_debtRangeDirty = true;   // picked up once a second in updateClockIfNeeded
-        }, LV_EVENT_VALUE_CHANGED, nullptr);
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
-    }
 
     void reloadDebtHistory(int years) {
         DebtHistoryPoint points[80];
@@ -1568,26 +1587,6 @@ private:
         gameScreen.setHorizonLabel(years);
     }
 
-    void openGameYearsPicker() {
-        static const char* options = "REAL TIME\n1Y\n3Y\n5Y\n10Y\n20Y\n30Y\n50Y\n75Y\n100Y";
-        static const int yearOpts[10] = {0, 1, 3, 5, 10, 20, 30, 50, 75, 100};
-        lv_obj_t* card = openModal(lv_scr_act());
-        lv_obj_t* roller = addOptionPicker(card, options, gameYearsIndex);
-        lv_obj_t* saveBtn = addModalButton(card, "SAVE", true);
-        static lv_obj_t* sCard;   sCard = card;
-        static UiManager* sSelf;  sSelf = this;
-        // Live-apply (see note above openSincePeriodPicker).
-        lv_obj_add_event_cb(roller, [](lv_event_t* e) {
-            sSelf->gameYearsIndex = lv_roller_get_selected(lv_event_get_target(e));
-            int yrs = yearOpts[sSelf->gameYearsIndex % 10];
-            char lbl[16];
-            if (yrs == 0) snprintf(lbl, sizeof(lbl), "REAL TIME \xEF\x81\xB8");
-            else          snprintf(lbl, sizeof(lbl), "%dY \xEF\x81\xB8", yrs);
-            sSelf->gameScreen.setYearsButtonLabel(lbl);
-            sSelf->_updateGameProjection();
-        }, LV_EVENT_VALUE_CHANGED, nullptr);
-        lv_obj_add_event_cb(saveBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);
-    }
 
     // ── Real-time inflation tick (1/s while the game screen shows REAL TIME) ──
     // $10,000 eroded continuously at the derived annual debasement rate since
@@ -1653,7 +1652,7 @@ private:
                     lv_scr_load_anim_t anim = LV_SCR_LOAD_ANIM_MOVE_LEFT) {
         currentScreen = id;
         // Update swipe position to stay in sync with direct navigation (e.g. logo tap → home)
-        for (int i = 0; i < (int)ScreenId::COUNT; i++) {
+        for (int i = 0; i < _swipeCount; i++) {
             if (_swipeOrder[i] == (uint8_t)id) { _currentSwipePos = i; break; }
         }
         // Instant (non-animated) load for the very first screen at boot: a screen
@@ -1700,7 +1699,7 @@ private:
             UiManager* self = (UiManager*)lv_obj_get_user_data(target);
             if (!self) return;
             lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-            int count = (int)ScreenId::COUNT;
+            int count = self->_swipeCount;   // hidden screens are out of rotation
             // Swipe LEFT → next screen (slides in from the right);
             // Swipe RIGHT → previous screen (slides in from the left).
             // (Touch X is mirror-corrected in the read_cb, so the gesture

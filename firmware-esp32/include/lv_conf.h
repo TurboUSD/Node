@@ -67,6 +67,7 @@
 #define LV_FONT_DEFAULT    &lv_font_montserrat_14
 
 /* Montserrat sizes used in firmware-esp32/include/ui/*.h */
+#define LV_FONT_MONTSERRAT_8   1
 #define LV_FONT_MONTSERRAT_10  1
 #define LV_FONT_MONTSERRAT_12  1
 #define LV_FONT_MONTSERRAT_14  1

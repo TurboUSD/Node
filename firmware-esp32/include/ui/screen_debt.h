@@ -54,18 +54,25 @@ public:
         // The title text is static, so a one-shot align_to is safe here.
         lv_obj_align_to(totalDebtLabel, titleLabel, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
 
-        rangeButton = lv_btn_create(topRow);
-        lv_obj_set_style_bg_opa(rangeButton, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(rangeButton, 0, 0);
-        lv_obj_set_style_shadow_width(rangeButton, 0, 0);
-        lv_obj_set_style_pad_all(rangeButton, 2, 0);
-        lv_obj_set_ext_click_area(rangeButton, 8);
+        // Range selector: SAME widget/format as the turbo chart's 1D/1W/1M
+        // timeframe dropdown. VALUE_CHANGED fires onRangeBtnTapped(userData).
+        rangeButton = lv_dropdown_create(topRow);
+        lv_dropdown_set_options_static(rangeButton, "5Y\n10Y\n20Y\n30Y\n50Y\n75Y");
+        lv_dropdown_set_selected(rangeButton, 4);   // matches debtYearsRangeIndex default (50Y)
+        lv_obj_set_size(rangeButton, 74, 32);
         lv_obj_align(rangeButton, LV_ALIGN_RIGHT_MID, 0, 0);
-        lv_obj_add_event_cb(rangeButton, onRangeBtnTapped, LV_EVENT_CLICKED, userData);
-        rangeButtonLabel = lv_label_create(rangeButton);
-        lv_obj_set_style_text_font(rangeButtonLabel, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(rangeButtonLabel, lv_color_hex(0xe8e8e8), 0);
-        lv_label_set_text(rangeButtonLabel, "LAST 50Y \xEF\x81\xB8");
+        lv_obj_set_style_bg_color(rangeButton, lv_color_hex(0x1a1a1e), 0);
+        lv_obj_set_style_border_color(rangeButton, lv_color_hex(0x3a3a42), 0);
+        lv_obj_set_style_border_width(rangeButton, 1, 0);
+        lv_obj_set_style_radius(rangeButton, 6, 0);
+        lv_obj_set_style_pad_all(rangeButton, 7, 0);
+        lv_obj_set_style_text_font(rangeButton, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(rangeButton, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_t* rangeList = lv_dropdown_get_list(rangeButton);
+        lv_obj_set_style_bg_color(rangeList, lv_color_hex(0x1a1a1e), 0);
+        lv_obj_set_style_text_color(rangeList, lv_color_hex(0xe8e8e8), 0);
+        lv_obj_set_style_text_font(rangeList, &lv_font_montserrat_12, 0);
+        lv_obj_add_event_cb(rangeButton, onRangeBtnTapped, LV_EVENT_VALUE_CHANGED, userData);
 
         // IMPORTANT: LVGL 8 draws PRIMARY_Y tick labels OUTSIDE the chart's
         // left edge (draw_y_ticks uses x_ofs = obj->coords.x1, i.e. the widget
@@ -182,8 +189,6 @@ public:
         }
         lv_label_set_text(rateValueLabel, buf);
     }
-
-    void setRangeButtonLabel(const String& text) { lv_label_set_text(rangeButtonLabel, text.c_str()); }
     void setSinceButtonLabel(const String& text) { lv_label_set_text(sinceButtonLabel, text.c_str()); }
     void setRateButtonLabel(const String& text) { lv_label_set_text(rateButtonLabel, text.c_str()); }
 
@@ -237,7 +242,6 @@ private:
     }
 
     lv_obj_t* rangeButton = nullptr;
-    lv_obj_t* rangeButtonLabel = nullptr;
     lv_obj_t* sinceButton = nullptr;
     lv_obj_t* sinceButtonLabel = nullptr;
     lv_obj_t* sinceValueLabel = nullptr;

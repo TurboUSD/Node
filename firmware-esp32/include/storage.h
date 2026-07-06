@@ -168,6 +168,18 @@ public:
     bool   getNftCarousel()             { return prefs.getBool(NVS_KEY_NFT_CAROUSEL, true); }
     void   setNftCarousel(bool on)      { prefs.putBool(NVS_KEY_NFT_CAROUSEL, on); }
 
+    // "Data" caption toggle: show collection name + floor under each artwork.
+    bool   getNftShowData()             { return prefs.getBool("nft_showdata", true); }
+    void   setNftShowData(bool on)      { prefs.putBool("nft_showdata", on); }
+
+    // Manual collection order (comma-joined slugs; empty = pure floor order)
+    String getNftCollOrder()            { return prefs.isKey("nft_order") ? prefs.getString("nft_order", "") : ""; }
+    void   setNftCollOrder(const String& v) { prefs.putString("nft_order", v); }
+
+    // Deleted/hidden collections (comma-joined slugs)
+    String getNftHidden()               { return prefs.isKey("nft_hidden") ? prefs.getString("nft_hidden", "") : ""; }
+    void   setNftHidden(const String& v){ prefs.putString("nft_hidden", v); }
+
     // Slideshow delay in seconds per cell (0 = manual/off, default 10 s).
     uint8_t getNftSlideshowSecs()       { return prefs.getUChar(NVS_KEY_NFT_SLIDE, 10); }
     void    setNftSlideshowSecs(uint8_t s){ prefs.putUChar(NVS_KEY_NFT_SLIDE, s); }
@@ -185,6 +197,21 @@ public:
     // Position 0 is always 0 (CLOCK/Home). The web setup page can reorder positions 1-6.
     String getScreenOrder()                 { return prefs.isKey("screen_order") ? prefs.getString("screen_order", "") : ""; }
     void   setScreenOrder(const String& o)  { prefs.putString("screen_order", o); }
+
+    // Screens hidden from the swipe rotation (comma-joined ScreenId ints).
+    String getScreenHidden()                { return prefs.isKey("scr_hidden") ? prefs.getString("scr_hidden", "") : ""; }
+    void   setScreenHidden(const String& v) { prefs.putString("scr_hidden", v); }
+
+    // Device-detected NFT collections (JSON array string) reported to the
+    // backend so the web setup page can render the collections board.
+    String getNftCollsReport()              { return prefs.isKey("nft_colls") ? prefs.getString("nft_colls", "") : ""; }
+    void   setNftCollsReport(const String& v){ prefs.putString("nft_colls", v); }
+    bool   getNftCollsDirty()               { return prefs.getBool("nftco_dirty", false); }
+    void   setNftCollsDirty(bool d)         { prefs.putBool("nftco_dirty", d); }
+
+    // Gallery lists (order/hidden/show_data) edited ON THE DEVICE → push up.
+    bool   getNftListsDirty()               { return prefs.getBool("nftls_dirty", false); }
+    void   setNftListsDirty(bool d)         { prefs.putBool("nftls_dirty", d); }
 
 private:
     Preferences prefs;
