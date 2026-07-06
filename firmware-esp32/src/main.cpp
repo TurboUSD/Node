@@ -152,19 +152,56 @@ void checkAlarmTrigger() {
     localtime_r(&now, &t); // LOCAL time — the alarm must fire at the user's wall-clock
                            // time, not UTC. Offset is set by syncTimeFromNtp()/geo.
 
-    bool shouldFire = storage.getAlarmEnabled()
-        && storage.isAlarmActiveToday(t.tm_wday)   // respects per-day bitmask
-        && t.tm_hour == storage.getAlarmHour()
-        && t.tm_min  == storage.getAlarmMinute()
-        && t.tm_sec  < 5; // 5-second window so we fire exactly once per minute
+    // Guard: before the first NTP sync `time()` returns a 1970 value, so
+    // tm_hour/tm_min are meaningless — never fire (or spam logs) then.
+    bool timeValid = (t.tm_year + 1900) >= 2024;
+
+    const bool    enabled     = storage.getAlarmEnabled();
+    const bool    activeToday = storage.isAlarmActiveToday(t.tm_wday);
+    const uint8_t alarmH      = storage.getAlarmHour();
+    const uint8_t alarmM      = storage.getAlarmMinute();
+    const uint8_t alarmVol    = storage.getAlarmVolume();
+    const bool    timeMatch   = timeValid && t.tm_hour == alarmH && t.tm_min == alarmM;
+
+    // Fire ONCE per target-minute occurrence, but accept the WHOLE minute — not
+    // just the first 5 seconds. The old 5-second window (`t.tm_sec < 5`) was the
+    // root cause of the silent alarm: a single loop pass that happened to land
+    // on a blocking TLS fetch right at HH:MM:00–04 skipped the only window, and
+    // the alarm stayed silent for the entire day. Keying off a per-minute id
+    // means the alarm fires as long as we run the check AT ALL during that
+    // minute (guaranteed — the check runs every loop pass).
+    static long lastFiredMinuteId = -1;
+    const long minuteId = timeValid
+        ? ((long)(t.tm_year) * 366L + t.tm_yday) * 1440L + t.tm_hour * 60L + t.tm_min
+        : -1;
+
+    const bool shouldFire = enabled && activeToday && timeMatch && (minuteId != lastFiredMinuteId);
+
+    // Diagnostic: log the full decision once a second while we're inside the
+    // target minute OR the minute right before it, so the serial log shows
+    // EXACTLY why the alarm did or didn't fire (enabled? right day? time match?
+    // already fired?). Silent the rest of the time so we don't flood the log.
+    static int lastLoggedSec = -1;
+    const bool nearAlarm = timeValid && enabled &&
+        (t.tm_hour == alarmH) && (t.tm_min == alarmM || (t.tm_min + 1) % 60 == alarmM);
+    if (nearAlarm && t.tm_sec != lastLoggedSec) {
+        lastLoggedSec = t.tm_sec;
+        Serial.printf("ALARM chk %02d:%02d:%02d | enabled=%d activeToday=%d set=%02u:%02u vol=%u "
+                      "timeMatch=%d firedThisMin=%d overlay=%d\n",
+                      t.tm_hour, t.tm_min, t.tm_sec, enabled, activeToday, alarmH, alarmM, alarmVol,
+                      timeMatch, (minuteId == lastFiredMinuteId), uiManager.isAlarmOverlayActive());
+    }
 
     static uint32_t alarmFiredAt = 0;
-    if (shouldFire && !alarmCurrentlyFiring) {
+    if (shouldFire) {
+        lastFiredMinuteId = minuteId;
         alarmCurrentlyFiring = true;
         alarmFiredAt = millis();
-        rp2040Link.playAlarm(storage.getAlarmVolume());
+        Serial.printf("ALARM: FIRING now (%02d:%02d:%02d) vol=%u — sending PLAY_ALARM to RP2040\n",
+                      t.tm_hour, t.tm_min, t.tm_sec, alarmVol);
+        rp2040Link.playAlarm(alarmVol);
         uiManager.showAlarmFiringOverlay();
-    } else if (!shouldFire) {
+    } else if (!timeMatch) {
         alarmCurrentlyFiring = false;
     }
 
@@ -179,7 +216,8 @@ void checkAlarmTrigger() {
         && millis() - alarmFiredAt < 5UL * 60UL * 1000UL
         && millis() - lastAlarmResendAt > 10000) {
         lastAlarmResendAt = millis();
-        rp2040Link.playAlarm(storage.getAlarmVolume());
+        Serial.println("ALARM: overlay still up — re-sending PLAY_ALARM to RP2040");
+        rp2040Link.playAlarm(alarmVol);
     }
 }
 
@@ -229,6 +267,11 @@ void setup() {
     netLockInit();
     diskcache::init();   // mount the LittleFS art cache (logos/NFTs survive reboots)   // single-TLS-at-a-time lock — see net_lock.h
     storage.begin();
+    // Alarm config snapshot at boot — so the serial log always shows what the
+    // device thinks the alarm is, independent of the web UI.
+    Serial.printf("ALARM cfg @boot: enabled=%d %02u:%02u vol=%u days=0x%02X dirty=%d\n",
+                  storage.getAlarmEnabled(), storage.getAlarmHour(), storage.getAlarmMinute(),
+                  storage.getAlarmVolume(), storage.getAlarmDays(), storage.getAlarmDirty());
     rp2040Link.begin();
     uiManager.begin(); // lv_init + hardware bring-up + build all screens
 

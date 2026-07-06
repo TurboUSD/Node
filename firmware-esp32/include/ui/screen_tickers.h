@@ -207,10 +207,12 @@ public:
         lv_obj_set_style_border_width(_addBtn, 1, 0);
         lv_obj_set_style_radius(_addBtn, 6, 0);
         lv_obj_set_style_pad_all(_addBtn, 2, 0);
-        lv_obj_align(_addBtn, LV_ALIGN_RIGHT_MID, 0, 0);
+        // Gear sits at the far right; Add just to its left (settings to the
+        // RIGHT of Add). The "+" is dropped — the label is just "Add".
+        lv_obj_align(_addBtn, LV_ALIGN_RIGHT_MID, -34, 0);
         lv_obj_add_event_cb(_addBtn, _onAddBtnTapped, LV_EVENT_CLICKED, this);
         lv_obj_t* addLbl = lv_label_create(_addBtn);
-        lv_label_set_text(addLbl, "+ Add");
+        lv_label_set_text(addLbl, "Add");
         lv_obj_set_style_text_font(addLbl, &lv_font_montserrat_10, 0);
         lv_obj_set_style_text_color(addLbl, lv_color_hex(0xd8d8dc), 0);   // matches the NFT bar's active tone
         lv_obj_center(addLbl);
@@ -218,9 +220,9 @@ public:
         // 1-col / 2-col layout toggle (NFT-style pair of small buttons).
         _cols = storage.getTickerCols();
         _col1Btn = _makeColsBtn("1", 1);
-        lv_obj_align(_col1Btn, LV_ALIGN_RIGHT_MID, -128, 0);
+        lv_obj_align(_col1Btn, LV_ALIGN_RIGHT_MID, -120, 0);
         _col2Btn = _makeColsBtn("2", 2);
-        lv_obj_align(_col2Btn, LV_ALIGN_RIGHT_MID, -98, 0);
+        lv_obj_align(_col2Btn, LV_ALIGN_RIGHT_MID, -90, 0);
         _refreshColsBtns();
 
         // Gear button → toggles edit mode (reorder ▲▼ + delete on each card).
@@ -231,7 +233,7 @@ public:
         lv_obj_set_style_border_width(_editBtn, 1, 0);
         lv_obj_set_style_radius(_editBtn, 6, 0);
         lv_obj_set_style_pad_all(_editBtn, 2, 0);
-        lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, -60, 0);
+        lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, 0, 0);   // far right, to the right of Add
         lv_obj_add_event_cb(_editBtn, _onEditBtnTapped, LV_EVENT_CLICKED, this);
         _editBtnLabel = lv_label_create(_editBtn);
         lv_label_set_text(_editBtnLabel, LV_SYMBOL_SETTINGS);
@@ -734,6 +736,9 @@ private:
         lv_obj_t* tfDd = lv_dropdown_create(topRow);
         lv_dropdown_set_options_static(tfDd, "1D\n1W\n1M");
         lv_dropdown_set_selected(tfDd, _chartTf);
+        lv_dropdown_set_symbol(tfDd, NULL);   // drop the ▼ arrow — it read as a
+                                              // second "collapse" control next to
+                                              // the actual collapse (▲) button
         lv_obj_set_size(tfDd, _cols == 2 ? 54 : 62, 36);
         lv_obj_set_style_bg_color(tfDd, lv_color_hex(CLR_SURFACE), 0);
         lv_obj_set_style_border_color(tfDd, lv_color_hex(CLR_BORDER), 0);

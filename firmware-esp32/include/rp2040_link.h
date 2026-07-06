@@ -97,6 +97,8 @@ public:
             Rp2040Command::PLAY_ALARM_V4,
             Rp2040Command::PLAY_ALARM_V5,
         };
+        Serial.printf("RP-link: playAlarm(vol=%u) → cmd=0x%02X uart_ok=%d\n",
+                      volume, (unsigned)VOL_CMD[volume - 1], (int)_ok);
         sendCommand(VOL_CMD[volume - 1]);
     }
     void stopAlarm()  { sendCommand(Rp2040Command::STOP_ALARM); }

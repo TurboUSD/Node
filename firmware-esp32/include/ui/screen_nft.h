@@ -225,13 +225,13 @@ public:
         }, LV_EVENT_CLICKED, this);
 
         // Gear — edit mode (reorder arrows + delete on each cell), mirrors the
-        // tickers screen's gear. Sits just left of the Wallet word.
+        // tickers screen's gear. Sits at the far right, to the RIGHT of Wallet.
         _editBtn = lv_label_create(_sizeBar);
         lv_obj_add_flag(_editBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
         lv_label_set_text(_editBtn, LV_SYMBOL_SETTINGS);
         lv_obj_set_style_text_font(_editBtn, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(_editBtn, lv_color_hex(NFT_CLR_MUTED), 0);
-        lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, -62, 0);
+        lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, -8, 0);   // far right — to the RIGHT of Wallet
         lv_obj_add_flag(_editBtn, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_ext_click_area(_editBtn, 10);
         lv_obj_add_event_cb(_editBtn, [](lv_event_t* e) {
@@ -251,7 +251,7 @@ public:
         _addWalletBtn = lv_btn_create(_sizeBar);
         lv_obj_add_flag(_addWalletBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
         lv_obj_set_size(_addWalletBtn, LV_SIZE_CONTENT, 20);
-        lv_obj_align(_addWalletBtn, LV_ALIGN_RIGHT_MID, -6, 0);
+        lv_obj_align(_addWalletBtn, LV_ALIGN_RIGHT_MID, -30, 0);   // left of the gear
         lv_obj_set_style_bg_opa(_addWalletBtn, LV_OPA_0, 0);
         lv_obj_set_style_border_width(_addWalletBtn, 0, 0);
         lv_obj_set_style_shadow_width(_addWalletBtn, 0, 0);
@@ -398,6 +398,9 @@ private:
     uint32_t _cacheTimestamp = 0;
     bool     _snapshotOnly   = false;   // cache came from disk → still needs a live refresh
     String   _lastListSig;              // change detector: skip rebuilds on identical refreshes
+    String   _fetchedPinlistSig;        // the pinlist string the current cache was built from —
+                                        // if it changes on the web (pins added/removed/reordered
+                                        // or a background colour edited) we force a fresh fetch
 
     // Slideshow state
     uint8_t _slideshowSecs  = 10;
@@ -416,6 +419,10 @@ private:
     bool _cacheExpired() {
         if (_snapshotOnly) return true;   // disk snapshot displays, but refresh anyway
         if (_nftCache.empty()) return true;
+        // A web edit to the pinlist (new/removed pin, reorder, or a changed
+        // ordinal background colour) changes the stored string → refetch now
+        // instead of waiting out the TTL, so the change shows on screen re-entry.
+        if (storage.getNftPinlist() != _fetchedPinlistSig) return true;
         return (millis() - _cacheTimestamp) > NFT_CACHE_TTL_MS;
     }
 
@@ -426,6 +433,7 @@ private:
     void _startPinlistFetch() {
         if (_fetching) return;
         _fetching = true;
+        _fetchedPinlistSig = storage.getNftPinlist();   // remember what we're fetching
         _pendingResult.ready = false;
         _pendingResult.error = false;
         _pendingResult.count = 0;
@@ -507,6 +515,9 @@ private:
                 snprintf(oi.image_url, sizeof(oi.image_url),
                          "https://ordinals.com/content/%s", e.contract);
                 oi.floor_price_eth = 0.0f;
+                oi.floor_btc = true;   // Ordinals are ALWAYS BTC-denominated →
+                                       // the caption must use ₿, never Ξ, even
+                                       // before/without a resolved floor value.
                 oi.pinned = true;
                 // User-picked background from the pinlist 4th field: applied
                 // up-front so it works even when resolve-ordinal is down.
@@ -643,7 +654,8 @@ private:
             return;
         }
 
-        _sortByFloor();   // most valuable collection first, same as wallet mode
+        _refreshUsdRates();   // ETH/BTC USD rates so BTC & ETH floors rank together
+        _sortByFloor();       // most valuable collection first, same as wallet mode
         _pendingResult.ready = true;
         self->_bgTask = nullptr;
         netUnlock();
@@ -651,14 +663,60 @@ private:
         vTaskDelete(nullptr);
     }
 
-    // Floor price desc; ties broken by slug so collections stay contiguous.
+    // ── Cross-currency floor sorting (USD) ───────────────────────────────────
+    // EVM collection floors are in ETH, Ordinals floors in BTC — both stored raw
+    // in floor_price_eth. Comparing the raw numbers made a 0.039 BTC NodeMonke
+    // (~$4k) sort BELOW a 0.08 ETH collection (~$300). We convert each floor to
+    // USD (floor × its currency's USD rate) so manual picks and wallet
+    // collections rank together by real value. Rates come from DexScreener (the
+    // same source the price ticker already uses), cached 10 min; if unavailable
+    // we fall back to the raw value so ordering is never worse than before.
+    static inline double   s_ethUsd  = 0;
+    static inline double   s_btcUsd  = 0;
+    static inline uint32_t s_ratesAt = 0;
+
+    static double _dexPriceUsd(const char* tokenAddr) {
+        HTTPClient http;
+        http.useHTTP10(true);   // DexScreener replies chunked on HTTP/1.1
+        http.begin(String(ENDPOINT_DEXSCREENER_TOKENS) + tokenAddr);
+        http.setTimeout(8000);
+        if (http.GET() != 200) { http.end(); return 0; }
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, http.getStream());
+        http.end();
+        if (err) return 0;
+        double best = 0;
+        for (JsonObject pair : doc["pairs"].as<JsonArray>()) {
+            double p = atof(pair["priceUsd"] | "0");
+            if (p > best) best = p;   // 1 WETH / 1 cbBTC in USD ≈ ETH / BTC price
+        }
+        return best;
+    }
+
+    static void _refreshUsdRates() {
+        if (s_ratesAt != 0 && millis() - s_ratesAt < 600000UL && s_ethUsd > 0 && s_btcUsd > 0) return;
+        double e = _dexPriceUsd("0x4200000000000000000000000000000000000006"); // WETH (Base)
+        double b = _dexPriceUsd("0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"); // cbBTC (Base)
+        if (e > 0) s_ethUsd = e;
+        if (b > 0) s_btcUsd = b;
+        if (e > 0 || b > 0) s_ratesAt = millis();
+        Serial.printf("NFT floor rates: ETH=$%.0f BTC=$%.0f\n", s_ethUsd, s_btcUsd);
+    }
+
+    static double _floorUsd(const NftItem& it) {
+        double rate = it.floor_btc ? s_btcUsd : s_ethUsd;
+        if (rate <= 0) return (double)it.floor_price_eth;   // no rate → raw fallback
+        return (double)it.floor_price_eth * rate;
+    }
+
+    // Floor value desc (USD); ties broken by slug so collections stay contiguous.
     static void _sortByFloor() {
         for (int i = 0; i < _pendingResult.count - 1; i++) {
             for (int j = 0; j < _pendingResult.count - 1 - i; j++) {
                 NftItem& a = _pendingResult.items[j];
                 NftItem& b = _pendingResult.items[j+1];
-                bool swap = a.floor_price_eth < b.floor_price_eth ||
-                            (a.floor_price_eth == b.floor_price_eth && strcmp(a.slug, b.slug) > 0);
+                double ua = _floorUsd(a), ub = _floorUsd(b);
+                bool swap = ua < ub || (ua == ub && strcmp(a.slug, b.slug) > 0);
                 if (swap) { NftItem tmp = a; a = b; b = tmp; }
             }
         }
@@ -667,6 +725,7 @@ private:
     void _startFetch() {
         if (_fetching) return;
         _fetching = true;
+        _fetchedPinlistSig = storage.getNftPinlist();   // pins merge into wallet mode too
         _pendingResult.ready = false;
         _pendingResult.error = false;
         _pendingResult.count = 0;
@@ -753,6 +812,12 @@ private:
             NftItem it = _pendingResult.items[i];
             for (auto& prev : oldCache) {
                 if (strcmp(prev.image_url, it.image_url) != 0) continue;
+                // Same URL is NOT enough: the decoded pixels bake in the
+                // composite background colour, so if the owner changed the
+                // ordinal's background on the web (bg_color differs) we must
+                // RE-DECODE rather than reuse the old-background bitmap — that
+                // was why a background change never showed on the device.
+                if (prev.bg_color != it.bg_color) continue;
                 for (int c = 0; c < 3; c++) {
                     if (!prev.px[c]) continue;
                     it.px[c] = prev.px[c];    // steal the buffer
@@ -1980,6 +2045,7 @@ private:
         // _buildGroups(), displacing the lowest wallet collection if needed.
         _appendPinlistItems();
 
+        _refreshUsdRates();   // ETH/BTC USD rates so BTC & ETH floors rank together
         _sortByFloor();
         Serial.printf("NFT: %d items after spam filter + picks (sorted by floor desc)\n", _pendingResult.count);
 
