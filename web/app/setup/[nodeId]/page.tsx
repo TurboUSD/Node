@@ -1060,6 +1060,14 @@ function parseOpenseaUrl(url: string): { chain: string; contract: string; tokenI
   return { chain: m[1].toLowerCase(), contract: m[2].toLowerCase(), tokenId: m[3] }
 }
 
+// Bitcoin Ordinals: satflow/magiceden/ordinals.com URLs or a raw inscription
+// id (64 hex chars + "i<n>"). Stored as chain "ord", contract = inscription id.
+function parseOrdinal(url: string): { chain: string; contract: string; tokenId: string } | null {
+  const m = url.match(/([0-9a-fA-F]{64}i[0-9]+)/)
+  if (!m) return null
+  return { chain: 'ord', contract: m[1].toLowerCase(), tokenId: '0' }
+}
+
 function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (items: PinItem[]) => void }) {
   const [url,       setUrl]       = useState('')
   const [resolving, setResolving] = useState(false)
@@ -1068,9 +1076,22 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
   async function addItem() {
     const trimmed = url.trim()
     if (!trimmed) return
-    const parsed = parseOpenseaUrl(trimmed)
+    const parsed = parseOpenseaUrl(trimmed) ?? parseOrdinal(trimmed)
     if (!parsed) {
-      setError('Paste a valid OpenSea URL — e.g. https://opensea.io/item/ethereum/0x…/3968')
+      setError('Paste an OpenSea URL (https://opensea.io/item/…) or an Ordinals inscription URL/id (satflow.com/ordinal/…, ordinals.com/inscription/…).')
+      return
+    }
+    if (parsed.chain === 'ord') {
+      const id = `ord:${parsed.contract}:0`
+      if (items.some(i => `${i.chain}:${i.contract}:${i.tokenId}` === id)) { setError('This inscription is already in your list.'); return }
+      if (items.length >= 20) { setError('Maximum 20 NFTs in the pinlist.'); return }
+      onChange([...items, {
+        chain: 'ord', contract: parsed.contract, tokenId: '0',
+        name: `Ordinal ${parsed.contract.slice(0, 8)}…`,
+        image_url: `https://ordinals.com/content/${parsed.contract}`,
+        collection_name: 'Ordinals',
+      }])
+      setUrl('')
       return
     }
     const id = `${parsed.chain}:${parsed.contract}:${parsed.tokenId}`
