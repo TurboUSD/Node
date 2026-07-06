@@ -52,8 +52,12 @@ uint32_t lastToggleAt = 0;
 bool     beepIsOn     = false;
 
 // Volume via PWM duty, capped at 127 (= 50% = loudest for a passive buzzer).
+// Even the LOWEST setting must be clearly audible: the old {13,26,…} floor was
+// so weak (5–10% duty) that an alarm at the default volume 2 looked "silent"
+// next to the 127-duty boot beep. Minimum now 60 (~24%), max still the 127
+// reference peak (going higher = DC = silent on a passive buzzer).
 uint8_t currentVolume = 2; // default; overridden by PLAY_ALARM_Vn commands
-const uint8_t VOLUME_DUTY[5] = { 13, 26, 51, 89, 127 };
+const uint8_t VOLUME_DUTY[5] = { 60, 80, 100, 115, 127 };
 
 void buzzerOn()  { analogWrite(BUZZER_PIN, VOLUME_DUTY[currentVolume - 1]); }  // Seeed method: plain analogWrite, default 1 kHz PWM
 void buzzerOff() { analogWrite(BUZZER_PIN, 0); }
@@ -185,19 +189,13 @@ void setup() {
     pinMode(BUZZER_PIN, OUTPUT);          // factory beep_init()
     delay(500);                           // factory settle delay before first beep
 
-    // Boot self-test: FOUR slow beeps, factory drive (plain analogWrite 127,
-    // default 1 kHz PWM). Beeps BEFORE any UART/I2C init so a hung peripheral
-    // can never silence them.
-    //   • FIVE well-separated beeps = THIS generation (I2C-hang fix: the
-    //     4-beep build could freeze forever in Wire on sensorless units).
-    //     FOUR beeps = the frozen-loop build. Fewer = even older.
-    //   • No beep at power-on → buzzer pin/drive problem.
-    for (int i = 0; i < 5; i++) {
-        analogWrite(BUZZER_PIN, 127);     // EXACTLY factory beep_on()
-        delay(150);
-        analogWrite(BUZZER_PIN, 0);
-        delay(250);
-    }
+    // Boot self-test: ONE beep, factory drive (plain analogWrite 127, default
+    // 1 kHz PWM), BEFORE any UART/I2C init so a hung peripheral can never
+    // silence it. No beep at power-on → buzzer pin/drive problem.
+    analogWrite(BUZZER_PIN, 127);         // EXACTLY factory beep_on()
+    delay(150);
+    analogWrite(BUZZER_PIN, 0);
+    delay(250);
 
     Serial1.setRX(UART_FROM_S3_RX);
     Serial1.setTX(UART_TO_S3_TX);

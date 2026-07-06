@@ -685,10 +685,17 @@ private:
         DeserializationError err = deserializeJson(doc, http.getStream());
         http.end();
         if (err) return 0;
-        double best = 0;
+        // priceUsd is the price of the pair's BASE token. /tokens/{addr} returns
+        // pairs where our token is EITHER base or quote — so we must only read
+        // pairs where it's the BASE (else we'd read some other token's price),
+        // and pick the deepest-liquidity one for a stable quote.
+        double best = 0, bestLiq = -1;
         for (JsonObject pair : doc["pairs"].as<JsonArray>()) {
-            double p = atof(pair["priceUsd"] | "0");
-            if (p > best) best = p;   // 1 WETH / 1 cbBTC in USD ≈ ETH / BTC price
+            const char* base = pair["baseToken"]["address"] | "";
+            if (strcasecmp(base, tokenAddr) != 0) continue;
+            double p   = atof(pair["priceUsd"] | "0");
+            double liq = pair["liquidity"]["usd"] | 0.0;
+            if (p > 0 && liq > bestLiq) { best = p; bestLiq = liq; }
         }
         return best;
     }
