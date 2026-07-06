@@ -687,7 +687,16 @@ private:
         if (!cfg["ticker_cols"].isNull())       storage.setTickerCols(cfg["ticker_cols"].as<uint8_t>());
         if (!cfg["nft_carousel_enabled"].isNull()) storage.setNftCarousel(cfg["nft_carousel_enabled"].as<bool>());
         if (!cfg["nft_slideshow_secs"].isNull()) storage.setNftSlideshowSecs(cfg["nft_slideshow_secs"].as<uint8_t>());
-        if (!cfg["nft_pinlist"].isNull())        storage.setNftPinlist(cfg["nft_pinlist"].as<String>());
+        // Log the pinlist the SERVER sent (heartbeat config), so /logs shows
+        // whether the DB actually holds the pin — no NFT fetch needed. `isNull`
+        // = the server sent JSON null (DB column is null → nothing saved).
+        if (cfg["nft_pinlist"].isNull()) {
+            Log.println("CFG nft_pinlist: <null from server> (DB has no pinlist)");
+        } else {
+            String pl = cfg["nft_pinlist"].as<String>();
+            Log.printf("CFG nft_pinlist from server: '%s'\n", pl.c_str());
+            storage.setNftPinlist(pl);
+        }
 
         // Screen order
         if (!cfg["screen_order"].isNull())  storage.setScreenOrder(cfg["screen_order"].as<String>());

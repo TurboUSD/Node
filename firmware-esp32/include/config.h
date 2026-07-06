@@ -88,15 +88,18 @@
 // See firmware-rp2040/PROTOCOL.md for the wire format.
 // ---------------------------------------------------------------------
 #define RP2040_UART_BAUD   115200
-// ESP32-S3 "UART to RP2040": GPIO43 = TX (to RP GP17/RX), GPIO44 = RX (from RP
-// GP16/TX). HARDWARE-VERIFIED (ril3y/sensecap-indicator-d1l) and reconfirmed by
-// the /logs capture: tx_pad=1 AND rx_pad=1 means the RP2040's TX really reaches
-// GP44 — i.e. the link IS on 43/44. GPIO 19/20 that some third-party docs list
-// are the S3's native USB pads (D-/D+), NOT the RP2040 link — don't use them.
-// The "no heartbeat / ping no ACK" symptom is the RP2040's loop() not running
-// (a Grove-I2C hang on sensorless units), NOT the pins — see firmware-rp2040.
-#define RP2040_UART_TX_PIN 43
-#define RP2040_UART_RX_PIN 44
+// ESP32-S3 "UART to RP2040" = GPIO 19/20. PROVEN by the /logs capture: on GP43/44
+// the ESP received the ASCII bytes "IMPROV..." (49 4D 50 52 4F 56) — that's the
+// esp-web-tools Improv provisioning protocol from the USB HOST, i.e. GP43/44 is
+// the CONSOLE/flasher UART (UART0 via the board's bridge), NOT the RP2040. The
+// RP2040 link is the S3's native-USB pads 19/20 (Seeed wiki + RP2040 board_pins):
+//   ESP GP19 = TX → RP2040 GP17 (RX)
+//   ESP GP20 = RX ← RP2040 GP16 (TX)
+// Native USB CDC is turned OFF in platformio.ini (ARDUINO_USB_CDC_ON_BOOT=0) so
+// the USB PHY releases 19/20 for UART2; the console then rides UART0 (43/44 → the
+// bridge). An earlier "43/44 is the link" note was WRONG (that's the host UART).
+#define RP2040_UART_TX_PIN 19
+#define RP2040_UART_RX_PIN 20
 
 // ---------------------------------------------------------------------
 // NVS (flash) storage keys — what survives reboots/power loss
