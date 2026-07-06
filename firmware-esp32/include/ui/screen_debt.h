@@ -162,11 +162,28 @@ public:
         lv_label_set_text(totalDebtLabel, buf);
     }
 
-    void updateSinceValue(double valueUsd) {
-        char buf[24];
+    void updateSinceValue(double valueUsd, bool asThousands = false) {
+        char buf[28];
+        if (asThousands) {
+            // NODE ON: "+$115,342.53k" — k with two LIVE decimals (they move
+            // every second, so the climb is watchable), commas for the rest.
+            char digits[20];
+            snprintf(digits, sizeof(digits), "%.2f", valueUsd / 1e3);
+            const char* dot = strchr(digits, '.');
+            int intLen = dot ? (int)(dot - digits) : (int)strlen(digits);
+            size_t o = 0;
+            buf[o++] = '+'; buf[o++] = '$';
+            for (int i = 0; digits[i] && o < sizeof(buf) - 2; i++) {
+                buf[o++] = digits[i];
+                int rem = intLen - 1 - i;
+                if (i < intLen && rem > 0 && rem % 3 == 0) buf[o++] = ',';
+            }
+            buf[o++] = 'k';
+            buf[o] = '\0';
+        }
         // "+$142.56M" reads far more impressive than "+$0.14B".
-        if (valueUsd >= 1e9) snprintf(buf, sizeof(buf), "+$%.2fB", valueUsd / 1e9);
-        else                 snprintf(buf, sizeof(buf), "+$%.2fM", valueUsd / 1e6);
+        else if (valueUsd >= 1e9) snprintf(buf, sizeof(buf), "+$%.2fB", valueUsd / 1e9);
+        else                      snprintf(buf, sizeof(buf), "+$%.2fM", valueUsd / 1e6);
         lv_label_set_text(sinceValueLabel, buf);
     }
 
@@ -268,7 +285,10 @@ private:
                                alignRight ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START);
 
         lv_obj_t* row = lv_obj_create(col);
-        lv_obj_set_size(row, LV_SIZE_CONTENT, 28);   // fixed: keeps both columns' geometry identical
+        // 34, NOT 28: the dropdown inside is 32 px tall — a 28 px row clipped
+        // its top/bottom 2 px, which is exactly where the 1 px grey border
+        // lives (the dropdowns looked borderless on top and bottom).
+        lv_obj_set_size(row, LV_SIZE_CONTENT, 34);   // fixed: keeps both columns' geometry identical
         lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
         lv_obj_set_style_border_width(row, 0, 0);
         lv_obj_set_style_pad_all(row, 0, 0);

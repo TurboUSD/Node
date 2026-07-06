@@ -14,6 +14,7 @@
 #include <lvgl.h>
 #include "api_client.h"
 #include "ui/shared_components.h"
+#include "ui/font_tenge.h"   // real ₸ glyph (Montserrat has no U+20B8)
 
 #define NODE_MINED_BLOCKS_SHOWN 3
 #define NODE_BLOCK_W      100   // mockup-sized cards (was 54 px — tiny)
@@ -125,7 +126,7 @@ public:
         rewardsLabel = lv_label_create(leftCol);
         lv_label_set_text(rewardsLabel, "Get verified to start earning");
         lv_obj_set_style_text_color(rewardsLabel, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_text_font(rewardsLabel, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(rewardsLabel, tengeFont12(), 0);   // "Rewards: ₸1.234"
 
         // Right column: UPTIME headline.
         lv_obj_t* uptimeCol = lv_obj_create(topRow);
@@ -241,7 +242,7 @@ public:
         lv_obj_set_flex_align(lbRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         lv_obj_clear_flag(lbRow, LV_OBJ_FLAG_SCROLLABLE);
 
-        _buildLeaderColumn(lbRow, "T REWARDS", lbRewardNames, lbRewardValues);
+        _buildLeaderColumn(lbRow, "\xE2\x82\xB8 REWARDS", lbRewardNames, lbRewardValues);
         _buildLeaderColumn(lbRow, "UPTIME",    lbUptimeNames, lbUptimeValues);
 
         // Soft pulse on the "LIVE MINING" label so there's a heartbeat even before
@@ -284,7 +285,7 @@ public:
     void setRewards(bool verified, double tusdEarned) {
         if (verified) {
             char buf[40];
-            snprintf(buf, sizeof(buf), "Rewards: %.3f TUSD", tusdEarned);
+            snprintf(buf, sizeof(buf), "Rewards: \xE2\x82\xB8%.3f", tusdEarned);
             lv_label_set_text(rewardsLabel, buf);
             lv_obj_set_style_text_color(rewardsLabel, lv_color_hex(0x3aff7a), 0);
         } else {
@@ -320,7 +321,7 @@ public:
         for (int i = 0; i < LB_ROWS; i++) {
             if (i < n) {
                 lv_label_set_text(lbRewardNames[i], tmp[i].name);
-                snprintf(buf, sizeof(buf), "T%.2f", tmp[i].earned);
+                snprintf(buf, sizeof(buf), "\xE2\x82\xB8%.2f", tmp[i].earned);
                 lv_label_set_text(lbRewardValues[i], buf);
             } else {
                 lv_label_set_text(lbRewardNames[i], "");
@@ -403,7 +404,7 @@ private:
         lv_obj_t* titleLbl = lv_label_create(col);
         lv_label_set_text(titleLbl, title);
         lv_obj_set_style_text_color(titleLbl, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(titleLbl, tengeFont10(), 0);   // "₸ REWARDS"
 
         for (int i = 0; i < LB_ROWS; i++) {
             lv_obj_t* row = lv_obj_create(col);
@@ -425,7 +426,7 @@ private:
 
             valueSlots[i] = lv_label_create(row);
             lv_label_set_text(valueSlots[i], "");
-            lv_obj_set_style_text_font(valueSlots[i], &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(valueSlots[i], tengeFont12(), 0);   // "₸12.34"
             lv_obj_set_style_text_color(valueSlots[i], lv_color_hex(0x3aff7a), 0);
         }
     }
@@ -471,7 +472,7 @@ private:
 
             w.rewardLabel = lv_label_create(w.container);
             lv_label_set_text(w.rewardLabel, "");
-            lv_obj_set_style_text_font(w.rewardLabel, &lv_font_montserrat_20, 0);
+            lv_obj_set_style_text_font(w.rewardLabel, tengeFont20(), 0);   // "₸100"
             lv_obj_set_style_text_color(w.rewardLabel, lv_color_white(), 0);
             lv_obj_align(w.rewardLabel, LV_ALIGN_CENTER, 0, -2);
 
@@ -526,7 +527,7 @@ private:
 
         char numBuf[12]; snprintf(numBuf, sizeof(numBuf), "#%ld", blockNumber);
         lv_label_set_text(w.numberLabel, numBuf);
-        char rewardBuf[16]; snprintf(rewardBuf, sizeof(rewardBuf), "T%d", (int)reward);
+        char rewardBuf[16]; snprintf(rewardBuf, sizeof(rewardBuf), "\xE2\x82\xB8%d", (int)reward);
         lv_label_set_text(w.rewardLabel, rewardBuf);
         lv_label_set_text(w.minerNameLabel, minerName.length() ? minerName.c_str() : "--");
         lv_obj_clear_flag(w.container, LV_OBJ_FLAG_HIDDEN);

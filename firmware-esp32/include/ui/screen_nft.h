@@ -510,7 +510,9 @@ private:
                     ho.addHeader("Content-Type", "application/json");
                     ho.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
                     String body = String("{\"ids\":[\"") + e.contract + "\"]}";
-                    if (ho.POST(body) == 200) {
+                    int oCode = ho.POST(body);
+                    Serial.printf("NFT ord: resolve-ordinal POST %d for %.12s...\n", oCode, e.contract);
+                    if (oCode == 200) {
                         JsonDocument od;
                         if (deserializeJson(od, ho.getStream()) == DeserializationError::Ok) {
                             const char* nm = od["results"][0]["name"] | "";
@@ -521,6 +523,10 @@ private:
                             if (fb > 0) { oi.floor_price_eth = (float)fb; oi.floor_btc = true; }
                             const char* bg = od["results"][0]["bg"] | "";
                             if (bg[0] == '#') oi.bg_color = (uint32_t)strtoul(bg + 1, nullptr, 16);
+                            Serial.printf("NFT ord: resolved name='%s' coll='%s' floor=%.5f\n",
+                                          oi.name, oi.collection, oi.floor_price_eth);
+                        } else {
+                            Serial.println("NFT ord: resolve-ordinal JSON parse failed");
                         }
                     }
                     ho.end();
@@ -1143,9 +1149,9 @@ private:
                 snprintf(floorBuf, sizeof(floorBuf), "%.2f %s", item.floor_price_eth, sym);
             lv_label_set_text(cw.floorLbl, floorBuf);
             lv_obj_set_style_text_font(cw.floorLbl, ethXiFont10(), 0);
-            uint32_t priceColor = item.floor_price_eth >= 1.0f ? NFT_CLR_GOLD :
-                                  item.floor_price_eth >= 0.1f ? NFT_CLR_BLUE  : NFT_CLR_GREEN;
-            lv_obj_set_style_text_color(cw.floorLbl, lv_color_hex(priceColor), 0);
+            // Same colour as the name for EVERY cell — the old per-tier
+            // gold/blue/green colouring made the caption band look random.
+            lv_obj_set_style_text_color(cw.floorLbl, lv_color_hex(NFT_CLR_TEXT), 0);
             lv_obj_align(cw.floorLbl, LV_ALIGN_BOTTOM_RIGHT, 0, -2);   // same row as the name
         }
 

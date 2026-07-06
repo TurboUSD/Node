@@ -1027,6 +1027,11 @@ private:
         refreshSharedFooter(tickerScreen.footer, footerName, _onlineNodeCount);
         refreshSharedFooter(nftScreen.footer,    footerName, _onlineNodeCount);
 
+        // Tick the SINCE/RATE figures once per second: SINCE keeps growing
+        // with elapsed time (visibly for NODE ON, whose value is shown in $k
+        // with two decimals precisely so the climb is watchable live).
+        if (_debtHistLoaded) _computeDebtDerived();
+
         // Debounced debt-range refetch (set by the range picker's live-apply).
         if (_debtRangeDirty) {
             _debtRangeDirty = false;
@@ -1564,7 +1569,9 @@ private:
         debtScreen.updateRateValue(_debtPerSecond * unitSec[rateUnitIndex % 4]);
         long secs = (sincePeriodIndex < 4) ? periodSec[sincePeriodIndex]
                                             : (long)(millis() / 1000);          // "NODE ON" ≈ uptime
-        debtScreen.updateSinceValue(_debtPerSecond * secs);
+        // NODE ON renders in $k with two decimals (the cents-of-a-thousand
+        // digits change every second — you can watch the debt climb live).
+        debtScreen.updateSinceValue(_debtPerSecond * secs, sincePeriodIndex == 4);
 
         // (Dropdowns render their own selected option — no label plumbing.)
     }

@@ -96,6 +96,21 @@ inline lv_obj_t* addModalButton(lv_obj_t* card, const char* label, bool primary)
     return btn;
 }
 
+// LVGL 8 roller gotcha: the default theme sets text_line_space (dpx(20)) on
+// the roller's MAIN part only. The highlighted middle band is drawn by
+// re-rendering the ENTIRE options label with the SELECTED part's styles and
+// mapping its position proportionally onto the background label — and the
+// SELECTED part's line_space resolves to 0 (part-specific lookup misses own
+// MAIN; inheritance jumps to the parent). The two renders therefore drift
+// apart the further the roller sits from its center, so the middle band
+// showed an option from pages away (e.g. "40" with "02" right below it) and
+// the visually-centered value wasn't the real selection. INFINITE mode made
+// it obvious: its options label is 7× taller, so the drift is huge.
+inline void fixRollerSelectedSpacing(lv_obj_t* roller) {
+    lv_obj_set_style_text_line_space(
+        roller, lv_obj_get_style_text_line_space(roller, LV_PART_MAIN), LV_PART_SELECTED);
+}
+
 // Hour/minute picker built on LVGL's built-in roller widget -- much less
 // code than the hand-rolled drag physics the browser simulator needed,
 // since lv_roller already implements exactly this scroll-to-select pattern.
@@ -125,6 +140,7 @@ inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t
     lv_roller_set_selected(refs.hourRoller, initialHour, LV_ANIM_OFF);
     lv_obj_set_style_text_color(refs.hourRoller, lv_color_hex(0xe8b339), LV_PART_SELECTED);
     lv_obj_set_style_bg_color(refs.hourRoller, lv_color_hex(0x1a1a1a), LV_PART_SELECTED);
+    fixRollerSelectedSpacing(refs.hourRoller);
 
     lv_obj_t* colon = lv_label_create(row);
     lv_label_set_text(colon, ":");
@@ -145,6 +161,7 @@ inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t
     lv_roller_set_selected(refs.minuteRoller, initialMinute, LV_ANIM_OFF);
     lv_obj_set_style_text_color(refs.minuteRoller, lv_color_hex(0xe8b339), LV_PART_SELECTED);
     lv_obj_set_style_bg_color(refs.minuteRoller, lv_color_hex(0x1a1a1a), LV_PART_SELECTED);
+    fixRollerSelectedSpacing(refs.minuteRoller);
 
     return refs;
 }
@@ -158,6 +175,7 @@ inline lv_obj_t* addOptionPicker(lv_obj_t* card, const char* newlineSeparatedOpt
     lv_roller_set_selected(roller, initialIndex, LV_ANIM_OFF);
     lv_obj_set_style_text_color(roller, lv_color_hex(0xff4d4d), LV_PART_SELECTED); // red, matches the debt-screen accent in the simulator; pass a color param here if other screens reuse this with a different accent
     lv_obj_set_style_bg_color(roller, lv_color_hex(0x1a1a1a), LV_PART_SELECTED);
+    fixRollerSelectedSpacing(roller);
     lv_obj_center(roller);
     return roller;
 }

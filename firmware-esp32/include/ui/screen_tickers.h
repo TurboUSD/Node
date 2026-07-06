@@ -302,6 +302,33 @@ private:
     char             _nodeCode[8] = {};
     bool             _editMode    = false;
 
+    // Which charts are expanded, keyed by POOL ADDRESS (not array index).
+    // The entries array gets rewritten in place on every server list reload
+    // (bg task, other core) and the index-carried is_expanded occasionally
+    // lost one of several open charts across a screen swipe. This set is the
+    // single source of truth: updated on every user toggle, re-applied to the
+    // freshly parsed entries after every list load.
+    char             _expPools[TICKER_MAX][44] = {};
+    bool _isExpandedPool(const char* pool) const {
+        if (!pool || !pool[0]) return false;
+        for (int i = 0; i < TICKER_MAX; i++)
+            if (_expPools[i][0] && strcasecmp(_expPools[i], pool) == 0) return true;
+        return false;
+    }
+    void _setExpandedPool(const char* pool, bool on) {
+        if (!pool || !pool[0]) return;
+        for (int i = 0; i < TICKER_MAX; i++) {
+            if (_expPools[i][0] && strcasecmp(_expPools[i], pool) == 0) {
+                if (!on) _expPools[i][0] = '\0';
+                return;
+            }
+        }
+        if (!on) return;
+        for (int i = 0; i < TICKER_MAX; i++)
+            if (!_expPools[i][0]) { strncpy(_expPools[i], pool, sizeof(_expPools[i]) - 1); return; }
+    }
+    void _clearExpandedPools() { for (int i = 0; i < TICKER_MAX; i++) _expPools[i][0] = '\0'; }
+
     // Card mutations (expand/collapse/delete/reorder) must NOT rebuild the
     // card tree from inside an LVGL event callback — lv_obj_del()'ing the
     // object that is currently dispatching the event corrupts LVGL's event
@@ -1273,6 +1300,10 @@ private:
                         strncpy(te.base_name,    obj["base_name"]    | "",   sizeof(te.base_name)-1);
                         strncpy(te.quote_symbol, obj["quote_symbol"] | "USD", sizeof(te.quote_symbol)-1);
                         te.logo_applied = false;   // new cards → re-attach
+                        // Expansion comes from the pool-keyed set, NOT the
+                        // index carry-over: survives reorders and the in-place
+                        // rewrite racing a rebuild on the other core.
+                        te.is_expanded = self->_isExpandedPool(pool);
                         n++;
                     }
                     self->_tickerCount = n;
@@ -1927,6 +1958,7 @@ private:
         if (self->_editMode) return;   // taps don't expand while editing
 
         self->_tickers[idx].is_expanded = !self->_tickers[idx].is_expanded;
+        self->_setExpandedPool(self->_tickers[idx].pool_address, self->_tickers[idx].is_expanded);
         if (self->_tickers[idx].is_expanded && !self->_tickers[idx].chart_loaded) {
             self->_chartLoadRequestIdx = idx;   // fetched after the rebuild
         }
@@ -1956,6 +1988,7 @@ private:
         int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
         if (!self || idx < 0 || idx >= self->_tickerCount) return;
         self->_tickers[idx].is_expanded = false;
+        self->_setExpandedPool(self->_tickers[idx].pool_address, false);
         self->_rebuildRequested = true;
     }
 
@@ -1968,8 +2001,10 @@ private:
                 lv_color_hex(self->_editMode ? CLR_GREEN : CLR_MUTED), 0);
         // Collapse everything when entering edit mode — reordering wants the
         // uniform compact rows.
-        if (self->_editMode)
+        if (self->_editMode) {
             for (int i = 0; i < self->_tickerCount; i++) self->_tickers[i].is_expanded = false;
+            self->_clearExpandedPools();
+        }
         self->_rebuildRequested = true;
     }
 
