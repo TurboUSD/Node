@@ -20,6 +20,7 @@
 #pragma once
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 #include <lvgl.h>
 #include <esp_heap_caps.h>
 #include "config.h"
@@ -157,6 +158,14 @@ inline void init() {
     s_srv->on("/logs",     HTTP_GET, []() { _sendLogPage(); });
     s_srv->on("/log.txt",  HTTP_GET, []() { _sendLogTxt();  });
     s_srv->begin();
+
+    // mDNS: reach the device by name instead of hunting for its IP —
+    // http://turbousd.local/logs works on the same WiFi (most phones/laptops
+    // resolve .local; Android is the usual exception → use the IP there).
+    if (MDNS.begin("turbousd")) {
+        MDNS.addService("http", "tcp", 80);
+        Log.println("mDNS: http://turbousd.local/ (logs: /logs)");
+    }
     Log.printf("Screenshot server: http://%s/  (screen: /shot.bmp, logs: /logs)\n",
                   WiFi.localIP().toString().c_str());
 }

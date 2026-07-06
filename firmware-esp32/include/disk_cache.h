@@ -14,6 +14,7 @@
 // All functions are safe to call from bg tasks (esp_littlefs serialises with
 // an internal mutex). Buffers are allocated in PSRAM.
 
+#pragma once
 #include "weblog.h"
 #include <Arduino.h>
 #include <LittleFS.h>

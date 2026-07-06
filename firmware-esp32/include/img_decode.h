@@ -15,6 +15,7 @@
 // Returns nullptr on any failure (HTTP error, unsupported format — e.g.
 // webp/gif —, decode error, out of memory). Caller owns the buffer (free()).
 
+#pragma once
 #include "weblog.h"
 #include <Arduino.h>
 #include <HTTPClient.h>

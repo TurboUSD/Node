@@ -19,7 +19,9 @@
 //        Arduino-ESP32 3.x -- see platformio.ini's espressif32@^6.0.0)
 //     6. Backlight enable (GPIO 45, active HIGH)
 
+#pragma once
 #include "weblog.h"
+#include <WiFi.h>          // WiFi.localIP() for the on-screen logs/screenshot URL
 #include <Wire.h>
 #include <lvgl.h>
 #include "esp_lcd_panel_rgb.h"
@@ -1501,6 +1503,23 @@ private:
             "Top button: short press = screen on/off,  hold 3s = sleep.");
         lv_obj_set_style_text_color(btnInfo, lv_color_hex(0x6e7280), 0);
         lv_obj_set_style_text_font(btnInfo, &lv_font_montserrat_10, 0);
+
+        // Diagnostics over WiFi (screen mirror + live logs) — at the very bottom.
+        // Works even when the USB serial console is unavailable. Shows the
+        // mDNS name and the raw IP (Android can't resolve .local → use the IP).
+        lv_obj_t* diagInfo = lv_label_create(card);
+        {
+            String ip = WiFi.localIP().toString();
+            String s = String("Logs & screen (same WiFi):\n")
+                     + "http://turbousd.local/logs\n"
+                     + "http://" + ip + "/logs";
+            lv_label_set_text(diagInfo, s.c_str());
+        }
+        lv_obj_set_style_text_color(diagInfo, lv_color_hex(0x43e397), 0);
+        lv_obj_set_style_text_font(diagInfo, &lv_font_montserrat_10, 0);
+        lv_label_set_long_mode(diagInfo, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(diagInfo, LV_PCT(100));
+        lv_obj_set_style_text_align(diagInfo, LV_TEXT_ALIGN_CENTER, 0);
 
         lv_obj_t* closeBtn = addModalButton(card, "CLOSE", false);
         static lv_obj_t* sCard; sCard = card;

@@ -3,6 +3,7 @@
 // with zero technical knowledge get the device online: power it up, connect
 // their phone to "TurboUSD-Setup-XXXX", pick their home WiFi, done.
 
+#pragma once
 #include "weblog.h"
 #include <WiFi.h>
 #include <WebServer.h>
