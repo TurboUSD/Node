@@ -143,6 +143,10 @@ inline void _sendLogTxt() {
     if (!buf) { s_srv->send(500, "text/plain", "oom"); return; }
     size_t n = weblog::snapshot(buf, weblog::CAP);
     buf[n] = 0;
+    // ?dl=1 → download the whole ring buffer as a file (the viewer's Download
+    // button). Plain /log.txt stays inline (the live viewer fetches it).
+    if (s_srv->hasArg("dl"))
+        s_srv->sendHeader("Content-Disposition", "attachment; filename=\"turbousd-log.txt\"");
     s_srv->send(200, "text/plain; charset=utf-8", buf);
     free(buf);
 }
@@ -174,6 +178,7 @@ inline void _sendLogPage() {
         "<b id='st'>live</b><span class='sp'></span>"
         "<button id='pz'>Pause</button>"
         "<button id='bt'>Bottom &darr;</button>"
+        "<a href='/log.txt?dl=1' download='turbousd-log.txt'>&#11015; Download</a>"
         "<a id='shot' href='/'>&#128247; Screenshot</a></div>"
         "<div id='l'>loading…</div>"
         "<script>let follow=true,paused=false;"

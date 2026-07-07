@@ -72,10 +72,12 @@ static time_t parseIso8601Utc(const char* s) {
 }
 
 struct LeaderboardEntry {
-    char   name[24]   = {};   // display name, or "#CODE" fallback
-    double earned     = 0;
-    int    uptimePct  = 0;
-    bool   online     = false;
+    char     name[24]   = {};   // display name, or "#CODE" fallback
+    double   earned     = 0;
+    int      uptimePct  = 0;
+    uint32_t totalUptimeSecs = 0;  // cumulative uptime → the device "Uptime" column
+                                   // shows real time ("4h 58m"), matching the web card
+    bool     online     = false;
 };
 
 struct GeoLocale {
@@ -487,7 +489,7 @@ public:
         HTTPClient http;
         http.useHTTP10(true);   // see header note
         http.begin(String(SUPABASE_REST_BASE_URL) +
-                   "/public_node_directory?select=display_name,node_code,total_tusd_earned,uptime_pct,is_online&limit=24");
+                   "/public_node_directory?select=display_name,node_code,total_tusd_earned,uptime_pct,total_uptime_seconds,is_online&limit=24");
         http.setTimeout(8000);
         http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
         http.addHeader("apikey", SUPABASE_ANON_KEY);
@@ -505,9 +507,10 @@ public:
             const char* dn = row["display_name"] | "";
             if (dn[0]) snprintf(e.name, sizeof(e.name), "%s", dn);
             else       snprintf(e.name, sizeof(e.name), "#%s", row["node_code"] | "????");
-            e.earned    = row["total_tusd_earned"] | 0.0;
-            e.uptimePct = row["uptime_pct"] | 0;
-            e.online    = row["is_online"] | false;
+            e.earned          = row["total_tusd_earned"] | 0.0;
+            e.uptimePct       = row["uptime_pct"] | 0;
+            e.totalUptimeSecs = row["total_uptime_seconds"] | 0;
+            e.online          = row["is_online"] | false;
             count++;
         }
         return count;

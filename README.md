@@ -58,7 +58,7 @@ The device has **7 screens** navigated by horizontal swipe gestures. The default
 ### 1. Home
 The default screen. Displays:
 - **Clock**: current time in large digits, date
-- **Alarm**: status shown below the time; tap to open the alarm picker (time, days of the week, on/off toggle, volume 1–5). The alarm fires the RP2040 buzzer at the configured volume level.
+- **Alarm**: status shown below the time; tap to open the alarm picker (time, days of the week, on/off toggle, volume 1 to 5). The hour wheel follows the device's 12h/24h setting: in 12-hour mode it shows 1 to 12 plus an AM/PM wheel and stores the result back as 24h internally. When the alarm fires, the ESP32 sends a play-alarm command over UART2 (GPIO19/20) to the RP2040, which drives the buzzer at the chosen volume; the screen wakes itself even from sleep and shows a full-screen blinking STOP overlay. Tapping STOP, or a short press of the top button, silences it.
 - **Temperature & humidity**: ambient readings from the Grove AHT20 sensor on the RP2040, polled over UART (shows `--` until the RP2040 firmware is flashed and an AHT20 is connected)
 - **Weather**: current conditions fetched from the network
 
@@ -77,10 +77,10 @@ A configurable live crypto price screener. Each node has its own ticker list sto
 - Live prices refresh via a single batched DexScreener request per chain
 
 ### 4. Debt
-US national debt tracker. Big "US TOTAL DEBT" title with the live total beside it (real increment rate derived from treasury data), a historical chart with a range dropdown (5Y–75Y), and two live widgets below: **SINCE** (debt added since a selected moment, including "node on" which ticks live in $k) and **RATE** (per sec/min/hour/day, thousands-separated). Failed fetches self-heal with minute-level retries instead of waiting for the next hourly cycle.
+US national debt tracker. Big "US TOTAL DEBT" title with the live total beside it (real increment rate derived from treasury data), a historical chart with a range dropdown (5Y to 75Y), and two live widgets below: **SINCE** (debt added since a selected moment, including "node on" which ticks live in $k) and **RATE** (per sec/min/hour/day, thousands-separated). Failed fetches self-heal with minute-level retries instead of waiting for the next hourly cycle.
 
 ### 5. Inflation Game
-A purchasing-power decay visualizer for $10,000, driven by the **real annual debasement rate derived from US debt growth** (fallback 8%). Defaults to **REAL TIME** mode: the value ticks down live with 4 decimals (~$0.000024/s), the loss line draws itself left→right over a rolling 2-minute window, and the Y scale adapts continuously so there is always fresh room below to keep falling. A dropdown switches to fixed horizons (1Y–100Y) showing the projected decay curve. A concrete illustration of monetary debasement, down to the second.
+A purchasing-power decay visualizer for $10,000, driven by the **real annual debasement rate derived from US debt growth** (fallback 8%). Defaults to **REAL TIME** mode: the value ticks down live with 4 decimals (~$0.000024/s), the loss line draws itself left→right over a rolling 2-minute window, and the Y scale adapts continuously so there is always fresh room below to keep falling. A dropdown switches to fixed horizons (1Y to 100Y) showing the projected decay curve. A concrete illustration of monetary debasement, down to the second.
 
 ### 6. NFT Gallery
 Displays real NFT artwork fetched from OpenSea (paginated wallet scan) plus optional manual picks, including **Bitcoin Ordinals** (art served by ordinals.com). Sources merge: picks are ALWAYS shown, each taking the cell of the lowest-floor wallet collection.
@@ -99,12 +99,12 @@ The NFT wallet (0x… or ENS) is set from the web setup page or the on-device Wa
 The node's own status and mining panel. Displays:
 - Node name, code, verification badge (✓ once verified, ⏳ while pending, tap for the verification steps)
 - Uptime % and total ₸USD earned
-- "NEXT BLOCK IN MM:SS → N TUSD" live countdown to the pending block
-- Mining track: recent mined blocks with winner names and rewards
-- On-device **leaderboard** (top-3 by ₸ rewards and by uptime), mirroring the web
+- "NEXT BLOCK IN MM:SS" live countdown to the pending block
+- Mining track: the 3 most recent mined blocks plus the pending one, each with block number, reward, winner name and country, and a slight 3D depth
+- On-device **leaderboard** (top-3 by ₸ rewards and by uptime), mirroring the web. The uptime column shows real accumulated time ("4h 58m", "3d 4h"), the same figure as the web card, not a percentage
 - Prompt to complete the profile (wallet + display name) if missing
 
-Device settings (display preferences (°C/°F, date format, time format), alarm, and the setup QR code) are accessible from the **footer of every screen** by tapping the QR icon, which opens the settings popup in-place.
+Device settings (display preferences: date format, 12h/24h time format, and week start; the alarm; and the setup QR code) are accessible from the **footer of every screen** by tapping the gear/QR icon, which opens the settings popup in-place. The bottom of that popup also shows the device's WiFi diagnostics links (screen mirror and live log, see below). Note: there is no °C/°F setting because the base D1 has no built-in ambient sensor.
 
 ---
 
@@ -152,16 +152,20 @@ Built with the Arduino + ESP-IDF stack via PlatformIO (espressif32 @ 6.x). Key m
 - **`img_decode.h`**: shared download+decode+scale pipeline (lodepng for PNG, tjpgd for baseline JPEG, aspect-preserving contain scaling to RGB565, PSRAM-bus-friendly with yields). Unsupported formats (SVG/webp/gif) fall back to the wsrv.nl transcoding proxy.
 - **`net_lock.h`**: global network mutex: background fetch tasks take it exclusively, the main loop uses try-lock. TLS handshakes need ~45 KB of contiguous internal RAM, so only one may run at a time.
 - **`lv_psram_mem.h`**: routes ALL LVGL allocations to PSRAM (custom `LV_MEM_CUSTOM` allocator). This was the structural fix for the recurring "SSL -32512" internal-RAM fragmentation failures.
-- **`rp2040_link.h`**: raw IDF UART2 driver for the ESP32↔RP2040 link (TX GPIO43 / RX GPIO44, the U0TXD/U0RXD pads hard-wired to the RP2040). `playAlarm(volume)` sends the volume command (0x11–0x15). Includes permanent link diagnostics: pad-level read-back (`tx_pad/rx_pad`), a raw RX hex monitor, and a 30 s round-trip ping.
+- **`rp2040_link.h`**: raw IDF UART2 driver for the ESP32↔RP2040 link. The link runs on **ESP32 GPIO19 (TX) to RP2040 GP17 (RX)** and **ESP32 GPIO20 (RX) from RP2040 GP16 (TX)**. Setting `ARDUINO_USB_CDC_ON_BOOT=0` releases the USB PHY so GPIO19/20 are free for UART2; the GPIO43/44 pads are the host/console UART (they carry the flasher's IMPROV bytes), not the RP2040. `playAlarm(volume)` sends the volume command (0x11 to 0x15). Includes permanent link diagnostics: pad-level read-back (`tx_pad/rx_pad`), a raw RX hex monitor, and a 30 s round-trip ping.
 - **`config.h`**: compile-time constants: endpoint URLs, API keys, NVS key names, screen count
 - **`partitions.csv`**: note that **NVS lives at the TOP of flash** (0x7FB000) so no factory/web/OTA image can ever wipe WiFi credentials; the LittleFS art cache sits just below it (0x670000).
 
 The display bring-up sequence (ST7701S SPI init, TCA9535 IO expander, FT6336U touch, ESP-IDF RGB panel) is fully implemented in `initDisplayAndTouch()` inside `ui_manager.h`, ported from Seeed's reference firmware.
 
+**Diagnostics over WiFi** (`screenshot_server.h`): once connected, the device serves a tiny HTTP page on port 80. `http://<device-ip>/` (or `http://turbousd.local/`) streams a pixel-accurate BMP screenshot of the panel, and `http://<device-ip>/logs` shows the live runtime log with Pause, jump-to-bottom, and Download buttons. This is how you read logs when the USB serial console is busy (the RP2040 link shares the console UART pads). Both links are printed on boot and surfaced at the bottom of the on-device settings popup.
+
+**Touch gestures**: horizontal swipes change screens (LVGL gesture). A short movement threshold in the touch read callback distinguishes a tap from a swipe, so a swipe that happens to start on a header icon (bell, date, gear) no longer also fires that icon's popup on the screen you swiped to.
+
 ### Firmware (RP2040)
 
 The RP2040 co-processor runs a C firmware (Arduino core) that:
-- Controls the buzzer for the alarm with **5 volume levels** (duty-cycle PWM via `analogWrite`, drive method matching Seeed's official buzzer example: plain `analogWrite` at the core's default 1 kHz, duty capped at 127, the MLT-8530 is a *passive* buzzer, so duty 255 = DC = silence). Legacy command `0x01` plays at volume 2; volume-aware commands `0x11–0x15` select levels 1–5 explicitly, maintaining backward compatibility during OTA rollouts. **Four slow self-test beeps at power-on** act as a firmware-generation marker and isolate buzzer/pin problems from UART/command problems. The firmware also emits a `7E EE` "hello" frame every 10 s (the ESP32 logs `heartbeat RECEIVED`) and chirps briefly when ANY byte arrives on its UART RX, together these make link failures diagnosable from the ESP32 serial log alone.
+- Controls the buzzer for the alarm with **5 volume levels** (duty-cycle PWM via `analogWrite`, drive method matching Seeed's official buzzer example: plain `analogWrite` at the core's default 1 kHz, duty capped at 127, the MLT-8530 is a *passive* buzzer, so duty 255 = DC = silence). Legacy command `0x01` plays at volume 2; volume-aware commands `0x11 to 0x15` select levels 1 to 5 explicitly, maintaining backward compatibility during OTA rollouts. **Four slow self-test beeps at power-on** act as a firmware-generation marker and isolate buzzer/pin problems from UART/command problems. The firmware also emits a `7E EE` "hello" frame every 10 s (the ESP32 logs `heartbeat RECEIVED`) and chirps briefly when ANY byte arrives on its UART RX, together these make link failures diagnosable from the ESP32 serial log alone.
 - Reads an optional Grove AHT20 temperature/humidity sensor (the base D1 has no built-in ambient sensor) and reports it to the ESP32-S3 on request
 - Communicates with the ESP32-S3 over UART, see `firmware-rp2040/PROTOCOL.md` for the 3-byte frame format and full command table
 
@@ -174,7 +178,7 @@ A Next.js app deployed to Vercel at `network.turbousd.com`:
 - **`/setup/[nodeCode]`**: per-node settings page (also linked from the device QR code):
   - Profile: display name, bio, country/city
   - Rewards & Identity: Base wallet address (for ₸USD payouts), X/Twitter handle
-  - Alarm: time picker + day-of-week selector + **volume slider (1–5, default 2)**
+  - Alarm: time picker + day-of-week selector + **volume slider (1 to 5, default 2)**
   - Display preferences: °C/°F, date format, time format
   - NFT Gallery: wallet (auto-detect) + **collections board** (one row per detected collection with show/hide checkbox and reorder arrows (first 9 fill the grid) + **manual picks** below (OpenSea URLs or Bitcoin Ordinals inscriptions) always shown on the device); grid size, carousel, "show name & floor" toggle, slideshow interval
   - Screen order: drag-and-drop to reorder the 7 device screens (Home always fixed first), with an **eye toggle** per screen to hide it from the device rotation entirely
@@ -206,7 +210,7 @@ Go to **[network.turbousd.com/setup](https://network.turbousd.com/setup)** in Ch
 
 1. Click **Flash firmware** and connect the device via USB-C.
 2. Select the correct serial port when prompted.
-3. The browser flashes the latest firmware automatically. Takes about 60–90 seconds.
+3. The browser flashes the latest firmware automatically. Takes about 60 to 90 seconds.
 
 **3. Connect to WiFi**
 
@@ -250,7 +254,7 @@ If you want to self-host the full stack (your own Supabase, your own domain), fo
 #### 1. Backend (Supabase)
 
 1. Create a [Supabase](https://supabase.com) project.
-2. Set up the database schema. Run the SQL files in `backend/sql/` (mining feed view, node directory, setup tokens, NFT gallery + screen visibility columns, location anonymization, mine-block scheduling), plus each Edge Function file header contains any extra `ALTER TABLE` statements it needs as SQL comments. The main tables are `nodes`, `mining_blocks`, `node_tickers`, and `firmware_releases`. Key columns added beyond a bare-minimum schema:
+2. Set up the database schema. Run the SQL files in `backend/sql/` (node directory + mining feed views, setup tokens, NFT gallery + screen-visibility columns, total-uptime column, location anonymization, anon read policies, and `schedule-mine-block.sql` which arms the hourly cron). Also run `mining-watchdog.sql`: it schedules a 5-minute pg_cron job that restarts a pending block's countdown if its window elapses unmined, so the block timer can never freeze at 00:00 (use `unstick-mining.sql` to clear a block that is already stuck). Each Edge Function file header also contains any extra `ALTER TABLE` statements it needs as SQL comments. The main tables are `nodes`, `mining_blocks`, `node_tickers`, and `firmware_releases`. Key columns added beyond a bare-minimum schema:
    - `nodes`: `screen_order text`, `nft_pinlist text`, `alarm_volume smallint DEFAULT 2`, `lat double precision`, `lng double precision`
    - `public_node_directory` view must expose `lat` and `lng` for the network map (see migration comment in `register-node/index.ts`)
 3. Deploy Edge Functions using the [Supabase CLI](https://supabase.com/docs/guides/cli):
@@ -336,7 +340,7 @@ Edge Functions live in `backend/functions/`. Each is a single `index.ts` file. T
 Contributions are welcome at any layer. Some areas where help is particularly valuable:
 
 - **New screens**: ideas include weather, sports scores, stock portfolio, RSS feeds, sleep tracker
-- **ESP32↔RP2040 link**: the alarm path (UART2 GPIO19/20 ↔ GP16/17) is under active debugging: both firmwares match Seeed's factory pinout and the pads read electrically alive, but frames don't cross reliably yet. Extensive diagnostics are built in (pad read-back, hello beacon, RX monitor, permanent ping), fresh eyes welcome
+- **ESP32↔RP2040 link**: the alarm buzzer path (ESP32 GPIO19/20 to RP2040 GP16/17 over UART2) is working. The built-in diagnostics (pad read-back, hello beacon every 10 s, raw RX monitor, 30 s round-trip ping) stay in for anyone extending the protocol, for example SD-card access or richer alarm patterns
 - **On-device webp/SVG decoding**: currently delegated to the wsrv.nl proxy; a native decoder would remove the third-party dependency
 - **RP2040 firmware**: SD card logging; richer alarm patterns
 - **Backend**: new data pipelines, automated reward disbursement, on-chain verification

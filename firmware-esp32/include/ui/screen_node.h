@@ -347,20 +347,28 @@ public:
                 lv_label_set_text(lbRewardValues[i], "");
             }
         }
-        // Top 3 by uptime.
+        // Top 3 by cumulative uptime (real time, not the %), matching the web card.
         for (int i = 0; i < n; i++)
             for (int j = i + 1; j < n; j++)
-                if (tmp[j].uptimePct > tmp[i].uptimePct) { LeaderboardEntry t = tmp[i]; tmp[i] = tmp[j]; tmp[j] = t; }
+                if (tmp[j].totalUptimeSecs > tmp[i].totalUptimeSecs) { LeaderboardEntry t = tmp[i]; tmp[i] = tmp[j]; tmp[j] = t; }
         for (int i = 0; i < LB_ROWS; i++) {
             if (i < n) {
                 lv_label_set_text(lbUptimeNames[i], tmp[i].name);
-                snprintf(buf, sizeof(buf), "%d%%", tmp[i].uptimePct);
+                _fmtUptimeShort(buf, sizeof(buf), tmp[i].totalUptimeSecs);
                 lv_label_set_text(lbUptimeValues[i], buf);
             } else {
                 lv_label_set_text(lbUptimeNames[i], "");
                 lv_label_set_text(lbUptimeValues[i], "");
             }
         }
+    }
+
+    // "45s" / "12m" / "4h 58m" / "3d 4h" — same format as the web leaderboard.
+    static void _fmtUptimeShort(char* buf, size_t sz, uint32_t s) {
+        if      (s < 60)     snprintf(buf, sz, "%us", (unsigned)s);
+        else if (s < 3600)   snprintf(buf, sz, "%um", (unsigned)(s / 60));
+        else if (s < 86400)  snprintf(buf, sz, "%uh %um", (unsigned)(s / 3600), (unsigned)((s % 3600) / 60));
+        else                 snprintf(buf, sz, "%ud %uh", (unsigned)(s / 86400), (unsigned)((s % 86400) / 3600));
     }
 
     // Real countdown from the backend feed (pending block's created_at + 1 h).

@@ -24,7 +24,20 @@ namespace diskcache {
 
 static bool s_ok = false;
 
+// One mutex serialises ALL cache ops. Without it, a load's exists()→open()
+// sequence (core 0/1 workers) could be interrupted by another op's eviction
+// deleting that very file in between → open() fails with the VFS "does not
+// exist, no permits for creation" ERROR line, and each of those blocks ~40 ms
+// and visibly stutters/flickers the UI. Serialising the whole op removes the
+// race (and thus the flicker) on a near-full, actively-evicting partition.
+static SemaphoreHandle_t s_mtx = nullptr;
+struct _Guard {
+    _Guard()  { if (s_mtx) xSemaphoreTake(s_mtx, portMAX_DELAY); }
+    ~_Guard() { if (s_mtx) xSemaphoreGive(s_mtx); }
+};
+
 inline void init() {
+    if (!s_mtx) s_mtx = xSemaphoreCreateMutex();
     // Partition label "spiffs" (see partitions.csv); format on first use.
     s_ok = LittleFS.begin(true /*formatOnFail*/, "/lfs", 5, "spiffs");
     if (s_ok) {
@@ -48,6 +61,7 @@ inline String _pathFor(const char* ns, const char* key) {
 inline uint8_t* loadAlloc(const char* ns, const char* key, size_t* outLen) {
     *outLen = 0;
     if (!s_ok) return nullptr;
+    _Guard _g;   // block eviction from deleting this file mid-open (see s_mtx)
     String path = _pathFor(ns, key);
     // exists() first: opening a missing file makes the Arduino VFS layer log
     // an ERROR line over serial ("no permits for creation") — besides the
@@ -99,6 +113,7 @@ inline void _evictUntil(size_t need) {
 
 inline bool save(const char* ns, const char* key, const uint8_t* data, size_t len) {
     if (!s_ok || !data || len == 0) return false;
+    _Guard _g;   // evict + write atomically vs. concurrent loads (see s_mtx)
     // Make room by evicting oldest entries rather than refusing forever.
     const size_t HEADROOM = 16 * 1024;
     if (_freeBytes() < len + HEADROOM) _evictUntil(len + HEADROOM);
@@ -117,11 +132,13 @@ inline bool save(const char* ns, const char* key, const uint8_t* data, size_t le
 
 inline bool has(const char* ns, const char* key) {
     if (!s_ok) return false;
+    _Guard _g;
     return LittleFS.exists(_pathFor(ns, key));
 }
 
 inline void remove(const char* ns, const char* key) {
     if (!s_ok) return;
+    _Guard _g;
     LittleFS.remove(_pathFor(ns, key));
 }
 
