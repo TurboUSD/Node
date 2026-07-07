@@ -270,28 +270,67 @@ public:
     }
 
     // Real TurboUSD treasury/supply/price data -- see config.h for the URL.
+    // Robustly GET a URL body into a PSRAM buffer (nullptr on failure; caller
+    // frees). It reads the ENTIRE body before returning: Arduino-ESP32 3.x /
+    // mbedtls 3.x deliver large HTTPS responses in a way that ArduinoJson's
+    // streaming parser bailed on early ("IncompleteInput"), and the TLS link can
+    // drop mid-transfer (HTTP -5). A full buffered read + a retry on transient
+    // connection errors fixes both. `auth` adds the Supabase Edge-Function keys.
+    uint8_t* _httpGetBody(const String& url, uint32_t readTimeoutMs, size_t* outLen,
+                          bool auth = false, int tries = 2) {
+        *outLen = 0;
+        for (int t = 0; t < tries; t++) {
+            HTTPClient http;
+            http.useHTTP10(true);   // body parsed raw — see header note
+            http.begin(url);
+            http.setConnectTimeout(8000);
+            http.setTimeout(readTimeoutMs);
+            if (auth) {
+                http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+                http.addHeader("apikey", SUPABASE_ANON_KEY);
+            }
+            int code = http.GET();
+            if (code != 200) {
+                http.end();
+                if (code < 0) { delay(200); continue; }        // transient conn error → retry
+                Log.printf("_httpGetBody: HTTP %d\n", code);     // real 4xx/5xx → don't spin
+                return nullptr;
+            }
+            int declared = http.getSize();
+            const size_t CAP = 128 * 1024;                       // treasury is the biggest (~40 KB)
+            size_t cap = (declared > 0 && (size_t)declared < CAP) ? (size_t)declared : CAP;
+            uint8_t* buf = (uint8_t*)heap_caps_malloc(cap + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (!buf) buf = (uint8_t*)malloc(cap + 1);
+            if (!buf) { http.end(); return nullptr; }
+            WiFiClient* s = http.getStreamPtr();
+            size_t len = 0; uint32_t lastData = millis();
+            while (s && (http.connected() || s->available()) && millis() - lastData < 9000) {
+                size_t avail = s->available();
+                if (!avail) { delay(3); continue; }
+                size_t room = cap - len;
+                if (!room) break;
+                int got = s->readBytes(buf + len, avail < room ? avail : room);
+                if (got > 0) { len += got; lastData = millis(); }
+                if (declared > 0 && len >= (size_t)declared) break;
+            }
+            http.end();
+            if (len > 0) { buf[len] = 0; *outLen = len; return buf; }
+            free(buf);
+            delay(200);   // empty body → retry once
+        }
+        return nullptr;
+    }
+
     TreasuryData fetchTreasuryData() {
         TreasuryData result;
-        // The treasury response is large (~40 KB). The old 8 s timeout often
-        // expired mid-download, so SUPPLY / TOTAL BURNED stayed "--". Just give
-        // it more time on the same plain client the other https calls use (an
-        // explicit WiFiClientSecure here was memory-heavy and destabilised the
-        // heap). http.begin(url) already negotiates TLS via the cert bundle.
-        HTTPClient http;
-        http.useHTTP10(true);   // treasury API replies chunked on HTTP/1.1 — see header note
-        http.begin(ENDPOINT_TREASURY_DATA);
-        http.setTimeout(20000);
-        int statusCode = http.GET();
-        if (statusCode != 200) {
-            Log.printf("fetchTreasuryData failed, HTTP %d\n", statusCode);
-            http.end();
-            return result;
-        }
+        // The treasury response is large (~40 KB); read it fully into PSRAM then
+        // parse ONLY the four scalar fields we need with a filter (so ArduinoJson
+        // never builds the whole doc). Buffered read fixes the Arduino-3.x
+        // "IncompleteInput" truncation of this big HTTPS body.
+        size_t len = 0;
+        uint8_t* body = _httpGetBody(ENDPOINT_TREASURY_DATA, 20000, &len);
+        if (!body) { Log.println("fetchTreasuryData: fetch failed"); return result; }
 
-        // The response is ~30 KB (huge chartData/operations arrays). Parse ONLY
-        // the four scalar fields we need with a filter, so ArduinoJson doesn't
-        // run out of heap trying to build the whole document (which left the
-        // whole screen blank).
         JsonDocument filter;
         filter["tusdSupplyNum"]  = true;
         filter["tusdBurnedNum"]  = true;
@@ -299,9 +338,9 @@ public:
         filter["totalManagedUsd"] = true;
 
         JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, http.getStream(),
+        DeserializationError err = deserializeJson(doc, body, len,
                                                    DeserializationOption::Filter(filter));
-        http.end();
+        free(body);
         if (err) {
             Log.printf("fetchTreasuryData JSON parse error: %s\n", err.c_str());
             return result;
