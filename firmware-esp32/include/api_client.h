@@ -370,20 +370,13 @@ public:
     // Real US national debt figure, from the Treasury's own Fiscal Data API.
     DebtData fetchUsDebt() {
         DebtData result;
-        HTTPClient http;
-        http.useHTTP10(true);   // see header note
-        http.begin(ENDPOINT_US_DEBT);
-        http.setTimeout(8000);
-        int statusCode = http.GET();
-        if (statusCode != 200) {
-            Log.printf("fetchUsDebt failed, HTTP %d\n", statusCode);
-            http.end();
-            return result;
-        }
+        size_t len = 0;
+        uint8_t* body = _httpGetBody(ENDPOINT_US_DEBT, 8000, &len);
+        if (!body) { Log.println("fetchUsDebt: fetch failed"); return result; }
 
         JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, http.getStream());
-        http.end();
+        DeserializationError err = deserializeJson(doc, body, len);
+        free(body);
         if (err) return result;
 
         // Fiscal Data API returns { data: [ { tot_pub_debt_out_amt: "..." } ] }
@@ -401,21 +394,16 @@ public:
     // out of the box without the Supabase debt-history function being deployed.
     // Returns points oldest-first, capped to `yearsBack` and `maxPoints`.
     int fetchDebtHistory(int yearsBack, DebtHistoryPoint* outPoints, int maxPoints) {
-        HTTPClient http;
-        http.useHTTP10(true);   // see header note
-        http.begin("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/"
-                   "debt_outstanding?fields=record_date,debt_outstanding_amt&sort=-record_date&page[size]=120");
-        http.setTimeout(9000);
-        int statusCode = http.GET();
-        if (statusCode != 200) {
-            Log.printf("fetchDebtHistory failed, HTTP %d\n", statusCode);
-            http.end();
-            return 0;
-        }
+        size_t len = 0;
+        uint8_t* body = _httpGetBody(
+            "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/"
+            "debt_outstanding?fields=record_date,debt_outstanding_amt&sort=-record_date&page[size]=120",
+            9000, &len);
+        if (!body) { Log.println("fetchDebtHistory: fetch failed"); return 0; }
 
         JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, http.getStream());
-        http.end();
+        DeserializationError err = deserializeJson(doc, body, len);
+        free(body);
         if (err) return 0;
 
         // API returns newest-first. Keep those within yearsBack, then reverse.
@@ -448,20 +436,14 @@ public:
     // client-side aggregation — the cache only stores weekly candles.
     int fetchOhlcvHistory(OhlcvCandle* outCandles, int maxCandles, int groupDays = 7) {
         if (groupDays != 7) return _fetchOhlcvGecko(outCandles, maxCandles, groupDays);
-        HTTPClient http;
-        http.useHTTP10(true);   // see header note
-        http.begin(ENDPOINT_OHLCV_HISTORY);
-        http.setTimeout(8000);
-        // Edge Functions are deployed with JWT verification by default — send
-        // the anon key or the request never reaches the function.
-        http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
-        http.addHeader("apikey", SUPABASE_ANON_KEY);
-
-        int statusCode = http.GET();
+        // auth=true → the Supabase Edge Function needs the anon key headers.
+        size_t len = 0;
+        uint8_t* body = _httpGetBody(ENDPOINT_OHLCV_HISTORY, 8000, &len, /*auth=*/true);
         int count = 0;
-        if (statusCode == 200) {
+        if (body) {
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, http.getStream());
+            DeserializationError err = deserializeJson(doc, body, len);
+            free(body);
             if (!err) {
                 for (JsonObject row : doc["candles"].as<JsonArray>()) {
                     if (count >= maxCandles) break;
@@ -472,10 +454,7 @@ public:
                     count++;
                 }
             }
-        } else {
-            Log.printf("fetchOhlcvHistory failed, HTTP %d\n", statusCode);
         }
-        http.end();
         if (count > 0) return count;
 
         // Fallback: our Supabase cache is unavailable (function not deployed,
