@@ -52,6 +52,8 @@ interface NodeConfig {
   screen_brightness:      number   // 1–5, default 5 (full)
   screen_always_on:       boolean  // default true
   screen_timeout_mins:    number   // 1 | 5 | 10 | 30, default 10
+  screen_carousel:        boolean  // default false
+  screen_carousel_secs:   number   // seconds per screen, default 10
   // NFT Gallery (optional, requires DB migration)
   nft_wallet_address?:    string | null
   nft_grid_size?:         1 | 4 | 9
@@ -283,6 +285,8 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         screen_brightness:     node.screen_brightness ?? 5,
         screen_always_on:      node.screen_always_on  ?? true,
         screen_timeout_mins:   node.screen_timeout_mins ?? 10,
+        screen_carousel:       node.screen_carousel ?? false,
+        screen_carousel_secs:  node.screen_carousel_secs ?? 10,
         nft_wallet_address:    node.nft_wallet_address,
         nft_grid_size:         node.nft_grid_size,
         nft_carousel_enabled:  node.nft_carousel_enabled,
@@ -515,6 +519,54 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               </div>
             )}
 
+            {/* Auto rotate screens (carousel) */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: `1px solid ${C.border}` }}>
+              <span style={{ fontSize: 14, color: C.text }}>Auto rotate screens</span>
+              <label style={{ position: 'relative', display: 'inline-block', width: 44, height: 24, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={node.screen_carousel ?? false}
+                  onChange={e => setNode({ ...node, screen_carousel: e.target.checked })}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span style={{
+                  position: 'absolute', inset: 0, borderRadius: 12,
+                  background: (node.screen_carousel ?? false) ? C.green : C.border,
+                  transition: 'background 0.2s',
+                }}>
+                  <span style={{
+                    position: 'absolute', top: 3, width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                    left: (node.screen_carousel ?? false) ? 23 : 3,
+                    transition: 'left 0.2s',
+                  }} />
+                </span>
+              </label>
+            </div>
+
+            {/* Seconds per screen, only visible when auto-rotate is ON */}
+            {(node.screen_carousel ?? false) && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: `1px solid ${C.border}` }}>
+                <span style={{ fontSize: 14, color: C.text }}>Each screen for</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {([5, 10, 20, 30, 60] as const).map(secs => (
+                    <button
+                      key={secs}
+                      type="button"
+                      onClick={() => setNode({ ...node, screen_carousel_secs: secs })}
+                      style={{
+                        padding: '4px 10px', borderRadius: 6, fontSize: 13, cursor: 'pointer', border: 'none',
+                        background: (node.screen_carousel_secs ?? 10) === secs ? C.yellow : C.card,
+                        color:      (node.screen_carousel_secs ?? 10) === secs ? '#000'    : C.muted,
+                        fontWeight: (node.screen_carousel_secs ?? 10) === secs ? 700       : 400,
+                      }}
+                    >
+                      {secs}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
 {/* Temperature (°C/°F) toggle hidden: the base SenseCAP D1 ships without
                 an ambient sensor, so this setting currently does nothing. Restore when
                 a Grove AHT20 becomes part of the kit.
@@ -687,6 +739,10 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               re-flashing the sensor chip; you press it with a paperclip during setup.
             </li>
           </ul>
+        </Section>
+
+        {/* ── Firmware & updates (always last) ── */}
+        <Section title="Firmware & updates" accent={C.muted}>
           <FirmwareCheck current={node.firmware_version} />
         </Section>
       </div>
@@ -708,6 +764,10 @@ function FirmwareCheck({ current }: { current?: string | null }) {
       const res = await fetch(`${FUNCTIONS_BASE_URL}/latest-firmware?target=esp32s3`, {
         headers: { Authorization: `Bearer ${anon}`, apikey: anon },
       })
+      if (res.status === 404) {
+        setMsg({ text: 'No firmware release has been published yet.', ok: true })
+        return
+      }
       const j = await res.json()
       const latest = j?.version as string | undefined
       if (!res.ok || !latest) throw new Error(j?.error ?? 'Could not fetch the latest firmware info.')
@@ -952,15 +1012,30 @@ function NftCollectionsBoard({ collections, order, hidden, onChange }: {
   }
   for (const c of collections) if (bySlug.has(c.slug)) { ordered.push(c); bySlug.delete(c.slug) }
 
-  const commit = (list: typeof ordered, hs: Set<string>) =>
-    onChange(list.map(c => c.slug).join(','), [...hs].join(','))
+  // Pure floor order (most valuable first) = the baseline the device sorts by.
+  const floorSlugs = [...collections].sort((a, b) => b.floor - a.floor).map(c => c.slug)
+
+  // Store a SPARSE overlay: only the leading run that diverges from floor order.
+  // Writing the whole list (what a checkbox toggle or a single move used to do)
+  // froze a stale ranking that then overrode the device's USD floor sort.
+  const sparse = (list: typeof ordered) => {
+    const slugs = list.map(c => c.slug)
+    let keep = 0
+    for (let k = 0; k < slugs.length; k++)
+      if (k >= floorSlugs.length || slugs[k] !== floorSlugs[k]) keep = k + 1
+    return slugs.slice(0, keep).join(',')
+  }
+
+  // Hiding/showing must NOT rewrite the order (that was the main accidental
+  // freeze): keep the existing order string, only update the hidden set.
+  const commitHidden = (hs: Set<string>) => onChange(order, [...hs].join(','))
 
   const move = (idx: number, dir: number) => {
     const to = idx + dir
     if (to < 0 || to >= ordered.length) return
     const next = [...ordered]
     ;[next[idx], next[to]] = [next[to], next[idx]]
-    commit(next, hiddenSet)
+    onChange(sparse(next), [...hiddenSet].join(','))
   }
 
   let visibleRank = 0
@@ -986,7 +1061,7 @@ function NftCollectionsBoard({ collections, order, hidden, onChange }: {
               onChange={e => {
                 const hs = new Set(hiddenSet)
                 if (e.target.checked) hs.delete(c.slug); else hs.add(c.slug)
-                commit(ordered, hs)
+                commitHidden(hs)
               }}
             />
             <span style={{ fontSize: 11, color: inGrid ? C.blue : C.muted, width: 22, textAlign: 'center', flexShrink: 0 }}>
