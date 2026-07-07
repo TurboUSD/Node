@@ -900,17 +900,28 @@ private:
         panelCfg.timings.flags.pclk_active_neg = 0;  // matches Seeed's verified Arduino
                                                      // reference (Arduino_GFX uses the
                                                      // default 0 for this panel).
-        panelCfg.num_fbs           = 1;    // single framebuffer (known-good, aligned)
+        panelCfg.num_fbs           = 1;    // single framebuffer in PSRAM
         panelCfg.flags.fb_in_psram = 1;
-        // Single framebuffer straight from PSRAM: rock-steady and correctly
-        // aligned. (Double-fb + full_refresh mis-rendered on this panel — bad
-        // alignment + flicker — and the bounce buffer rolls on the precompiled
-        // Arduino libs, so we stay here. Decode-time shimmer is tamed by the
-        // disk-cache + nearest-decode work instead.)
+        // Bounce-buffer mode: the ~450 KB frame buffer stays in PSRAM, but the
+        // panel is fed from a small internal-SRAM bounce buffer that the driver
+        // refills by DMA. This DECOUPLES scanout from PSRAM bandwidth, which is
+        // the root cause of the random horizontal/vertical desync — with a bare
+        // PSRAM framebuffer the panel FIFO underruns whenever PSRAM is contended
+        // (image decode / LVGL blits / WiFi) and latches a random offset.
+        // 10 lines (480*10*2 = ~9.4 KB SRAM) is plenty of slack at 12 MHz PCLK.
+        // This is only rock-steady because platformio.ini's custom_sdkconfig
+        // rebuilds esp_lcd with LCD_RGB_ISR_IRAM_SAFE + GDMA_*_IRAM + PSRAM XIP,
+        // so the refill ISR keeps running even during LittleFS flash writes
+        // (without those flags the bounce buffer "rolls" — that was the old bug).
+        panelCfg.bounce_buffer_size_px = LCD_H_RES * 10;
 
         ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
         ESP_ERROR_CHECK(esp_lcd_panel_reset(_lcdPanel));
         ESP_ERROR_CHECK(esp_lcd_panel_init(_lcdPanel));
+        // Distinctive marker so /logs unambiguously shows you're on the
+        // bounce-buffer build (look for "bounce=" right after boot).
+        Log.printf("Display: RGB panel up, bounce=%d px, IRAM-safe scanout\n",
+                   LCD_H_RES * 10);
 
         // 9. Register LVGL display driver.
         //    Draw buffer: 480×20 lines in internal SRAM (fast partial rendering).
@@ -1724,7 +1735,7 @@ private:
         static lv_obj_t* sOtaCard; sOtaCard = card;
         lv_obj_add_event_cb(otaLink, [](lv_event_t* e) {
             UiManager* self = (UiManager*)lv_event_get_user_data(e);
-            if (self) { self->otaCheckRequested = true; self->showOtaInfo("Checking for updates\xE2\x80\xA6"); }
+            if (self) { self->otaCheckRequested = true; self->showOtaInfo("Checking for updates..."); }
             closeModal(sOtaCard);
         }, LV_EVENT_CLICKED, this);
 
