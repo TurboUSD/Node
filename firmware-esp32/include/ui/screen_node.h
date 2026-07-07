@@ -202,6 +202,7 @@ public:
             // Newest mined block (i=0) sits rightmost, just left of the divider;
             // oldest (i = NODE_MINED_BLOCKS_SHOWN-1) sits leftmost.
             lv_coord_t slotX = (lv_coord_t)((NODE_MINED_BLOCKS_SHOWN - 1 - i) * NODE_BLOCK_SLOT_WIDTH);
+            minedBlocks[i].restingX = slotX;   // remember home X for the slide anim
             lv_obj_set_pos(minedBlocks[i].container, slotX, 16);
         }
         pendingBlock = buildBlockWidget(miningTrack, false);
@@ -297,24 +298,40 @@ public:
     }
 
     void updateMiningFeed(MiningFeedEntry* entries, int count) {
+        if (!minedBlocks[0].container) return;   // feed arrived before build()
         int minedIdx = 0;
         for (int i = 0; i < count && minedIdx < NODE_MINED_BLOCKS_SHOWN; i++) {
             if (!entries[i].mined) continue;
             setBlockContent(minedBlocks[minedIdx], entries[i].blockNumber, entries[i].rewardTusd, entries[i].winnerDisplayName, entries[i].winnerCountry);
             minedIdx++;
         }
+        // Hide any slots that no longer have a block (a shorter feed than before
+        // used to leave stale blocks on screen). Reset lastBlockNumber so the
+        // slot re-slides if it fills again later.
+        for (int s = minedIdx; s < NODE_MINED_BLOCKS_SHOWN; s++) {
+            if (!minedBlocks[s].container) continue;
+            lv_anim_del(minedBlocks[s].container, nullptr);
+            lv_obj_add_flag(minedBlocks[s].container, LV_OBJ_FLAG_HIDDEN);
+            minedBlocks[s].lastBlockNumber = -1;
+        }
+        bool foundPending = false;
         for (int i = 0; i < count; i++) {
             if (entries[i].mined) continue;
             setPendingBlockNumber(entries[i].blockNumber);
+            foundPending = true;
             break;
         }
+        if (!foundPending && pendingBlock.numberLabel)
+            lv_label_set_text(pendingBlock.numberLabel, "NEXT");   // no pending block yet
     }
 
     // Fill both leaderboard columns from the public node directory.
     void updateLeaderboard(LeaderboardEntry* entries, int count) {
-        // Top 3 by earnings.
-        static LeaderboardEntry tmp[24];
-        int n = count > 24 ? 24 : count;
+        if (!lbRewardNames[0]) return;   // leaderboard not built yet
+        // Top 3 by earnings. Cap raised so the real top-3 isn't computed from a
+        // truncated first-N slice once the directory grows past a couple dozen.
+        static LeaderboardEntry tmp[64];
+        int n = count > 64 ? 64 : count;
         memcpy(tmp, entries, n * sizeof(LeaderboardEntry));
         for (int i = 0; i < n; i++)
             for (int j = i + 1; j < n; j++)
@@ -349,6 +366,7 @@ public:
     // Real countdown from the backend feed (pending block's created_at + 1 h).
     // Takes over from the fake looping animation the first time it's called.
     void updateCountdown(long secondsLeft, double rewardTusd) {
+        if (!pendingBlock.ring || !pendingBlock.centerLabel) return;   // not built yet
         if (!_realCountdownActive) {
             _realCountdownActive = true;
             lv_anim_del(pendingBlock.ring, nullptr);   // stop the visual-only loop
@@ -442,6 +460,10 @@ private:
         lv_obj_t* ring = nullptr;
         lv_obj_t* centerLabel = nullptr;
         bool isMinedSlot = false;
+        lv_coord_t restingX = 0;   // this slot's true home X (set once in build).
+                                   // The slide anim must return here — reading
+                                   // lv_obj_get_x() mid-slide captured a transient
+                                   // position and the block drifted permanently.
         long lastBlockNumber = -1; // tracks what this slot last showed, so
                                     // setBlockContent() only animates a
                                     // slide when the slot's content actually
@@ -560,11 +582,14 @@ private:
 
         if (!isNewBlock) return; // periodic refresh of the same block's data, no slide needed
 
-        // Slide in from one slot-width to the right of this widget's
-        // resting position, mirroring the simulator's `transition: left
-        // 0.9s ease-in-out` -- the block visually arrives from where the
-        // next-older slot used to be, reading as "everything shifted left".
-        lv_coord_t restingX = lv_obj_get_x(w.container);
+        // Slide in from one slot-width to the right of this widget's HOME
+        // position, mirroring the simulator's `transition: left 0.9s ease-in-out`
+        // -- the block visually arrives from where the next-older slot used to
+        // be, reading as "everything shifted left". Use the stored resting X (not
+        // the live x, which may be mid-slide) and cancel any in-flight slide so
+        // overlapping animations can't leave the block parked off-position.
+        lv_anim_del(w.container, nullptr);
+        lv_coord_t restingX = w.restingX;
         lv_obj_set_x(w.container, restingX + NODE_BLOCK_SLOT_WIDTH);
 
         lv_anim_t anim;

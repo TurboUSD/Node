@@ -173,7 +173,11 @@ public:
     // fetchOhlcvHistory() into the chart. `count` may be less than 26 if
     // GeckoTerminal's cache doesn't have that much history yet.
     void loadRealCandles(OhlcvCandle* candles, int count, int groupDays = 7) {
-        if (count == 0) return;
+        if (count <= 0) return;
+        // Clamp to the parallel arrays' size (lowValues/openValues are [26]).
+        // Without this, a fetch that ever returns more than 26 candles would
+        // write past those arrays and corrupt adjacent members.
+        if (count > 26) count = 26;
         _groupDays = groupDays;
 
         _minPrice = candles[0].low;
@@ -320,6 +324,10 @@ private:
         if (leadingZeros < 0) leadingZeros = 0;
         double mantissa = n * pow(10, leadingZeros + 2);   // in [1,10)
         int digits4 = (int)llround(mantissa * 1000.0);      // 4 significant digits
+        // Rounding can push a mantissa of 9.9996 to 10000 (5 digits → wrong
+        // magnitude). Keep it to exactly 4 significant digits.
+        if (digits4 > 9999) digits4 = 9999;
+        if (digits4 < 1000) digits4 = 1000;
         _priceLabel("$0.0", &lv_font_montserrat_16);
         snprintf(buf, sizeof(buf), "%d", leadingZeros);
         _priceLabel(buf, &lv_font_montserrat_10);           // subscript (small, bottom)
@@ -455,6 +463,7 @@ private:
 
     // "$12,345,678" — integer USD with thousands separators.
     static void fmtThousands(char* out, size_t sz, double v) {
+        if (sz == 0) return;   // guard: `sz - 1` below would wrap (size_t)
         char digits[24];
         snprintf(digits, sizeof(digits), "%.0f", v < 0 ? -v : v);
         int n = strlen(digits);
@@ -478,17 +487,4 @@ private:
         return String(buf);
     }
 
-    String formatPriceSubscript(double n) {
-        if (n <= 0) return "$0.00";
-        if (n >= 0.01) {
-            char buf[16];
-            snprintf(buf, sizeof(buf), "$%.4f", n);
-            return String(buf);
-        }
-        int leadingZeros = (int)floor(-log10(n)) - 1;
-        double mantissa = n * pow(10, leadingZeros + 2);
-        char buf[24];
-        snprintf(buf, sizeof(buf), "$0.0(%d)%d", leadingZeros, (int)mantissa);
-        return String(buf);
-    }
 };

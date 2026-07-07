@@ -95,11 +95,20 @@ inline void _sendBmp() {
     WiFiClient c = s_srv->client();
     c.write(hd, sizeof(hd));
     const uint8_t* p = (const uint8_t*)fb;
+    // Streaming ~460 KB over WiFi blocks the main loop for ~150 ms, during which
+    // lv_timer_handler() never runs — the UI froze and then jumped, which read
+    // as a flicker every time a screenshot was served. Service LVGL every ~20 ms
+    // MID-STREAM so the screen keeps refreshing. We're not inside lv_timer_handler
+    // here (the loop already returned from it before screenshot::poll), so this
+    // is a plain sequential call, not re-entrancy. Worst case the capture tears
+    // one frame — already an accepted tradeoff for this debug aid.
+    uint32_t lastLv = millis();
     for (uint32_t off = 0; off < pxBytes; ) {
         size_t n = min((uint32_t)8192, pxBytes - off);
         size_t wr = c.write(p + off, n);
         if (wr == 0) break;                      // client gone
         off += wr;
+        if (millis() - lastLv >= 20) { lv_timer_handler(); lastLv = millis(); }
         delay(0);                                // feed the watchdog
     }
     Log.println("Screenshot served");

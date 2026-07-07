@@ -4,6 +4,7 @@
 
 #pragma once
 #include <lvgl.h>
+#include <math.h>          // isfinite() — guards the async value updaters
 #include "api_client.h"
 #include "ui/shared_components.h"
 #include "ui/modal.h"
@@ -157,12 +158,15 @@ public:
     }
 
     void updateLiveTotal(double totalDebtUsd) {
-        char buf[20];
+        if (!totalDebtLabel) return;   // update raced screen build/teardown
+        if (!isfinite(totalDebtUsd)) { lv_label_set_text(totalDebtLabel, "--"); return; }
+        char buf[32];
         snprintf(buf, sizeof(buf), "$%.2fT", totalDebtUsd / 1e12);
         lv_label_set_text(totalDebtLabel, buf);
     }
 
     void updateSinceValue(double valueUsd) {
+        if (!sinceValueLabel || !isfinite(valueUsd)) return;
         // FULL figure for every timeframe — "+$7,711,260", no k/M/B, no
         // decimals. Long is fine (there's room) and the whole number visibly
         // climbs on the 1-second recompute tick.
@@ -182,6 +186,7 @@ public:
     }
 
     void updateRateValue(double valueUsd) {
+        if (!rateValueLabel || !isfinite(valueUsd)) return;
         char buf[28];
         if (valueUsd >= 1e9) {
             snprintf(buf, sizeof(buf), "+$%.2fB", valueUsd / 1e9);

@@ -49,11 +49,11 @@ extern "C" unsigned lodepng_decode32(unsigned char** out, unsigned* w, unsigned*
 #define CLR_BLUE     0x5b8dee
 #define CLR_YELLOW   0xffcf72
 #define CLR_BG       0x000000
-#define CLR_CARD     0x0c0c0c
-#define CLR_SURFACE  0x141414
-#define CLR_BORDER   0x1c1c1c
+#define CLR_CARD     0x121214   // was 0x0c0c0c — matches the lightened web cards
+#define CLR_SURFACE  0x1b1b1e   // was 0x141414
+#define CLR_BORDER   0x2a2a2e   // was 0x1c1c1c — edges now read on black
 #define CLR_TEXT     0xe8e8e8
-#define CLR_MUTED    0x6e7280
+#define CLR_MUTED    0x9096a1   // was 0x6e7280 — secondary text was too dark
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 #define TICKER_MAX          10
@@ -79,6 +79,7 @@ struct TickerEntry {
     float chart_low  [CHART_BARS] = {};
     float chart_closes[CHART_BARS] = {};
     int   chart_count      = 0;
+    time_t chart_last_ts   = 0;          // unix ts of the NEWEST candle (for X-axis dates)
     bool  live_loaded      = false;
     bool  chart_loaded     = false;
     volatile bool chart_dirty = false;  // bg task → UI: fresh chart data to draw
@@ -348,6 +349,24 @@ private:
     volatile bool    _listReloadRequested = false;  // retried until the worker is free
     volatile bool    _searchRequested     = false;  // ditto, for the search dialog
 
+    // Mutations queued when the worker is busy. Previously add/remove/reorder
+    // did `if (_bgTask) return;` and were silently dropped server-side while the
+    // local UI still applied them — so a deleted ticker REAPPEARED and a reorder
+    // REVERTED on the next list reload. These retry every poll until dispatched.
+    // (All set/read on core 1 only — the poll timer and event callbacks.)
+    SearchResultEntry _pendingAdd;
+    bool             _pendingAddSet     = false;
+    char             _pendingRemovePool[68] = {};
+    bool             _pendingRemoveSet  = false;
+    bool             _pendingReorderSet = false;
+
+    // Token logo bitmaps freed after the card tree is rebuilt (freeing on the
+    // spot could yank a bitmap LVGL is mid-drawing). Filled on delete/reorder.
+    uint8_t*         _logoFreeList[TICKER_MAX] = {};
+    int              _logoFreeCount = 0;
+
+    bool             _loadedOnce = false;   // false until the first list load returns
+
     TickerEntry      _tickers[TICKER_MAX];
     int              _tickerCount = 0;
 
@@ -454,12 +473,16 @@ private:
             _tickers[i].logo_applied = false;   // cards are new → re-attach logos
         }
 
-        bool hasAny = (_tickerCount > 0);
-        if (hasAny) {
-            lv_obj_add_flag(_emptyLabel, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_clear_flag(_emptyLabel, LV_OBJ_FLAG_HIDDEN);
-        }
+        // Empty body: show the spinner while the FIRST list load is still in
+        // flight, and only fall back to the "No tickers yet" copy once a load
+        // has actually returned empty (it used to flash "No tickers yet" during
+        // every initial load).
+        bool hasAny   = (_tickerCount > 0);
+        bool loading  = !hasAny && !_loadedOnce;
+        if (hasAny || !loading) lv_obj_add_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
+        else                    lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
+        if (hasAny || loading)  lv_obj_add_flag(_emptyLabel, LV_OBJ_FLAG_HIDDEN);
+        else                    lv_obj_clear_flag(_emptyLabel, LV_OBJ_FLAG_HIDDEN);
 
         // 1 column: classic full-width stack. 2 columns: row-wrap grid — the
         // full-width title row keeps its own line, cards pair up below it.
@@ -545,7 +568,6 @@ private:
         TickerEntry& t = _tickers[idx];
         CardWidgets& w = _cards[idx];
         if (!t.logo_ready || t.logo_applied || !w.symBg) return;
-        Log.printf("logo[%s] applied to card\n", t.base_symbol);
         w.logoImg = lv_img_create(w.symBg);
         lv_img_set_src(w.logoImg, &t.logo_dsc);
         lv_obj_center(w.logoImg);
@@ -852,7 +874,9 @@ private:
         lv_obj_clear_flag(xRow, LV_OBJ_FLAG_CLICKABLE);   // taps fall through to the card
         // Real calendar dates ("Jun 12", "Jun 24", "Jul 5") instead of the old
         // relative "-24d/-12d/now" — 24 daily bars, newest on the right.
-        time_t nowT = time(nullptr);
+        // Anchor the date labels on the NEWEST candle's real timestamp when we
+        // have it (falls back to now before the chart has loaded).
+        time_t nowT = t.chart_last_ts > 0 ? t.chart_last_ts : time(nullptr);
         int tfG = _tfGroup(), tfB = _tfBars();
         for (int i = 0; i < 3; i++) {
             time_t ts = nowT - (time_t)((tfB - 1) - i * (tfB - 1) / 2) * tfG * 86400;
@@ -1220,11 +1244,14 @@ private:
     }
 
     void _dispatchAdd(int searchResultIdx) {
-        if (_bgTask) return;   // worker busy — see note in _dispatchTask
+        _dispatchAddEntry(_searchResults[searchResultIdx]);
+    }
+    void _dispatchAddEntry(const SearchResultEntry& e) {
+        if (_bgTask) { _pendingAdd = e; _pendingAddSet = true; return; }   // queue, retried in poll
         TickerTaskPayload* payload = new TickerTaskPayload();
         payload->type    = TT_ADD;
         strncpy(payload->node_code, _nodeCode, sizeof(payload->node_code) - 1);
-        payload->to_add  = _searchResults[searchResultIdx];
+        payload->to_add  = e;
         xTaskCreatePinnedToCore(_bgTaskFn, "ticker_add", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
     }
 
@@ -1232,7 +1259,7 @@ private:
     // if the worker is busy or the function isn't deployed, the order still
     // applies locally until the next list reload).
     void _dispatchReorder() {
-        if (_bgTask) return;   // worker busy — see note in _dispatchTask
+        if (_bgTask) { _pendingReorderSet = true; return; }   // queue, retried in poll
         TickerTaskPayload* payload = new TickerTaskPayload();
         payload->type = TT_REORDER;
         strncpy(payload->node_code, _nodeCode, sizeof(payload->node_code) - 1);
@@ -1243,12 +1270,19 @@ private:
     }
 
     void _dispatchRemove(int tickerIdx) {
-        if (_bgTask) return;   // worker busy — see note in _dispatchTask
+        _dispatchRemovePool(_tickers[tickerIdx].pool_address);
+    }
+    void _dispatchRemovePool(const char* pool) {
+        if (_bgTask) {   // queue, retried in poll — otherwise the server keeps the
+                         // ticker and it reappears on the next list reload
+            strncpy(_pendingRemovePool, pool, sizeof(_pendingRemovePool) - 1);
+            _pendingRemoveSet = true;
+            return;
+        }
         TickerTaskPayload* payload = new TickerTaskPayload();
         payload->type         = TT_REMOVE;
-        payload->ticker_index = tickerIdx;
-        strncpy(payload->node_code,       _nodeCode,                    sizeof(payload->node_code) - 1);
-        strncpy(payload->pool_to_remove,  _tickers[tickerIdx].pool_address, sizeof(payload->pool_to_remove) - 1);
+        strncpy(payload->node_code,       _nodeCode, sizeof(payload->node_code) - 1);
+        strncpy(payload->pool_to_remove,  pool,      sizeof(payload->pool_to_remove) - 1);
         xTaskCreatePinnedToCore(_bgTaskFn, "ticker_rm", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
     }
 
@@ -1594,6 +1628,10 @@ private:
                 te.chart_low [n2] = ll;
             }
             te.chart_count  = buckets;
+            // Newest candle's timestamp (row 0, field 0 — seconds) so the X-axis
+            // labels reflect the real data dates instead of "now" (which lied
+            // whenever GeckoTerminal's data was a day stale).
+            if (ohlcv.size() > 0) te.chart_last_ts = (time_t)(ohlcv[0][0].as<long long>());
             te.chart_loaded = true;
             te.chart_at     = millis();
             te.chart_dirty  = true;   // pollPending redraws on core 1
@@ -1810,7 +1848,6 @@ private:
                 te.logo_dsc.data      = blob;
                 te.logo_px            = blob;
                 te.logo_ready         = true;   // pollPending picks this up on core 1
-                Log.printf("logo[%s] from disk cache\n", te.base_symbol);
                 return;
             }
             if (blob) free(blob);   // wrong size → stale format, refetch
@@ -1868,8 +1905,6 @@ private:
             free(png);
             return false;
         }
-        Log.printf("logo[%s] downloaded %u bytes, magic %02X%02X\n",
-                      te.base_symbol, (unsigned)pngLen, png[0], png[1]);
 
         // Decode to RGBA8888 (rgba, iw×ih) — format picked by magic bytes.
         unsigned char* rgba = nullptr;
@@ -1996,6 +2031,10 @@ private:
             self->_tickers[i].chart_loaded = false;
         self->_chartLoadRequestIdx = (int)(intptr_t)lv_obj_get_user_data(dd);
         self->_rebuildRequested = true;   // pollPending rebuilds outside this callback
+        // Every card's chart is now the OLD timeframe — trigger a full list
+        // reload so ALL charts refetch with the new grouping, not just the one
+        // whose dropdown changed (the others used to go blank until re-entry).
+        self->_listReloadRequested = true;
     }
 
     static void _onCollapseTapped(lv_event_t* e) {
@@ -2051,6 +2090,12 @@ private:
         int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
         if (!self || idx < 0 || idx >= self->_tickerCount) return;
         self->_dispatchRemove(idx);
+        // Reclaim the removed ticker's logo bitmap (the array shift below would
+        // otherwise overwrite the pointer and leak ~4.7 KB PSRAM per delete).
+        // Deferred: freed in pollPending AFTER the card tree is rebuilt, so we
+        // never free a bitmap an lv_img is still drawing.
+        if (self->_tickers[idx].logo_px && self->_logoFreeCount < TICKER_MAX)
+            self->_logoFreeList[self->_logoFreeCount++] = self->_tickers[idx].logo_px;
         // Optimistic UI: remove from local array immediately
         for (int i = idx; i < self->_tickerCount - 1; i++)
             self->_tickers[i] = self->_tickers[i + 1];
@@ -2081,7 +2126,7 @@ private:
 
     static void _onResultSelected(lv_event_t* e) {
         auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
-        lv_obj_t* obj = lv_event_get_target(e);
+        lv_obj_t* obj = lv_event_get_current_target(e);   // the row the cb is on, not a child label
         int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
         if (!self || idx < 0 || idx >= self->_searchResultCount) return;
         self->_closeSearchDialog();
@@ -2106,6 +2151,11 @@ public:
         if (self->_rebuildRequested) {
             self->_rebuildRequested = false;
             self->_rebuildTickerCards();
+            // Now that the old cards (and their lv_img logos) are gone, it's safe
+            // to free the bitmaps of any removed/replaced tickers.
+            for (int i = 0; i < self->_logoFreeCount; i++)
+                if (self->_logoFreeList[i]) { free(self->_logoFreeList[i]); self->_logoFreeList[i] = nullptr; }
+            self->_logoFreeCount = 0;
             int want = self->_chartLoadRequestIdx;
             self->_chartLoadRequestIdx = -1;
             if (want >= 0 && want < self->_tickerCount && !self->_tickers[want].chart_loaded)
@@ -2137,8 +2187,9 @@ public:
             }
         }
 
-        // Queued work: retried every tick until the worker is free. Search
-        // jumps the queue ahead of list reloads (user is actively waiting).
+        // Queued work: retried every tick until the worker is free. Priority:
+        // search (user waiting) → mutations (add/remove/reorder must reach the
+        // server before a list reload, or the reload undoes them) → list reload.
         if (self->_searchRequested && !self->_bgTask) {
             if (self->_searchOverlay && self->_searchTA) {
                 self->_searchRequested = false;
@@ -2146,6 +2197,18 @@ public:
             } else {
                 self->_searchRequested = false;   // dialog closed meanwhile — cancel
             }
+        }
+        else if (self->_pendingAddSet && !self->_bgTask) {
+            self->_pendingAddSet = false;
+            self->_dispatchAddEntry(self->_pendingAdd);
+        }
+        else if (self->_pendingRemoveSet && !self->_bgTask) {
+            self->_pendingRemoveSet = false;
+            self->_dispatchRemovePool(self->_pendingRemovePool);
+        }
+        else if (self->_pendingReorderSet && !self->_bgTask) {
+            self->_pendingReorderSet = false;
+            self->_dispatchReorder();
         }
         else if (self->_listReloadRequested && !self->_bgTask) {
             self->_listReloadRequested = false;
@@ -2160,6 +2223,7 @@ public:
 
         switch (type) {
             case PR_LIST_LOADED:
+                self->_loadedOnce = true;   // real data has arrived at least once
                 lv_obj_add_flag(self->_spinner, LV_OBJ_FLAG_HIDDEN);
                 self->_rebuildTickerCards();
                 break;

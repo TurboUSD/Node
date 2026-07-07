@@ -334,6 +334,7 @@ public:
             _rebuildGrid();
             lv_label_set_text(_loadingLabel,
                 "No NFT wallet set.\nTap the + WALLET button at the top\nto enter one, or add it on your\nnode's setup page.");
+            lv_obj_clear_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
         } else if (_cacheExpired()) {
             _startFetch();
         } else {
@@ -449,6 +450,7 @@ private:
         // snapshot on display this refresh is silent.
         if (_nftCache.empty()) {
             lv_label_set_text(_loadingLabel, "Loading pinlisted NFTs...");
+            lv_obj_clear_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
             for (int i = 0; i < _cellCount; i++)
                 if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
@@ -778,6 +780,7 @@ private:
         // with a snapshot showing, this is a silent background refresh.
         if (_nftCache.empty()) {
             lv_label_set_text(_loadingLabel, "Fetching your NFTs...");
+            lv_obj_clear_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
             for (int i = 0; i < _cellCount; i++)
                 if (_cells[i].container) lv_obj_add_flag(_cells[i].container, LV_OBJ_FLAG_HIDDEN);
@@ -851,9 +854,11 @@ private:
         _fetching = false;
         lv_obj_add_flag(_spinner, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(_loadingLabel, "");
+        lv_obj_add_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
 
         if (_pendingResult.error) {
             lv_label_set_text(_loadingLabel, _pendingResult.error_msg);
+            lv_obj_clear_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
             return;
         }
 
@@ -1042,9 +1047,15 @@ private:
 
         if (_nftCache.empty()) {
             lv_label_set_text(_loadingLabel, "No NFTs found.\nEnter a wallet with NFTs.");
+            lv_obj_clear_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
             return;
         }
+        // HIDE (not just blank) the centered loading label once the grid has
+        // cells — an empty label is invisible, but any later message set on it
+        // (a background refresh, error, etc.) used to peek out through the gaps
+        // on either side of the middle cell (stray text behind the grid).
         lv_label_set_text(_loadingLabel, "");
+        lv_obj_add_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
 
         // On a grid-size change: redirect the worker (generation bump) and
         // purge slots nobody is entitled to anymore — the current grid keeps
@@ -1864,18 +1875,31 @@ private:
                     if (q >= 0) base = base.substring(0, q);
                     bool fromDisk = diskcache::has("img", it.image_url);
                     uint16_t w = 0, h = 0;
+                    // Ordinals (ordinals.com/content/…) serve the FULL-size PNG and
+                    // ignore resize query params, so the "sized" + raw attempts just
+                    // download the big original — slow, and often over the 300 KB
+                    // fetch cap, so nothing gets cached (NodeMonke "never saved").
+                    // Go straight to the wsrv proxy for a small sized JPEG (same as
+                    // seadn.io's variants): fast AND always fits the disk cache.
+                    // The cache key stays it.image_url either way, so it persists.
+                    bool isOrdinal = it.floor_btc || strstr(it.image_url, "ordinals.com") != nullptr;
+                    String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=jpg";
                     netLock();   // exclusive TLS only for THIS image's fetch+decode
-                    uint8_t* px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
-                                                      boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
-                    if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
-                    if (!px) {
-                        // Last resort for formats the chip can't decode (SVG —
-                        // e.g. on-chain Checks —, webp, gif): the wsrv.nl image
-                        // proxy rasterizes/transcodes ANYTHING to JPEG. Only
-                        // reached when both direct attempts failed, and the
-                        // JPEG result lands in the disk cache like any other.
-                        String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=jpg";
+                    uint8_t* px = nullptr;
+                    if (isOrdinal) {
                         px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
+                        if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
+                    } else {
+                        px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
+                                                 boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
+                        if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
+                        if (!px) {
+                            // Last resort for formats the chip can't decode (SVG —
+                            // e.g. on-chain Checks —, webp, gif): the wsrv.nl image
+                            // proxy rasterizes/transcodes ANYTHING to JPEG. The
+                            // JPEG result lands in the disk cache like any other.
+                            px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
+                        }
                     }
                     netUnlock();   // released before the flash write + rate-limit delay
 

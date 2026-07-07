@@ -234,6 +234,7 @@ private:
 
     // "$12,345" — integer USD with thousands separators.
     static void _fmtThousands(char* out, size_t sz, double v) {
+        if (sz == 0) return;   // guard: unsigned `sz - 1` below would wrap
         char digits[24];
         snprintf(digits, sizeof(digits), "%.0f", v < 0 ? -v : v);
         int n = strlen(digits);
@@ -250,6 +251,7 @@ private:
 
     // "$9,997.8932" — thousands separators + 4 decimals (real-time mode).
     static void _fmtMoney4(char* out, size_t sz, double v) {
+        if (sz == 0) return;   // guard: unsigned `sz - 1` below would wrap
         long long u  = llround((v < 0 ? -v : v) * 10000.0);
         long long ip = u / 10000, fp = u % 10000;
         char digits[24];

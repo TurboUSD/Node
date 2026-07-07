@@ -1598,7 +1598,7 @@ private:
         // Button reference (informational) — bottom of the preferences card.
         lv_obj_t* btnInfo = lv_label_create(card);
         lv_label_set_text(btnInfo,
-            "Top button: short press = screen on/off,  hold 3s = sleep.");
+            "Top button: tap to toggle the screen, or to silence a ringing alarm.");
         lv_obj_set_style_text_color(btnInfo, lv_color_hex(0x6e7280), 0);
         lv_obj_set_style_text_font(btnInfo, &lv_font_montserrat_10, 0);
 
@@ -1613,7 +1613,9 @@ private:
                      + "http://" + ip + "/logs";
             lv_label_set_text(diagInfo, s.c_str());
         }
-        lv_obj_set_style_text_color(diagInfo, lv_color_hex(0x43e397), 0);
+        // Same muted tone as the URL under the QR (was bright green, which drew
+        // the eye more than the setup URL above it).
+        lv_obj_set_style_text_color(diagInfo, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(diagInfo, &lv_font_montserrat_10, 0);
         lv_label_set_long_mode(diagInfo, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(diagInfo, LV_PCT(100));
