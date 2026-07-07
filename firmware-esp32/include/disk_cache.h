@@ -31,10 +31,22 @@ static bool s_ok = false;
 // and visibly stutters/flickers the UI. Serialising the whole op removes the
 // race (and thus the flicker) on a near-full, actively-evicting partition.
 static SemaphoreHandle_t s_mtx = nullptr;
+// TRY-lock with a timeout, never a forever wait. If a cache op ever holds the
+// mutex too long (a big eviction on a near-full partition), a forever wait on
+// the LVGL/loopTask — which the Task Watchdog watches — would starve it past the
+// ~5 s TWDT and PANIC-REBOOT the device (the NFT-decode crash loop). With a
+// bounded wait the blocked caller just treats it as a cache miss/skip instead.
+static const uint32_t CACHE_LOCK_MS = 2000;
 struct _Guard {
-    _Guard()  { if (s_mtx) xSemaphoreTake(s_mtx, portMAX_DELAY); }
-    ~_Guard() { if (s_mtx) xSemaphoreGive(s_mtx); }
+    bool locked = false;
+    _Guard() {
+        if (!s_mtx) { locked = true; return; }
+        locked = (xSemaphoreTake(s_mtx, pdMS_TO_TICKS(CACHE_LOCK_MS)) == pdTRUE);
+    }
+    ~_Guard() { if (locked && s_mtx) xSemaphoreGive(s_mtx); }
 };
+
+inline void _purgeOrphans(const char* const* deadPrefixes, int nPrefixes);   // defined below
 
 inline void init() {
     if (!s_mtx) s_mtx = xSemaphoreCreateMutex();
@@ -42,6 +54,14 @@ inline void init() {
     s_ok = LittleFS.begin(true /*formatOnFail*/, "/lfs", 5, "spiffs");
     if (s_ok) {
         Log.printf("DiskCache: mounted, %u/%u KB used\n",
+                      (unsigned)(LittleFS.usedBytes() / 1024),
+                      (unsigned)(LittleFS.totalBytes() / 1024));
+        // Reclaim space from superseded decoded-cover formats so the partition
+        // isn't permanently full of dead blobs (which caused constant eviction
+        // of live art + re-downloads + the decode-time watchdog reboot).
+        static const char* kDead[] = { "dec_", "dec2_" };
+        _purgeOrphans(kDead, 2);
+        Log.printf("DiskCache: %u/%u KB used after purge\n",
                       (unsigned)(LittleFS.usedBytes() / 1024),
                       (unsigned)(LittleFS.totalBytes() / 1024));
     } else {
@@ -62,6 +82,7 @@ inline uint8_t* loadAlloc(const char* ns, const char* key, size_t* outLen) {
     *outLen = 0;
     if (!s_ok) return nullptr;
     _Guard _g;   // block eviction from deleting this file mid-open (see s_mtx)
+    if (!_g.locked) return nullptr;   // busy → treat as a miss, decode fresh
     String path = _pathFor(ns, key);
     // exists() first: opening a missing file makes the Arduino VFS layer log
     // an ERROR line over serial ("no permits for creation") — besides the
@@ -92,30 +113,81 @@ inline size_t _freeBytes() { return LittleFS.totalBytes() - LittleFS.usedBytes()
 // pixels already live in PSRAM; only the disk copy goes.
 inline void _evictUntil(size_t need) {
     if (!s_ok) return;
-    int guard = 0;
-    while (_freeBytes() < need && guard++ < 256) {
-        File dir = LittleFS.open("/");
-        if (!dir) return;
-        String oldestPath; time_t oldestT = 0; bool first = true;
-        for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
+    if (_freeBytes() >= need) return;
+    // ONE directory scan (the expensive part), then in-memory oldest-first
+    // deletes. The old code re-scanned the whole directory for EVERY single file
+    // it deleted (O(files²)); on a near-full partition that held the cache mutex
+    // for seconds, starving the watchdog-watched loopTask into a reboot.
+    struct Ent { char path[40]; time_t t; };
+    const int MAXF = 320;
+    Ent* ents = (Ent*)heap_caps_malloc(sizeof(Ent) * MAXF, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!ents) return;   // no PSRAM: skip eviction rather than risk a long scan loop
+    int cnt = 0;
+    File dir = LittleFS.open("/");
+    if (dir) {
+        for (File f = dir.openNextFile(); f && cnt < MAXF; f = dir.openNextFile()) {
             if (!f.isDirectory()) {
-                time_t t = f.getLastWrite();
-                String p = f.path();
-                if (first || t < oldestT) { oldestT = t; oldestPath = p; first = false; }
+                strncpy(ents[cnt].path, f.path(), sizeof(ents[cnt].path) - 1);
+                ents[cnt].path[sizeof(ents[cnt].path) - 1] = 0;
+                ents[cnt].t = f.getLastWrite();
+                cnt++;
             }
             f.close();
         }
         dir.close();
-        if (oldestPath.length() == 0) break;   // nothing left to evict
-        LittleFS.remove(oldestPath);
     }
+    while (_freeBytes() < need) {
+        int oldest = -1;
+        for (int i = 0; i < cnt; i++) {
+            if (ents[i].path[0] == 0) continue;
+            if (oldest < 0 || ents[i].t < ents[oldest].t) oldest = i;
+        }
+        if (oldest < 0) break;   // nothing left to evict
+        LittleFS.remove(String(ents[oldest].path));
+        ents[oldest].path[0] = 0;
+    }
+    free(ents);
+}
+
+// One-time cleanup of ORPHANED namespaces: when a decoded-cover format changes
+// we bump its namespace ("dec" → "dec2" → "dec3"), but the old blobs linger and
+// fill the partition, so eviction then keeps deleting LIVE logos/images and the
+// device re-downloads everything each boot. Delete any file whose name starts
+// with a dead prefix so live entries persist as intended.
+inline void _purgeOrphans(const char* const* deadPrefixes, int nPrefixes) {
+    if (!s_ok) return;
+    _Guard _g;
+    if (!_g.locked) return;
+    File dir = LittleFS.open("/");
+    if (!dir) return;
+    String toDelete[64];
+    int nDel = 0;
+    for (File f = dir.openNextFile(); f && nDel < 64; f = dir.openNextFile()) {
+        if (!f.isDirectory()) {
+            String p = f.path();                 // e.g. "/dec2_1a2b3c4d.bin"
+            const char* name = p.c_str();
+            if (name[0] == '/') name++;
+            for (int k = 0; k < nPrefixes; k++) {
+                if (strncmp(name, deadPrefixes[k], strlen(deadPrefixes[k])) == 0) {
+                    toDelete[nDel++] = p; break;
+                }
+            }
+        }
+        f.close();
+    }
+    dir.close();
+    for (int i = 0; i < nDel; i++) LittleFS.remove(toDelete[i]);
+    if (nDel) Log.printf("DiskCache: purged %d orphaned entries\n", nDel);
 }
 
 inline bool save(const char* ns, const char* key, const uint8_t* data, size_t len) {
     if (!s_ok || !data || len == 0) return false;
     _Guard _g;   // evict + write atomically vs. concurrent loads (see s_mtx)
-    // Make room by evicting oldest entries rather than refusing forever.
-    const size_t HEADROOM = 16 * 1024;
+    if (!_g.locked) return false;   // busy → skip caching this blob (harmless)
+    // Make room by evicting oldest entries rather than refusing forever. Free a
+    // BIG chunk in one go (not just this blob) so a burst of NFT-cover saves
+    // doesn't trigger a fresh eviction scan on every single one.
+    const size_t HEADROOM = 192 * 1024;
     if (_freeBytes() < len + HEADROOM) _evictUntil(len + HEADROOM);
     if (_freeBytes() < len + 2 * 1024) {   // couldn't free enough (blob too big)
         Log.printf("DiskCache: cannot fit %s (%u B) even after eviction\n", key, (unsigned)len);
@@ -133,12 +205,14 @@ inline bool save(const char* ns, const char* key, const uint8_t* data, size_t le
 inline bool has(const char* ns, const char* key) {
     if (!s_ok) return false;
     _Guard _g;
+    if (!_g.locked) return false;
     return LittleFS.exists(_pathFor(ns, key));
 }
 
 inline void remove(const char* ns, const char* key) {
     if (!s_ok) return;
     _Guard _g;
+    if (!_g.locked) return;
     LittleFS.remove(_pathFor(ns, key));
 }
 
