@@ -1244,9 +1244,9 @@ const s: Record<string, React.CSSProperties> = {
   },
   // mempool.space-style 3D block. Depth now falls to the LEFT + down (negative
   // x) with FOUR stacked "thickness" layers for a chunkier, less-flat look.
-  blockMined:   { background: 'linear-gradient(160deg,#0c2417,rgba(39,93,59,0.6))', border: `1px solid ${C.green}66`,
+  blockMined:   { background: '#1b4d2e', border: `1px solid ${C.green}66`,
                   boxShadow: '-3px 5px 0 #1e6e44, -6px 10px 0 #155232, -9px 15px 0 #0d3a23, -11px 20px 22px rgba(0,0,0,0.6)' },
-  blockPending: { background: 'linear-gradient(160deg,#241a00,rgba(93,78,39,0.6))', border: `1px solid ${C.yellow}66`,
+  blockPending: { background: '#4d3c15', border: `1px solid ${C.yellow}66`,
                   boxShadow: '-3px 5px 0 #7a6323, -6px 10px 0 #5a4917, -9px 15px 0 #3d3110, -11px 20px 22px rgba(0,0,0,0.6)' },
   blockNum:     { fontSize: 12, fontWeight: 700, color: '#e8e8ea', letterSpacing: 0.5 },
   blockAgo:     { fontSize: 9,  color: '#a4a8b2', marginTop: 1, marginBottom: 2 },
