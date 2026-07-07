@@ -73,6 +73,15 @@ public:
         updateClockIfNeeded();
         _checkScreenTimeout();
         _checkScreenCarousel();
+        // Keep the RGB panel's DMA aligned to the framebuffer. With the bounce
+        // buffer, a single missed refill (e.g. during a flash/cache-disable
+        // window) desyncs the panel: the image rolls, then settles a permanent
+        // half-frame vertical shift. `esp_lcd_rgb_panel_restart()` only sets a
+        // flag that the driver acts on at the next VSYNC, re-aligning the scan-
+        // out — the runtime equivalent of CONFIG_LCD_RGB_RESTART_IN_VSYNC (which
+        // we can't set in the precompiled Arduino sdkconfig). It's a no-op when
+        // already aligned, so calling it every loop keeps the picture locked.
+        if (_lcdPanel) esp_lcd_rgb_panel_restart(_lcdPanel);
     }
 
     // Set backlight brightness level 1–5 immediately via LEDC PWM.
