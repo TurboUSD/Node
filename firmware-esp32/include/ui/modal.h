@@ -302,8 +302,19 @@ inline void addStepperRow(lv_obj_t* card, const char* label, int initial,
 
     const lv_coord_t STEP_BTN_W = 34, STEP_BTN_H = 28;
 
-    StepperState* st = new StepperState{ nullptr, initial, minV, maxV, step, "", onChange };
+    // Field-by-field (not brace-aggregate-init): a string-literal initialiser for
+    // the char suffix[] member inside the braced list doesn't compile under the
+    // toolchain's C++ standard ("could not convert {...} to StepperState").
+    StepperState* st = new StepperState();
+    st->valLbl   = nullptr;
+    st->val      = initial;
+    st->minV     = minV;
+    st->maxV     = maxV;
+    st->step     = step;
+    st->onChange = onChange;
+    st->suffix[0] = '\0';
     strncpy(st->suffix, suffix ? suffix : "", sizeof(st->suffix) - 1);
+    st->suffix[sizeof(st->suffix) - 1] = '\0';
 
     lv_obj_t* minusBtn = lv_btn_create(group);
     lv_obj_set_size(minusBtn, STEP_BTN_W, STEP_BTN_H);
