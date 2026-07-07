@@ -47,6 +47,23 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
+      # Cache the PlatformIO toolchain, the pioarduino platform, and the build
+      # directory. The FROM-SOURCE Arduino/IDF build (needed for custom_sdkconfig
+      # → the RGB bounce buffer) is slow (~20-40 min) but ONLY the first time:
+      # once cached, later pushes restore the compiled framework and SCons only
+      # recompiles the source files that actually changed (~1-2 min). The key is
+      # hashed on platformio.ini, so it auto-refreshes when the platform or the
+      # custom_sdkconfig changes; restore-keys reuses the newest cache otherwise.
+      - name: Cache PlatformIO build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            firmware-esp32/.pio
+          key: pio-esp32-${{ runner.os }}-${{ hashFiles('firmware-esp32/platformio.ini') }}
+          restore-keys: |
+            pio-esp32-${{ runner.os }}-
+
       - name: Inject Supabase credentials into config.h
         run: |
           PROJECT_REF=$(echo "${{ secrets.SUPABASE_URL }}" | sed 's|https://||' | sed 's|\.supabase\.co||')
