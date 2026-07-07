@@ -113,6 +113,17 @@ public:
     uint8_t getScreenTimeoutMins()          { return prefs.getUChar("scr_timeout", 10); }
     void    setScreenTimeoutMins(uint8_t v) { prefs.putUChar("scr_timeout", v); }
 
+    // Auto screen carousel: when true the UI advances through every screen on a
+    // timer, looping back to Home. Default OFF. Seconds-per-screen default 10.
+    // A device-side change marks it dirty so the next heartbeat pushes it up
+    // (bidirectional sync with the web, same pattern as the alarm settings).
+    bool    getScreenCarousel()             { return prefs.getBool("scr_carou", false); }
+    void    setScreenCarousel(bool v)       { prefs.putBool("scr_carou", v); prefs.putBool("scr_carou_d", true); }
+    uint8_t getScreenCarouselSecs()         { return prefs.getUChar("scr_carou_s", 10); }
+    void    setScreenCarouselSecs(uint8_t v){ prefs.putUChar("scr_carou_s", constrain(v, 3, 120)); prefs.putBool("scr_carou_d", true); }
+    bool    getScreenCarouselDirty()        { return prefs.getBool("scr_carou_d", false); }
+    void    clearScreenCarouselDirty()      { prefs.putBool("scr_carou_d", false); }
+
     // Bitmask of active alarm days: bit0=Mon, bit1=Tue, …, bit6=Sun (ISO order).
     // Default 0x7F = all seven days active.
     uint8_t getAlarmDays() { return prefs.getUChar(NVS_KEY_ALARM_DAYS, 0x7F); }
@@ -187,9 +198,19 @@ public:
     bool   getNftShowData()             { return prefs.getBool("nft_showdata", true); }
     void   setNftShowData(bool on)      { prefs.putBool("nft_showdata", on); }
 
-    // Manual collection order (comma-joined slugs; empty = pure floor order)
+    // Manual collection order (comma-joined slugs; empty = pure floor order).
+    // Now stored SPARSELY: only the collections the user explicitly reordered,
+    // as a front-overlay on the (USD) floor sort. Empty means pure floor order.
     String getNftCollOrder()            { return prefs.isKey("nft_order") ? prefs.getString("nft_order", "") : ""; }
     void   setNftCollOrder(const String& v) { prefs.putString("nft_order", v); }
+
+    // One-time heal: older builds (and the web board's checkbox toggle) used to
+    // persist the FULL collection list as the "manual order", freezing a stale
+    // raw-ETH-floor ranking that then overrode the device's USD floor sort (BTC
+    // Ordinals stranded last, visible only in 3x3 where all cells fit). Clear it
+    // once so pure USD floor order returns; genuine sparse reorders survive.
+    bool   getNftOrderHealed()          { return prefs.getBool("nft_ord_heal", false); }
+    void   setNftOrderHealed(bool v)    { prefs.putBool("nft_ord_heal", v); }
 
     // Deleted/hidden collections (comma-joined slugs)
     String getNftHidden()               { return prefs.isKey("nft_hidden") ? prefs.getString("nft_hidden", "") : ""; }

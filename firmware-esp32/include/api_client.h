@@ -223,6 +223,14 @@ public:
             reqDoc["nft_coll_hidden"] = storage.getNftHidden();
             reqDoc["nft_show_data"]   = storage.getNftShowData();
         }
+        // Screen carousel toggled/edited ON THE DEVICE (config popup) → push up
+        // so the web setting reflects it instead of reverting on next sync.
+        bool carouselWasDirty = storage.getScreenCarouselDirty();
+        if (carouselWasDirty) {
+            reqDoc["screen_carousel"]      = storage.getScreenCarousel();
+            reqDoc["screen_carousel_secs"] = storage.getScreenCarouselSecs();
+        }
+
         // Detected collections list changed → report it (feeds the web board).
         bool collsWereDirty = storage.getNftCollsDirty();
         if (collsWereDirty) {
@@ -249,13 +257,15 @@ public:
             JsonObjectConst cfg = respDoc["config"];
             if (!cfg.isNull()) {
                 applyServerConfig(cfg, /*skipAlarm=*/alarmWasDirty,
-                                  /*skipNftLists=*/nftListsWereDirty);
+                                  /*skipNftLists=*/nftListsWereDirty,
+                                  /*skipCarousel=*/carouselWasDirty);
             }
         }
         http.end();
         if (alarmWasDirty)    storage.clearAlarmDirty();       // pushed successfully
         if (nftListsWereDirty) storage.setNftListsDirty(false);
         if (collsWereDirty)    storage.setNftCollsDirty(false);
+        if (carouselWasDirty)  storage.clearScreenCarouselDirty();
         return true;
     }
 
@@ -618,7 +628,7 @@ private:
     // skipAlarm: true while a device-side alarm change is being pushed up —
     // the server copy is (at best) what we just sent, and applying it back
     // could race/revert the local value.
-    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false, bool skipNftLists = false) {
+    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false, bool skipNftLists = false, bool skipCarousel = false) {
         // Node identity (Node & Network screen headline)
         if (!cfg["display_name"].isNull())      storage.setDisplayName(cfg["display_name"].as<String>());
         if (!cfg["is_verified"].isNull())       storage.setIsVerified(cfg["is_verified"].as<bool>());
@@ -687,6 +697,16 @@ private:
         }
         if (!cfg["screen_timeout_mins"].isNull()) {
             storage.setScreenTimeoutMins(cfg["screen_timeout_mins"].as<uint8_t>());
+        }
+
+        // Auto screen carousel (bool + seconds). Skip while a device-side change
+        // is in flight so we don't clobber the user's just-made toggle, then
+        // clear the dirty flag on a server-originated value (nothing to push back).
+        if (!skipCarousel) {
+            bool carChanged = false;
+            if (!cfg["screen_carousel"].isNull())      { storage.setScreenCarousel(cfg["screen_carousel"].as<bool>()); carChanged = true; }
+            if (!cfg["screen_carousel_secs"].isNull())  { storage.setScreenCarouselSecs(cfg["screen_carousel_secs"].as<uint8_t>()); carChanged = true; }
+            if (carChanged) storage.clearScreenCarouselDirty();
         }
 
         // NFT Gallery settings

@@ -105,7 +105,7 @@ The node's own status and mining panel. Displays:
 - On-device **leaderboard** (top-3 by ₸ rewards and by uptime), mirroring the web. The uptime column shows real accumulated time ("4h 58m", "3d 4h"), the same figure as the web card, not a percentage
 - Prompt to complete the profile (wallet + display name) if missing
 
-Device settings (display preferences: date format, 12h/24h time format, and week start; the alarm; and the setup QR code) are accessible from the **footer of every screen** by tapping the gear/QR icon, which opens the settings popup in-place. The bottom of that popup also shows the device's WiFi diagnostics links (screen mirror and live log, see below). Note: there is no °C/°F setting because the base D1 has no built-in ambient sensor.
+Device settings (display preferences: date format, 12h/24h time format, week start, and the **auto rotate screens** toggle plus its seconds-per-screen picker; the alarm; and the setup QR code) are accessible from the **footer of every screen** by tapping the gear/QR icon, which opens the settings popup in-place. The bottom of that popup shows the device's WiFi diagnostics links (screen mirror and live log, see below) and a **Firmware & updates** block: the running ESP32 and RP2040 versions, and a **Check for updates** button that runs a WiFi OTA check right there on the device (no computer needed, see the OTA note below). Note: there is no °C/°F setting because the base D1 has no built-in ambient sensor.
 
 ---
 
@@ -186,10 +186,11 @@ A Next.js app deployed to Vercel at `network.turbousd.com`:
   - Profile: display name, bio, country/city
   - Rewards & Identity: Base wallet address (for ₸USD payouts), X/Twitter handle
   - Alarm: time picker + day-of-week selector + **volume slider (1 to 5, default 2)**
-  - Display preferences: °C/°F, date format, time format
+  - Display preferences: °C/°F, date format, time format, brightness, screen timeout, and **auto rotate screens** (off by default): when on, the device cycles through every screen on a timer and loops back to Home, with a selectable dwell time per screen (default 10s). The same toggle and seconds picker also live in the device's own settings popup, and the two stay in sync. Rotation pauses while an alarm is ringing, a popup is open, or the NFT fullscreen photo frame is active.
   - NFT Gallery: wallet (auto-detect) + **collections board** (one row per detected collection with show/hide checkbox and reorder arrows (first 9 fill the grid) + **manual picks** below (OpenSea URLs or Bitcoin Ordinals inscriptions) always shown on the device); grid size, carousel, "show name & floor" toggle, slideshow interval
   - Screen order: drag-and-drop to reorder the 7 device screens (Home always fixed first), with an **eye toggle** per screen to hide it from the device rotation entirely
   - Verified badge: submit X post URL for manual verification
+  - Firmware & updates (its own section, always last): shows the running ESP32 version and a **Check for updates** button that reports whether a newer published image exists. The web can't push the OTA itself (the device pulls it), so when an update is available it points you to the device's own **Settings to Check for updates** button to install it over WiFi.
 - **`/block/[number]`**: block explorer: timestamp, winner, reward, candidate count, Base block hash used as randomness source
 
 ### Telegram bot (`@ami9000_bot`)
@@ -310,7 +311,7 @@ pio run --target upload      # flash over USB-C
 pio device monitor           # serial logs
 ```
 
-CI automatically builds and publishes firmware releases when changes are pushed to `main` under `firmware-esp32/` or `firmware-rp2040/`. Devices pick up updates via OTA automatically, no re-flashing needed.
+CI automatically builds and publishes firmware releases when changes are pushed to `main` under `firmware-esp32/` or `firmware-rp2040/`. The ESP32 image then updates over the air (WiFi), no USB re-flashing needed: the device checks for a newer published version on a nightly window and whenever you tap **Check for updates** in its Settings popup, downloads it, verifies the SHA-256, and flashes the inactive partition (rollback-guarded). It is never applied silently mid-use. The web setup page's **Firmware & updates** section can also tell you when a newer version exists, but the install itself always happens from the device (the device pulls, the web can't push).
 
 Required GitHub repository secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
 

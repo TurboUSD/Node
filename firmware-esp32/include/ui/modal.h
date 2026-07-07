@@ -6,11 +6,22 @@
 #pragma once
 #include <lvgl.h>
 
+// Global count of currently-open modals. The screen carousel checks this so it
+// never rotates the screen out from under an open popup (config, alarm picker,
+// calendar, etc.) — that would orphan the modal's backdrop on the old screen.
+inline int& _modalOpenCount() { static int c = 0; return c; }
+inline bool anyModalOpen()    { return _modalOpenCount() > 0; }
+
 // Returns the modal's content container -- callers add their own widgets
 // (labels, rollers, buttons) as children of it. The dimmed background and
 // the green-bordered card are already set up.
 inline lv_obj_t* openModal(lv_obj_t* parent) {
     lv_obj_t* backdrop = lv_obj_create(parent);
+    // Decrement on ANY delete path (X button, closeModal, screen teardown).
+    _modalOpenCount()++;
+    lv_obj_add_event_cb(backdrop, [](lv_event_t*) {
+        if (_modalOpenCount() > 0) _modalOpenCount()--;
+    }, LV_EVENT_DELETE, nullptr);
     lv_obj_set_size(backdrop, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(backdrop, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(backdrop, LV_OPA_70, 0);
@@ -250,6 +261,93 @@ inline void applyPrefToggleColors(PrefTogglePair* pair, bool leftActive) {
     lv_obj_set_style_bg_color(pair->rightBtn, !leftActive ? lv_color_hex(0x2eaa50) : lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(pair->rightBtn, !leftActive ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_color(pair->rightLbl, !leftActive ? lv_color_hex(0x06150a) : lv_color_hex(0x9a9a9e), 0);
+}
+
+// ── Numeric stepper row:  LABEL        [ − ]  value+suffix  [ + ] ────────────
+struct StepperState {
+    lv_obj_t* valLbl;
+    int  val, minV, maxV, step;
+    char suffix[6];
+    void (*onChange)(int newVal);
+};
+inline void _stepperPaintValue(StepperState* s) {
+    char b[16]; snprintf(b, sizeof(b), "%d%s", s->val, s->suffix);
+    lv_label_set_text(s->valLbl, b);
+}
+inline void addStepperRow(lv_obj_t* card, const char* label, int initial,
+                          int minV, int maxV, int step, const char* suffix,
+                          void (*onChange)(int newVal)) {
+    lv_obj_t* row = lv_obj_create(card);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t* lbl = lv_label_create(row);
+    lv_label_set_text(lbl, label);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(0x9a9a9e), 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+
+    lv_obj_t* group = lv_obj_create(row);
+    lv_obj_set_size(group, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(group, LV_OPA_0, 0);
+    lv_obj_set_style_border_color(group, lv_color_hex(0x2eaa50), 0);
+    lv_obj_set_style_border_width(group, 1, 0);
+    lv_obj_set_style_radius(group, 6, 0);
+    lv_obj_set_style_pad_all(group, 0, 0);
+    lv_obj_set_flex_flow(group, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(group, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(group, LV_OBJ_FLAG_SCROLLABLE);
+
+    const lv_coord_t STEP_BTN_W = 34, STEP_BTN_H = 28;
+
+    StepperState* st = new StepperState{ nullptr, initial, minV, maxV, step, "", onChange };
+    strncpy(st->suffix, suffix ? suffix : "", sizeof(st->suffix) - 1);
+
+    lv_obj_t* minusBtn = lv_btn_create(group);
+    lv_obj_set_size(minusBtn, STEP_BTN_W, STEP_BTN_H);
+    lv_obj_set_style_radius(minusBtn, 0, 0);
+    lv_obj_set_style_pad_all(minusBtn, 0, 0);
+    lv_obj_set_style_bg_color(minusBtn, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(minusBtn, LV_OPA_TRANSP, 0);
+    lv_obj_t* minusLbl = lv_label_create(minusBtn);
+    lv_label_set_text(minusLbl, "-");
+    lv_obj_set_style_text_color(minusLbl, lv_color_hex(0x9a9a9e), 0);
+    lv_obj_center(minusLbl);
+
+    lv_obj_t* valLbl = lv_label_create(group);
+    lv_obj_set_width(valLbl, 52);
+    lv_obj_set_style_text_color(valLbl, lv_color_hex(0xd4d4d8), 0);
+    lv_obj_set_style_text_font(valLbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(valLbl, LV_TEXT_ALIGN_CENTER, 0);
+    st->valLbl = valLbl;
+    _stepperPaintValue(st);
+
+    lv_obj_t* plusBtn = lv_btn_create(group);
+    lv_obj_set_size(plusBtn, STEP_BTN_W, STEP_BTN_H);
+    lv_obj_set_style_radius(plusBtn, 0, 0);
+    lv_obj_set_style_pad_all(plusBtn, 0, 0);
+    lv_obj_set_style_bg_color(plusBtn, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(plusBtn, LV_OPA_TRANSP, 0);
+    lv_obj_t* plusLbl = lv_label_create(plusBtn);
+    lv_label_set_text(plusLbl, "+");
+    lv_obj_set_style_text_color(plusLbl, lv_color_hex(0x9a9a9e), 0);
+    lv_obj_center(plusLbl);
+
+    lv_obj_set_user_data(minusBtn, st);
+    lv_obj_add_event_cb(minusBtn, [](lv_event_t* e) {
+        auto* s = (StepperState*)lv_obj_get_user_data(lv_event_get_target(e));
+        s->val -= s->step; if (s->val < s->minV) s->val = s->minV;
+        _stepperPaintValue(s); s->onChange(s->val);
+    }, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_set_user_data(plusBtn, st);
+    lv_obj_add_event_cb(plusBtn, [](lv_event_t* e) {
+        auto* s = (StepperState*)lv_obj_get_user_data(lv_event_get_target(e));
+        s->val += s->step; if (s->val > s->maxV) s->val = s->maxV;
+        _stepperPaintValue(s); s->onChange(s->val);
+    }, LV_EVENT_CLICKED, nullptr);
 }
 
 inline void addPrefToggleRow(lv_obj_t* card, const char* label, const char* leftLabel, const char* rightLabel,

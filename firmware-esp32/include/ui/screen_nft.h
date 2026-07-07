@@ -469,6 +469,7 @@ private:
     volatile bool         _imgDirty = false;    // set by img task → poll refreshes cells
     int                   _decodedForGrid = 0;  // grid size the cached pixels were decoded for
     volatile uint16_t     _imgGen = 0;          // bumped when pixels are invalidated → stale workers abort
+    String                _lastGridSig;         // group/size fingerprint → skip redundant full rebuilds (flicker)
     static NftPendingResult _pendingResult;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1084,7 +1085,38 @@ private:
 
     // ── Grid builder ──────────────────────────────────────────────────────────
 
+    // Fingerprint of what the grid WOULD show (size + fullscreen + caption mode
+    // + the ordered group slugs/counts). Cheap: builds groups but no LVGL work.
+    String _gridSignature() {
+        _refreshListBufs();
+        String sig = String((int)_gridSize) + (_fullscreen ? "F" : "N")
+                   + (storage.getNftShowData() ? "D" : "-") + ":";
+        int total = (int)_nftCache.size();
+        if (_gridSize == 1) { sig += "all"; sig += String(total); return sig; }
+        NftGrp* g = _allocGroups();
+        if (!g) { sig += "?"; return sig; }
+        int gn  = _buildGroups(g, NFT_MAX_COLLECTIONS, _gridSize);
+        int cap = gn < _gridSize ? gn : _gridSize;
+        for (int k = 0; k < cap; k++) {
+            sig += g[k].slug; sig += 'x'; sig += String(g[k].count); sig += ',';
+        }
+        free(g);
+        return sig;
+    }
+
     void _rebuildGrid() {
+        // Skip the full teardown+recreate (a visible flash) when nothing
+        // structural changed. Rates settling, a config echo from our own
+        // heartbeat push, etc. used to re-run this with an IDENTICAL layout,
+        // flashing the grid several times in a row. Decoded art still repaints
+        // in place via _imgDirty, so a no-op here loses nothing.
+        String sig = _gridSignature();
+        if (_cellCount > 0 && sig == _lastGridSig) {
+            _startImageFetch();   // still top up any missing covers
+            return;
+        }
+        _lastGridSig = sig;
+
         _imgSettled = false;   // fresh cells → let the img worker run again
         // Delete old cells
         for (int i = 0; i < _cellCount; i++) {
@@ -1457,8 +1489,28 @@ private:
         int to = cellIdx + dir;
         if (cellIdx < 0 || cellIdx >= n || to < 0 || to >= n) { free(g); return; }
         NftGrp t = g[cellIdx]; g[cellIdx] = g[to]; g[to] = t;
+
+        // Store a SPARSE overlay, not the whole list. Build the pure floor order
+        // (same grouping, no manual overlay) and keep only the leading run of the
+        // new arrangement that DIVERGES from it. Everything past the last
+        // divergence already matches floor order, so it needn't be stored, which
+        // is exactly what used to freeze a stale ranking on top of the sort.
         String ord;
-        for (int k = 0; k < n; k++) { if (k) ord += ','; ord += g[k].slug; }
+        NftGrp* fg = _allocGroups();
+        if (fg) {
+            char savedOrd[sizeof(_ordBuf)];
+            strncpy(savedOrd, _ordBuf, sizeof(savedOrd));
+            _ordBuf[0] = 0;                                       // floor-only build
+            int fn = _buildGroups(fg, NFT_MAX_COLLECTIONS, _classCells(_gridClass()));
+            memcpy(_ordBuf, savedOrd, sizeof(_ordBuf));           // restore overlay
+            int keep = 0;
+            for (int k = 0; k < n; k++)
+                if (k >= fn || strcmp(g[k].slug, fg[k].slug) != 0) keep = k + 1;
+            for (int k = 0; k < keep; k++) { if (k) ord += ','; ord += g[k].slug; }
+            free(fg);
+        } else {
+            for (int k = 0; k < n; k++) { if (k) ord += ','; ord += g[k].slug; }
+        }
         free(g);
         storage.setNftCollOrder(ord);
         storage.setNftListsDirty(true);   // sync to the web on next heartbeat
@@ -1846,6 +1898,19 @@ private:
     }
 
     void _refreshListBufs() {
+        // One-time heal: pre-sparse builds (and the web board's checkbox toggle)
+        // persisted the WHOLE collection list as the "manual order", freezing a
+        // raw-ETH-floor ranking that then overrode the USD floor sort (BTC
+        // Ordinals stranded last, only visible in 3x3 where every cell fits).
+        // Clear that legacy value once so pure USD floor order returns; genuine
+        // sparse reorders made after this run survive.
+        if (!storage.getNftOrderHealed()) {
+            if (storage.getNftCollOrder().length()) {
+                storage.setNftCollOrder("");
+                storage.setNftListsDirty(true);   // push the cleared value to the web
+            }
+            storage.setNftOrderHealed(true);
+        }
         String o = storage.getNftCollOrder();
         String h = storage.getNftHidden();
         strncpy(_ordBuf, o.c_str(), sizeof(_ordBuf) - 1);
@@ -1952,14 +2017,15 @@ private:
                     if (q >= 0) base = base.substring(0, q);
                     bool fromDisk = diskcache::has("img", it.image_url);
                     uint16_t w = 0, h = 0;
-                    // Ordinals (ordinals.com/content/…) serve the RAW inscription,
-                    // which for pixel art like NodeMonkes is tiny (28x28) and ignores
-                    // resize params — nearest-scaling a 28px source to a big cell looks
-                    // blocky. Fetch a 512px render from the wsrv proxy (PNG, so no JPEG
-                    // artifacts on the flat pixel colours), and — crucially — key the
-                    // cache by the PROXY url, not it.image_url. Otherwise loadAlloc()
-                    // returns the OLD raw-28px blob cached under it.image_url and the
-                    // proxy is never fetched (why NodeMonke stayed pixelated).
+                    // Ordinals (ordinals.com/content/…) serve the RAW inscription.
+                    // NodeMonkes etc. are tiny pixel art (28x28); weserv won't enlarge
+                    // past native, so the proxy returns the crisp 28px PNG and the
+                    // NEAREST scaler blows it up with hard edges — exactly how satflow
+                    // and other marketplaces render it (bilinear here made it a blurry
+                    // "low quality" blob). We still route through the wsrv proxy (PNG,
+                    // no JPEG artifacts on flat colours) and key the cache by the PROXY
+                    // url, not it.image_url — otherwise loadAlloc() returns a stale blob
+                    // cached under it.image_url and the proxy is never fetched.
                     bool isOrdinal = it.floor_btc || strstr(it.image_url, "ordinals.com") != nullptr;
                     String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=png";
                     netLock();   // exclusive TLS only for THIS image's fetch+decode
@@ -1968,14 +2034,21 @@ private:
                         px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, prox.c_str(), &w, &h, it.bg_color);
                         if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                     } else {
+                        bool unsup = false;
                         px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
-                                                 boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
-                        if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
+                                                 boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color, &unsup);
+                        // Only retry the RAW url when the sized variant failed for a
+                        // NETWORK reason (404/timeout). If it DECODED but the format is
+                        // unsupported (SVG like on-chain Checks, webp, gif), the raw url
+                        // is the SAME asset and would just fail again after another 15 s
+                        // timeout — skip it and go straight to the proxy. This was the
+                        // main source of the "NFT screen hangs for ages" delay.
+                        if (!px && !unsup)
+                            px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color, &unsup);
                         if (!px) {
-                            // Last resort for formats the chip can't decode (SVG —
-                            // e.g. on-chain Checks —, webp, gif): the wsrv.nl image
-                            // proxy rasterizes/transcodes ANYTHING to JPEG. The
-                            // JPEG result lands in the disk cache like any other.
+                            // Last resort for formats the chip can't decode (SVG,
+                            // webp, gif): the wsrv.nl image proxy rasterizes/transcodes
+                            // ANYTHING to JPEG. The result lands in the disk cache too.
                             px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                         }
                     }

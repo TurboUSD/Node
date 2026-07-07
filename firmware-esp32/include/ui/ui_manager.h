@@ -72,6 +72,7 @@ public:
         lv_timer_handler();
         updateClockIfNeeded();
         _checkScreenTimeout();
+        _checkScreenCarousel();
     }
 
     // Set backlight brightness level 1–5 immediately via LEDC PWM.
@@ -497,6 +498,7 @@ private:
     uint8_t _swipeOrder[(int)ScreenId::COUNT] = { 0, 1, 6, 2, 3, 5, 4 };
     int     _swipeCount = (int)ScreenId::COUNT;   // visible screens (hidden ones filtered out)
     int     _currentSwipePos = 0;
+    uint32_t _carouselLastMs = 0;                 // last screen change (manual or auto); gates the carousel
 
     // Swipe-vs-tap disambiguation. The touch read_cb records where a press
     // started and, if the finger travels past TAP_SLOP_PX before release, marks
@@ -1636,6 +1638,16 @@ private:
                           storage.getWeekStart() == 1,
                           [](bool leftActive){ storage.setWeekStart(leftActive ? 1 : 0); storage.setLocaleLocked(true); });
 
+        // Auto screen carousel: cycle through every screen on a timer, looping
+        // back to Home. OFF by default. The seconds stepper sets the dwell time
+        // per screen. Both push to the web on the next heartbeat (dirty flag).
+        addPrefToggleRow(card, "AUTO ROTATE", "ON", "OFF",
+                          storage.getScreenCarousel(),
+                          [](bool leftActive){ storage.setScreenCarousel(leftActive); });
+        addStepperRow(card, "ROTATE EVERY", storage.getScreenCarouselSecs(),
+                      5, 120, 5, "s",
+                      [](int v){ storage.setScreenCarouselSecs((uint8_t)v); });
+
         // Button reference (informational) — bottom of the preferences card.
         lv_obj_t* btnInfo = lv_label_create(card);
         lv_label_set_text(btnInfo,
@@ -1643,6 +1655,11 @@ private:
             "On the NFT gallery, double-tap for fullscreen (double-tap again to exit).");
         lv_obj_set_style_text_color(btnInfo, lv_color_hex(0x6e7280), 0);
         lv_obj_set_style_text_font(btnInfo, &lv_font_montserrat_10, 0);
+        // Without wrap the sentence renders on one line and overflows the card
+        // sides. Wrap it to the card width and centre it like the notes below.
+        lv_label_set_long_mode(btnInfo, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(btnInfo, LV_PCT(100));
+        lv_obj_set_style_text_align(btnInfo, LV_TEXT_ALIGN_CENTER, 0);
 
         // Diagnostics over WiFi (screen mirror + live logs) — at the very bottom.
         // Works even when the USB serial console is unavailable. Shows the
@@ -1663,8 +1680,13 @@ private:
         lv_obj_set_width(diagInfo, LV_PCT(100));
         lv_obj_set_style_text_align(diagInfo, LV_TEXT_ALIGN_CENTER, 0);
 
-        // Firmware versions at the very bottom (ESP32 = the OTA-managed image;
-        // RP2040 = the paired co-processor build, see config.h).
+        // ── FIRMWARE & UPDATES (own labelled block at the very bottom) ──
+        lv_obj_t* fwTitle = lv_label_create(card);
+        lv_label_set_text(fwTitle, "FIRMWARE & UPDATES");
+        lv_obj_set_style_text_color(fwTitle, lv_color_hex(0x9a9a9e), 0);
+
+        // Firmware versions (ESP32 = the OTA-managed image; RP2040 = the paired
+        // co-processor build, see config.h).
         lv_obj_t* verInfo = lv_label_create(card);
         {
             // Real RP2040 version from its version frame; fall back to the paired
@@ -1684,7 +1706,7 @@ private:
         // "Check for updates" → requests an OTA check on the network thread; the
         // main loop shows the install badge if a newer ESP32 image exists, or an
         // "up to date" bar otherwise. The install itself is the existing badge flow.
-        lv_obj_t* otaBtn = addModalButton(card, "CHECK FOR UPDATES", false);
+        lv_obj_t* otaBtn = addModalButton(card, "CHECK FOR UPDATES", true);
         static lv_obj_t* sOtaCard; sOtaCard = card;
         lv_obj_add_event_cb(otaBtn, [](lv_event_t* e) {
             UiManager* self = (UiManager*)lv_event_get_user_data(e);
@@ -1946,6 +1968,27 @@ private:
         if (id == ScreenId::INFLATION_GAME) {
             _updateGameProjection();
         }
+        // Any navigation (manual OR the auto-carousel) restarts the dwell timer,
+        // so a manual swipe/tap gives you the full interval before it advances.
+        _carouselLastMs = millis();
+    }
+
+    // Auto screen carousel: when enabled, advance to the next visible screen
+    // every N seconds, wrapping back to Home. Paused while the screen is off,
+    // an alarm is ringing, a modal is open, or NFT fullscreen ("photo frame")
+    // is active — none of which the user wants yanked away on a timer.
+    void _checkScreenCarousel() {
+        if (!storage.getScreenCarousel())   return;
+        if (!_screenOn)                      return;
+        if (isAlarmOverlayActive())          return;
+        if (_nftFullscreen)                  return;
+        if (anyModalOpen())                  return;
+        if (_swipeCount <= 1)                return;
+        uint32_t dwellMs = (uint32_t)storage.getScreenCarouselSecs() * 1000UL;
+        if (millis() - _carouselLastMs < dwellMs) return;
+        int newPos = (_currentSwipePos + 1) % _swipeCount;
+        showScreen((ScreenId)_swipeOrder[newPos], true, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+        // showScreen() resets _carouselLastMs.
     }
 
     void attachSwipeGesture(lv_obj_t* screen) {

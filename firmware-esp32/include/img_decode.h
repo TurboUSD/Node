@@ -71,7 +71,7 @@ static inline uint8_t* _alloc(size_t n) {
 static uint8_t* _decodeScale(const uint8_t* body, size_t len,
                              int maxW, int maxH, const char* tag,
                              uint16_t* outWp, uint16_t* outHp,
-                             uint32_t bgColor) {
+                             uint32_t bgColor, bool* unsupportedOut = nullptr) {
     unsigned char* rgba = nullptr;
     unsigned iw = 0, ih = 0;
     bool rgbaFromLvMem = false;
@@ -121,7 +121,8 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
         }
         free(ctx.rgb);
     } else {
-        Log.printf("img[%s] unsupported format %02X%02X (webp/gif?)\n", tag, body[0], body[1]);
+        Log.printf("img[%s] unsupported format %02X%02X (svg/webp/gif?)\n", tag, body[0], body[1]);
+        if (unsupportedOut) *unsupportedOut = true;   // caller can jump straight to the proxy
         return nullptr;
     }
 
@@ -131,45 +132,25 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
     if (outW < 1) outW = 1;
     if (outH < 1) outH = 1;
 
-    // Scale → RGB565 little-endian ([lo, hi] per pixel). BILINEAR when ENLARGING
-    // (output bigger than the source, e.g. a 28x28 NodeMonke blown up to a 1x1 or
-    // 2x2 cell — nearest-neighbour made it look blocky), NEAREST when shrinking
-    // (fast, and detail is already there so no visible loss).
+    // Scale → RGB565 little-endian ([lo, hi] per pixel), NEAREST-NEIGHBOUR both
+    // ways. Pixel-art Ordinals (e.g. a 28x28 NodeMonke) are the reason: bilinear
+    // ENLARGING smears the hard pixel edges into a blurry low-quality blob, which
+    // is NOT how marketplaces render them (they nearest-upscale, keeping crisp
+    // squares). Nearest is also far lighter on the PSRAM bus the RGB panel streams
+    // its framebuffer from — bilinear's 4 reads + floats per output pixel starved
+    // the panel DMA and made the whole grid shimmer/smear while decoding.
     const uint8_t br  = (uint8_t)((bgColor >> 16) & 0xFF);
     const uint8_t bgc = (uint8_t)((bgColor >> 8)  & 0xFF);
     const uint8_t bb  = (uint8_t)( bgColor        & 0xFF);
-    const bool upscale = (outW > (int)iw || outH > (int)ih);
     uint8_t* px = _alloc((size_t)outW * outH * 2);
     if (!px) { if (rgbaFromLvMem) lv_mem_free(rgba); else free(rgba); return nullptr; }
     for (int y = 0; y < outH; y++) {
         if ((y & 31) == 31) delay(1);   // PSRAM-bus breather (see above)
-        // Nearest source row (shrink path).
         unsigned sy = (unsigned)((uint64_t)y * ih / outH);
-        // Bilinear source row (enlarge path): fractional y between two rows.
-        float  fy = (outH > 1) ? ((float)y * (ih - 1) / (outH - 1)) : 0.0f;
-        int    y0 = (int)fy, y1 = (y0 + 1 < (int)ih) ? y0 + 1 : y0;
-        float  dy = fy - y0;
         for (int x = 0; x < outW; x++) {
-            unsigned sr, sg, sb, a;
-            if (upscale) {
-                float fx = (outW > 1) ? ((float)x * (iw - 1) / (outW - 1)) : 0.0f;
-                int   x0 = (int)fx, x1 = (x0 + 1 < (int)iw) ? x0 + 1 : x0;
-                float dx = fx - x0;
-                const unsigned char* p00 = &rgba[(y0 * iw + x0) * 4];
-                const unsigned char* p10 = &rgba[(y0 * iw + x1) * 4];
-                const unsigned char* p01 = &rgba[(y1 * iw + x0) * 4];
-                const unsigned char* p11 = &rgba[(y1 * iw + x1) * 4];
-                float w00 = (1 - dx) * (1 - dy), w10 = dx * (1 - dy);
-                float w01 = (1 - dx) * dy,       w11 = dx * dy;
-                sr = (unsigned)(p00[0]*w00 + p10[0]*w10 + p01[0]*w01 + p11[0]*w11 + 0.5f);
-                sg = (unsigned)(p00[1]*w00 + p10[1]*w10 + p01[1]*w01 + p11[1]*w11 + 0.5f);
-                sb = (unsigned)(p00[2]*w00 + p10[2]*w10 + p01[2]*w01 + p11[2]*w11 + 0.5f);
-                a  = (unsigned)(p00[3]*w00 + p10[3]*w10 + p01[3]*w01 + p11[3]*w11 + 0.5f);
-            } else {
-                unsigned sx = (unsigned)((uint64_t)x * iw / outW);
-                const unsigned char* sp = &rgba[(sy * iw + sx) * 4];
-                sr = sp[0]; sg = sp[1]; sb = sp[2]; a = sp[3];
-            }
+            unsigned sx = (unsigned)((uint64_t)x * iw / outW);
+            const unsigned char* sp = &rgba[(sy * iw + sx) * 4];
+            unsigned sr = sp[0], sg = sp[1], sb = sp[2], a = sp[3];
             // Composite transparency onto bgColor (per-image — e.g. a NodeMonke's
             // Background trait orange; default black for the dark gallery).
             unsigned ia = 255 - a;
@@ -192,7 +173,7 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
 static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
                             const char* tag, const char* cacheKey = nullptr,
                             uint16_t* outWp = nullptr, uint16_t* outHp = nullptr,
-                            uint32_t bgColor = 0x000000) {
+                            uint32_t bgColor = 0x000000, bool* unsupportedOut = nullptr) {
     uint8_t* body    = nullptr;
     size_t   len     = 0;
     bool     fromDisk = false;
@@ -241,7 +222,7 @@ static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
         Log.printf("img[%s] %u bytes, magic %02X%02X\n", tag, (unsigned)len, body[0], body[1]);
     }
 
-    uint8_t* px = _decodeScale(body, len, maxW, maxH, tag, outWp, outHp, bgColor);
+    uint8_t* px = _decodeScale(body, len, maxW, maxH, tag, outWp, outHp, bgColor, unsupportedOut);
     if (px && cacheKey && !fromDisk)  diskcache::save("img", cacheKey, body, len);
     if (!px && cacheKey && fromDisk)  diskcache::remove("img", cacheKey);   // corrupt/stale entry
     free(body);
