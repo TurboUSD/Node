@@ -9,7 +9,6 @@
 #include "config.h"
 #include "driver/uart.h"               // raw IDF driver — see begin()
 #include "driver/gpio.h"
-#include "soc/io_mux_reg.h"            // PIN_INPUT_ENABLE — pad level read-back diagnostic
 
 enum class Rp2040Command : uint8_t {
     PLAY_ALARM    = 0x01,  // legacy: plays at volume 2 (soft default)
@@ -56,13 +55,11 @@ public:
         _e2 = uart_param_config(LINK_UART, &cfg);
         _e3 = uart_set_pin(LINK_UART, RP2040_UART_TX_PIN, RP2040_UART_RX_PIN,
                            UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-        // Enable the INPUT BUFFER on both pads (doesn't disturb the matrix
-        // routing) so printStatus() can read back the physical line levels.
-        // UART idles HIGH: tx_pad=1 → our pad is really driving; rx_pad=1 →
-        // the RP2040's TX is really reaching us. Any 0 = that line is dead
-        // at the electrical level and no firmware can fix it.
-        PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[RP2040_UART_TX_PIN]);
-        PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[RP2040_UART_RX_PIN]);
+        // (The old PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[...]) pad read-back was
+        // removed: GPIO_PIN_MUX_REG is no longer a public array in IDF 5.x. The
+        // tx_pad/rx_pad levels in printStatus() below still read via
+        // gpio_get_level(); the RX pad already has its input enabled by
+        // uart_set_pin, so the diagnostic remains useful for the receive line.)
         printStatus();
         _ok = (_e1 == ESP_OK && _e2 == ESP_OK && _e3 == ESP_OK);
         if (!_ok) Log.println("RP-link: INIT FAILED — alarm commands cannot reach the RP2040");
