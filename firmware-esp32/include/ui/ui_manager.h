@@ -902,13 +902,17 @@ private:
                                                      // default 0 for this panel).
         panelCfg.num_fbs           = 1;
         panelCfg.flags.fb_in_psram = 1;
-        // NO bounce buffer: on the precompiled Arduino-ESP32 3.x libs the RGB
-        // refill ISR is NOT in IRAM and CONFIG_LCD_RGB_RESTART_IN_VSYNC is off,
-        // so during flash writes (LittleFS cache-disable) the bounce buffer
-        // underruns and the panel permanently desyncs (image rolls / shifts half
-        // a frame). Single framebuffer straight from PSRAM is rock-steady; the
-        // NFT-decode flicker is instead tamed by the disk-cache + nearest-decode
-        // work. (A double framebuffer would be the tear-free upgrade — see notes.)
+        // BOUNCE BUFFER — the root fix for the NFT-decode flicker: the panel DMA
+        // pulls from a pair of small SRAM bounce buffers instead of reading the
+        // PSRAM framebuffer directly, so a background task hammering PSRAM can't
+        // starve the scan-out. For this to stay in sync (no vertical roll) it
+        // REQUIRES two sdkconfig options that are enabled via custom_sdkconfig in
+        // platformio.ini (a from-source build): CONFIG_LCD_RGB_ISR_IRAM_SAFE (so
+        // the refill ISR runs even while flash cache is disabled during LittleFS
+        // writes) and CONFIG_LCD_RGB_RESTART_IN_VSYNC (auto re-aligns the DMA
+        // each frame). Without those the bounce buffer desyncs — that's why the
+        // stock precompiled build rolled/flickered vertically.
+        panelCfg.bounce_buffer_size_px = LCD_H_RES * 10;
 
         ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
         ESP_ERROR_CHECK(esp_lcd_panel_reset(_lcdPanel));
