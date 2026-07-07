@@ -69,6 +69,8 @@ interface NodeConfig {
   // Manual NFT pinlist (optional, requires DB migration)
   // Comma-separated "chain:contract:tokenId" items, max 20. Takes priority over nft_wallet_address on device.
   nft_pinlist?:           string | null
+  // Reported by the device on each heartbeat (the ESP32 image OTA compares against).
+  firmware_version?:      string | null
 }
 
 interface NodeStats {
@@ -683,6 +685,11 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               re-flashing the sensor chip; you press it with a paperclip during setup.
             </li>
           </ul>
+          <p style={{ margin: '14px 0 0', fontSize: 13, color: C.muted }}>
+            Firmware: <strong style={{ color: C.text }}>ESP32 v{node.firmware_version || 'unknown'}</strong>
+            {' '}&middot; RP2040 v0.1.0. The ESP32 version is reported by your node on its last check-in and is
+            what over-the-air updates compare against.
+          </p>
         </Section>
       </div>
     </div>
