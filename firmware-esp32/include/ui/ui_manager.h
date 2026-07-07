@@ -1621,6 +1621,24 @@ private:
         lv_obj_set_width(diagInfo, LV_PCT(100));
         lv_obj_set_style_text_align(diagInfo, LV_TEXT_ALIGN_CENTER, 0);
 
+        // Firmware versions at the very bottom (ESP32 = the OTA-managed image;
+        // RP2040 = the paired co-processor build, see config.h).
+        lv_obj_t* verInfo = lv_label_create(card);
+        {
+            // Real RP2040 version from its version frame; fall back to the paired
+            // build constant until the first frame arrives.
+            String rpv = rp2040Link.rpVersion();
+            char verBuf[80];
+            snprintf(verBuf, sizeof(verBuf), "Firmware  ESP32 v%s   RP2040 v%s",
+                     FIRMWARE_VERSION, rpv.length() ? rpv.c_str() : RP2040_FIRMWARE_VERSION);
+            lv_label_set_text(verInfo, verBuf);
+        }
+        lv_obj_set_style_text_color(verInfo, lv_color_hex(0x6a6a6e), 0);
+        lv_obj_set_style_text_font(verInfo, &lv_font_montserrat_10, 0);
+        lv_label_set_long_mode(verInfo, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(verInfo, LV_PCT(100));
+        lv_obj_set_style_text_align(verInfo, LV_TEXT_ALIGN_CENTER, 0);
+
         lv_obj_t* closeBtn = addModalButton(card, "CLOSE", false);
         static lv_obj_t* sCard; sCard = card;
         lv_obj_add_event_cb(closeBtn, [](lv_event_t*) { closeModal(sCard); }, LV_EVENT_CLICKED, nullptr);

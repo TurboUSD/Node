@@ -175,6 +175,8 @@ inline void _sendLogPage() {
         "#l{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.45;"
         "padding:10px 12px 60px}b{color:#3aff7a}</style></head><body>"
         "<div id='bar'><span class='t'>TurboUSD logs</span>"
+        "<span style='color:#6a6a6e;font-size:11px'>ESP32 v" FIRMWARE_VERSION
+        " &middot; RP2040 v" RP2040_FIRMWARE_VERSION "</span>"
         "<b id='st'>live</b><span class='sp'></span>"
         "<button id='pz'>Pause</button>"
         "<button id='bt'>Bottom &darr;</button>"

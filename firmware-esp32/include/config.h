@@ -4,6 +4,16 @@
 
 #pragma once
 
+// Firmware versions. FIRMWARE_VERSION (the ESP32 image) comes from the build
+// flag in platformio.ini and is what OTA compares against. The RP2040 co-processor
+// ships from the same repo/release; the ESP32 can't read the RP2040's version over
+// the link (its hello frame carries no version), so we track the paired version
+// here to display it. Keep this in sync with firmware-rp2040/platformio.ini.
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "0.0.0"
+#endif
+#define RP2040_FIRMWARE_VERSION "0.1.0"
+
 // `Log` — tees every console line to Serial AND a WiFi-readable ring buffer
 // (http://<device-ip>/logs). Included here because nearly every file includes
 // config.h; the firmware calls Log.printf/println/print instead of Serial.*.

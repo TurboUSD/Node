@@ -110,6 +110,11 @@ public:
     void stopAlarm()  { sendCommand(Rp2040Command::STOP_ALARM); }
     void playChime()  { sendCommand(Rp2040Command::PLAY_CHIME); }
 
+    // RP2040 firmware version reported over the link via its version frame.
+    // Empty string until the first frame arrives (the caller can fall back to
+    // the paired build constant in config.h).
+    String rpVersion() const { return String(_rpVersion); }
+
     // Call every main-loop pass. Drains and HEX-logs anything the RP2040
     // sends spontaneously (its new firmware emits a 0x7E 0xEE hello every 5 s
     // for the first 2 minutes). This splits the dead-link mystery in half
@@ -123,8 +128,17 @@ public:
         int n = uart_read_bytes(LINK_UART, buf, sizeof(buf), 0);
         if (n <= 0) return;
         bool hello = false;
-        for (int i = 0; i + 1 < n; i++)
+        for (int i = 0; i + 1 < n; i++) {
             if (buf[i] == 0x7E && buf[i + 1] == 0xEE) hello = true;
+            // Version frame [0x7E][0xEF][maj][min][pat]: record the RP2040's real
+            // firmware version so the UI can show it (a version frame also proves
+            // the link is alive, same as the plain hello).
+            if (buf[i] == 0x7E && buf[i + 1] == 0xEF && i + 4 < n) {
+                snprintf(_rpVersion, sizeof(_rpVersion), "%u.%u.%u",
+                         buf[i + 2], buf[i + 3], buf[i + 4]);
+                hello = true;
+            }
+        }
         static uint32_t lastLogAt = 0;
         if (hello) {
             if (millis() - lastLogAt > 4000) {
@@ -199,6 +213,7 @@ private:
     static const uart_port_t LINK_UART = UART_NUM_2;
     bool _ok = false;
     esp_err_t _e1 = ESP_FAIL, _e2 = ESP_FAIL, _e3 = ESP_FAIL;   // init results, reprintable
+    char _rpVersion[16] = {};   // RP2040 firmware version from its version frame ("" until received)
 
     // Non-blocking single-byte read; -1 when nothing is waiting.
     int _readByte() {

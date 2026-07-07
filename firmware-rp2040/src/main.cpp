@@ -256,6 +256,18 @@ void loop() {
         lastHelloAt = millis();
         uint8_t f[3] = { 0x7E, 0xEE, (uint8_t)(0x7E ^ 0xEE) };
         Serial1.write(f, sizeof(f));
+        // Version frame: [0x7E][0xEF][maj][min][pat][checksum]. Lets the ESP32
+        // display the RP2040's REAL firmware version (it can't otherwise read it
+        // over the link). Parsed once from FIRMWARE_VERSION ("maj.min.pat").
+        static uint8_t vmaj = 0, vmin = 0, vpat = 0, vparsed = 0;
+        if (!vparsed) {
+            unsigned a = 0, b = 0, c = 0;
+            sscanf(FIRMWARE_VERSION, "%u.%u.%u", &a, &b, &c);
+            vmaj = (uint8_t)a; vmin = (uint8_t)b; vpat = (uint8_t)c; vparsed = 1;
+        }
+        uint8_t vf[6] = { 0x7E, 0xEF, vmaj, vmin, vpat,
+                          (uint8_t)(0x7E ^ 0xEF ^ vmaj ^ vmin ^ vpat) };
+        Serial1.write(vf, sizeof(vf));
     }
 
     // Frame parser: [0x7E][cmd][checksum]. Reads byte-by-byte rather than
