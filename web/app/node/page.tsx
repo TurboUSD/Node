@@ -643,11 +643,12 @@ const s: Record<string, React.CSSProperties> = {
     minWidth: 92, padding: '10px 10px 9px', borderRadius: 8, textAlign: 'center', flexShrink: 0,
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, justifyContent: 'center',
   },
-  // mempool.space-style chunky 3D block depth.
+  // mempool.space-style 3D block: visible green/amber "thickness" faces below +
+  // slight right offset for an isometric look (dark-on-black was invisible).
   blockMined:   { background: 'linear-gradient(160deg,#0c2417,rgba(39,93,59,0.6))', border: `1px solid ${C.green}66`,
-                  boxShadow: `0 3px 0 rgba(20,58,38,0.95), 0 6px 0 rgba(11,36,24,0.95), 0 9px 12px rgba(0,0,0,0.5)` },
+                  boxShadow: '2px 5px 0 #1a6640, 3px 9px 0 #0f4227, 4px 13px 14px rgba(0,0,0,0.6)' },
   blockPending: { background: 'linear-gradient(160deg,#241a00,rgba(93,78,39,0.6))', border: `1px solid ${C.yellow}66`,
-                  boxShadow: `0 3px 0 rgba(60,50,20,0.95), 0 6px 0 rgba(38,32,12,0.95), 0 9px 12px rgba(0,0,0,0.5)` },
+                  boxShadow: '2px 5px 0 #6b571f, 3px 9px 0 #443713, 4px 13px 14px rgba(0,0,0,0.6)' },
   blockNum:     { fontSize: 11, fontWeight: 700, color: '#c4c4cc', letterSpacing: 0.5 },
 
   miniMapWrap: {
