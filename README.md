@@ -136,7 +136,7 @@ The backend is a single Supabase project. It provides:
   - `sync-debt-history` / `debt-history`, daily sync + public read of US debt data
   - `latest-firmware`: returns the latest firmware version for OTA checks
   - `rewards-payout` / `confirm-payout`, batch reward disbursement
-- **Scheduled cron jobs**: mining every hour, data syncs daily.
+- **Scheduled cron jobs**: `mine-block` every hour, data syncs daily, and a `mining-watchdog` every 5 minutes. The watchdog is a small always-on safety net: if a pending block's 1-hour window elapses with no node online to mine it, the watchdog restarts that block's countdown so the on-device and web timers can never freeze at 00:00 (see `backend/sql/mining-watchdog.sql`, also included in `schema.sql`). It only touches the block's timestamp, never rewards or winners, so it is safe to leave running permanently.
 - **Public views**: `public_node_directory`, `public_mining_feed`, `node_ticker_config` expose read-only data using the anon key. Wallet addresses and sensitive fields are only accessible via the service role key.
 
 ### Firmware (ESP32-S3)
@@ -254,7 +254,7 @@ If you want to self-host the full stack (your own Supabase, your own domain), fo
 #### 1. Backend (Supabase)
 
 1. Create a [Supabase](https://supabase.com) project.
-2. Set up the database schema. Run the SQL files in `backend/sql/` (node directory + mining feed views, setup tokens, NFT gallery + screen-visibility columns, total-uptime column, location anonymization, anon read policies, and `schedule-mine-block.sql` which arms the hourly cron). Also run `mining-watchdog.sql`: it schedules a 5-minute pg_cron job that restarts a pending block's countdown if its window elapses unmined, so the block timer can never freeze at 00:00 (use `unstick-mining.sql` to clear a block that is already stuck). Each Edge Function file header also contains any extra `ALTER TABLE` statements it needs as SQL comments. The main tables are `nodes`, `mining_blocks`, `node_tickers`, and `firmware_releases`. Key columns added beyond a bare-minimum schema:
+2. Set up the database schema. On a fresh project, run the single file **`backend/sql/schema.sql`** in the Supabase SQL Editor. It creates everything from zero (all tables, columns, public views, the RLS policies, the helper functions, and the cron section at the bottom) and is idempotent, so you do not need the other, dated files in `backend/sql/` (those are the historical migrations that `schema.sql` consolidates; `mining-watchdog.sql` and `unstick-mining.sql` remain handy as standalone helpers, and their contents are also included in `schema.sql`). The main tables are `nodes`, `mining_blocks`, `node_reward_balances`, `node_tickers`, and `latest_firmware`. Key columns to know about:
    - `nodes`: `screen_order text`, `nft_pinlist text`, `alarm_volume smallint DEFAULT 2`, `lat double precision`, `lng double precision`
    - `public_node_directory` view must expose `lat` and `lng` for the network map (see migration comment in `register-node/index.ts`)
 3. Deploy Edge Functions using the [Supabase CLI](https://supabase.com/docs/guides/cli):
@@ -278,7 +278,7 @@ If you want to self-host the full stack (your own Supabase, your own domain), fo
    supabase functions deploy resolve-nft
    ```
 4. Note your project's URL, anon key, and service role key for the next steps.
-5. Enable the `pg_cron` extension in Supabase (Database → Extensions) and schedule `mine-block` to run every hour.
+5. Enable the `pg_cron` extension in Supabase (Database → Extensions) and schedule the cron jobs from the bottom of `schema.sql` (fill in your project ref and anon key): `mine-block` every hour and `mining-watchdog` every 5 minutes. The watchdog stays scheduled permanently as a safety net so the block countdown can never freeze if a window elapses with nobody online to mine it.
 
 #### 2. Web app
 
