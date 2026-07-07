@@ -5,6 +5,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import SiteHeader from '@/components/SiteHeader'
+import { LocationNote } from '@/components/NodeBadges'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
 const C = {
@@ -544,7 +545,7 @@ function BlockTile({ block, circlePct, minsLeft }: {
             style={s.blockWinner}
           />
           {/* Country under the name */}
-          <div style={s.blockCountry}>{block.winner_country || ' '}</div>
+          <div style={s.blockCountry}>{block.winner_country ? `${block.winner_country}*` : ' '}</div>
         </>
       ) : (
         <>
@@ -774,7 +775,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
               <span style="font-weight:700;font-size:14px;color:#e8e8e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${node.display_name || node.node_code}</span>
               ${node.is_verified ? '<span style="font-size:11px;color:#5b8dee;flex-shrink:0">✓</span>' : ''}
             </div>
-            ${loc ? `<div style="font-size:12px;color:#6e7280;margin-bottom:10px">${loc}</div>` : ''}
+            ${loc ? `<div style="font-size:12px;color:#6e7280;margin-bottom:10px">${loc}<span title="Approximate location, anonymized to ~300 km. The network never stores the real position; the owner can set it manually." style="cursor:help;font-weight:700;margin-left:2px">*</span></div>` : ''}
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
                 <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Rewards</div>
@@ -1022,7 +1023,7 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
             {/* Location under the name — also shown on desktop leaderboard */}
             {node.country && (
               <div style={{ fontSize: 11, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {node.country}{node.city ? ` · ${node.city}` : ''}
+                {node.country}{node.city ? ` · ${node.city}` : ''}<LocationNote />
               </div>
             )}
           </div>
@@ -1062,7 +1063,7 @@ function NodeRowCard({ node, right, prefix, onClick }: {
         {node.country && (
           <div style={s.nodeMeta}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {node.country}{node.city ? ` · ${node.city}` : ''}
+              {node.country}{node.city ? ` · ${node.city}` : ''}<LocationNote />
             </span>
           </div>
         )}
@@ -1126,7 +1127,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
               )}
               {node.country && (
                 <span style={{ fontSize: 12, color: C.muted }}>
-                  {node.country}{node.city ? ` · ${node.city}` : ''}
+                  {node.country}{node.city ? ` · ${node.city}` : ''}<LocationNote />
                 </span>
               )}
             </div>

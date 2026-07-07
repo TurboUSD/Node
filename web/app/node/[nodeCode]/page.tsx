@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { VerifiedBadge, UnverifiedBadge, GenesisBadge } from '@/components/NodeBadges'
+import { VerifiedBadge, UnverifiedBadge, GenesisBadge, LocationNote } from '@/components/NodeBadges'
 
 const C = {
   bg:     '#0a0a0a',
@@ -129,7 +129,7 @@ export default function PublicNodePage() {
 
         <div style={{ color: C.muted, fontSize: 13, marginBottom: node.bio ? 14 : 18 }}>
           {stats?.is_online ? 'Online now' : stats?.last_seen_at ? `Last seen ${timeSince(stats.last_seen_at)}` : 'Offline'}
-          {location && <> · {location}</>}
+          {location && <> · {location}<LocationNote /></>}
           {node.twitter_handle && <> · <a href={`https://x.com/${node.twitter_handle.replace(/^@/, '')}`} style={{ color: C.blue, textDecoration: 'none' }}>@{node.twitter_handle.replace(/^@/, '')}</a></>}
         </div>
 

@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { VerifiedBadge, UnverifiedBadge, GenesisBadge } from './NodeBadges'
+import { VerifiedBadge, UnverifiedBadge, GenesisBadge, LocationNote } from './NodeBadges'
 
 const C = {
   green: '#43e397', blue: '#5b8dee', yellow: '#ffcf72',
@@ -112,7 +112,7 @@ export default function NodeOverlay({ nodeCode, onClose }: { nodeCode: string; o
 
             <div style={{ color: C.muted, fontSize: 13, marginBottom: node.bio ? 14 : 18 }}>
               {node.is_online ? 'Online now' : node.last_seen_at ? `Last seen ${timeSince(node.last_seen_at)}` : 'Offline'}
-              {location && <> · {location}</>}
+              {location && <> · {location}<LocationNote /></>}
               {node.twitter_handle && <> · <a href={`https://x.com/${node.twitter_handle.replace(/^@/, '')}`} target="_blank" rel="noreferrer" style={{ color: C.blue, textDecoration: 'none' }}>@{node.twitter_handle.replace(/^@/, '')}</a></>}
             </div>
 

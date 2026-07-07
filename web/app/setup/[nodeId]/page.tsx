@@ -676,7 +676,9 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 14, color: C.muted, lineHeight: 1.6 }}>
             <li>
               <strong style={{ color: C.text }}>Top button</strong>: tap to turn the screen off/on
-              (the node keeps mining in the background), or to silence a ringing alarm. It{' '}
+              (the node keeps mining in the background), or to silence a ringing alarm.{' '}
+              <strong style={{ color: C.text }}>Double-tap</strong> on the NFT gallery to enter fullscreen
+              &quot;photo frame&quot; mode (double-tap again to exit). It{' '}
               <strong style={{ color: C.text }}>won&apos;t</strong> erase your firmware, there&apos;s
               no reset shortcut, on purpose.
             </li>

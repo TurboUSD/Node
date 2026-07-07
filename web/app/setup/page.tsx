@@ -215,7 +215,9 @@ export default function SetupPage() {
                 <strong style={{ color: C.yellow }}>pinhole button on the bottom edge</strong>, next to the
                 USB-C port, and press it in with a paperclip or needle.{' '}
                 <strong style={{ color: C.text }}>Keep it held</strong> while you plug in the USB-C cable,
-                then release. A drive called <code style={s.code}>RPI-RP2</code> will appear on your computer.{' '}
+                then release. A drive called <code style={s.code}>RPI-RP2</code> appears{' '}
+                <strong style={{ color: C.text }}>on your desktop like a USB stick or external hard drive</strong>{' '}
+                (look on the Mac desktop / in Finder, or under This PC on Windows).{' '}
                 <button
                   type="button"
                   onClick={() => setRefImageOpen(true)}
