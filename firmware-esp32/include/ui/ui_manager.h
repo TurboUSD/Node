@@ -1727,7 +1727,10 @@ private:
         // Tappable "Check for updates" link (WiFi OTA, no USB). A plain clickable
         // label rather than a big button, per request — sits under the versions.
         lv_obj_t* otaLink = lv_label_create(card);
-        lv_label_set_text(otaLink, "Check for updates \xC2\xBB");
+        // Use an LVGL built-in symbol (it lives in the Montserrat font's symbol
+        // range) — the old "»" (U+00BB) isn't in the font and rendered as a
+        // "tofu" box. LV_SYMBOL_DOWNLOAD reads clearly as "get the update".
+        lv_label_set_text(otaLink, LV_SYMBOL_DOWNLOAD "  Check for updates");
         lv_obj_set_style_text_color(otaLink, lv_color_hex(0x3aff7a), 0);
         lv_obj_set_style_text_font(otaLink, &lv_font_montserrat_12, 0);
         lv_obj_add_flag(otaLink, LV_OBJ_FLAG_CLICKABLE);
