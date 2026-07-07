@@ -201,7 +201,7 @@ void setup() {
 
     // Boot self-test: ONE short, SOFT beep (low duty, brief) — just enough to
     // confirm the buzzer works at power-on. The alarm is the only loud sound.
-    analogWrite(BUZZER_PIN, 30);          // soft (~12% duty vs the 127 alarm peak)
+    analogWrite(BUZZER_PIN, 15);          // very soft (~half the previous soft beep)
     delay(70);
     analogWrite(BUZZER_PIN, 0);
     delay(200);

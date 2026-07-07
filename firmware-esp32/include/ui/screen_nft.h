@@ -698,8 +698,16 @@ private:
         http.begin(String(ENDPOINT_DEXSCREENER_TOKENS) + tokenAddr);
         http.setTimeout(8000);
         if (http.GET() != 200) { http.end(); return 0; }
+        // FILTER the parse to only the 3 fields we use. /tokens/{addr} returns
+        // ~30 fat pair objects for WETH/cbBTC; parsing them whole blew the heap
+        // and crashed the NFT screen. The filter keeps the JsonDocument tiny.
+        JsonDocument filter;
+        filter["pairs"][0]["baseToken"]["address"] = true;
+        filter["pairs"][0]["priceUsd"]             = true;
+        filter["pairs"][0]["liquidity"]["usd"]     = true;
         JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, http.getStream());
+        DeserializationError err = deserializeJson(doc, http.getStream(),
+                                                   DeserializationOption::Filter(filter));
         http.end();
         if (err) return 0;
         // priceUsd is the price of the pair's BASE token. /tokens/{addr} returns
@@ -1629,7 +1637,13 @@ private:
         for (int i = 0; i < total && n < maxG; ) {
             int j = i;
             while (j < total && strcmp(_nftCache[j].slug, _nftCache[i].slug) == 0) j++;
-            if (!_listHas(_hidBuf, _nftCache[i].slug)) {
+            // A MANUAL PICK always earns a group, even if its slug is in the
+            // hidden list — otherwise a pinned Ordinal (slug "ordinals") that
+            // the collections board also marked hidden got filtered out here,
+            // BEFORE the pinned-promotion could pull it into the grid.
+            bool grpPinned = false;
+            for (int q = i; q < j; q++) if (_nftCache[q].pinned) { grpPinned = true; break; }
+            if (grpPinned || !_listHas(_hidBuf, _nftCache[i].slug)) {
                 g[n].start = i;
                 g[n].count = j - i;
                 strncpy(g[n].slug, _nftCache[i].slug, sizeof(g[n].slug) - 1);

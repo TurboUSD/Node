@@ -36,6 +36,17 @@ public:
     String getNodeCode() { return prefs.getString(NVS_KEY_NODE_CODE, ""); }
     void setNodeCode(const String& code) { prefs.putString(NVS_KEY_NODE_CODE, code); }
 
+    // --- Cumulative uptime (across reboots) ---
+    // RAM only: seeded from the server's total_uptime_seconds on each heartbeat
+    // and ticked locally in between, so the Node screen shows LIFETIME uptime
+    // instead of resetting to "1m" on every reboot. Until the first heartbeat
+    // syncs it, we fall back to this session's since-boot time.
+    void setTotalUptime(uint32_t secs) { _totalUptBase = secs; _totalUptBaseMs = millis(); }
+    uint32_t getTotalUptimeSecs() {
+        if (_totalUptBaseMs == 0) return millis() / 1000;
+        return _totalUptBase + (millis() - _totalUptBaseMs) / 1000;
+    }
+
     // --- Node identity (synced down from the backend on each heartbeat) ---
     String getDisplayName()            { return prefs.isKey("disp_name") ? prefs.getString("disp_name", "") : ""; }
     void   setDisplayName(const String& n) { prefs.putString("disp_name", n); }
@@ -219,6 +230,8 @@ public:
 
 private:
     Preferences prefs;
+    uint32_t _totalUptBase   = 0;   // cumulative uptime at last heartbeat (s), RAM only
+    uint32_t _totalUptBaseMs = 0;   // millis() when _totalUptBase was set (0 = never)
 };
 
 extern Storage storage;

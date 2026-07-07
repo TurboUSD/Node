@@ -617,6 +617,8 @@ private:
         if (!cfg["display_name"].isNull())      storage.setDisplayName(cfg["display_name"].as<String>());
         if (!cfg["is_verified"].isNull())       storage.setIsVerified(cfg["is_verified"].as<bool>());
         if (!cfg["total_tusd_earned"].isNull()) storage.setTotalEarned(cfg["total_tusd_earned"].as<float>());
+        // Lifetime uptime across reboots — seed the local ticking counter.
+        if (!cfg["total_uptime_seconds"].isNull()) storage.setTotalUptime(cfg["total_uptime_seconds"].as<uint32_t>());
 
         // Display preferences
         if (!cfg["temp_unit"].isNull()) {

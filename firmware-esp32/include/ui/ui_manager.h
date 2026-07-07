@@ -330,11 +330,31 @@ public:
 
         lv_obj_t* overlay = lv_obj_create(lv_scr_act());
         lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-        lv_obj_set_style_bg_color(overlay, lv_color_hex(0xe8b339), 0);
+        lv_obj_set_style_bg_color(overlay, lv_color_hex(ALARM_GREEN), 0);
+        lv_obj_set_style_border_width(overlay, 0, 0);
+        lv_obj_set_style_pad_all(overlay, 0, 0);
+        lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_center(overlay);
 
+        // Big "TURBO ALARM!" filling the background, repeated, flashing.
+        lv_obj_t* bgText = lv_label_create(overlay);
+        lv_label_set_text(bgText,
+            "TURBO ALARM!\nTURBO ALARM!\nTURBO ALARM!\nTURBO ALARM!\nTURBO ALARM!\nTURBO ALARM!");
+        lv_obj_set_style_text_font(bgText, &lv_font_montserrat_32, 0);
+        lv_obj_set_style_text_align(bgText, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_line_space(bgText, 16, 0);
+        lv_obj_set_style_text_color(bgText, lv_color_hex(0xffffff), 0);
+        lv_obj_center(bgText);
+
         lv_obj_t* stopBtn = lv_btn_create(overlay);
-        lv_obj_set_size(stopBtn, 160, 60);
+        lv_obj_set_size(stopBtn, 190, 74);
+        lv_obj_set_style_radius(stopBtn, 37, 0);
+        lv_obj_set_style_bg_color(stopBtn, lv_color_hex(0xffffff), 0);
+        lv_obj_set_style_border_width(stopBtn, 3, 0);
+        lv_obj_set_style_border_color(stopBtn, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_shadow_width(stopBtn, 24, 0);
+        lv_obj_set_style_shadow_color(stopBtn, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_shadow_opa(stopBtn, LV_OPA_40, 0);
         lv_obj_center(stopBtn);
         lv_obj_add_event_cb(stopBtn, [](lv_event_t* e) {
             UiManager* self = (UiManager*)lv_event_get_user_data(e);
@@ -342,9 +362,37 @@ public:
         }, LV_EVENT_CLICKED, this);
         lv_obj_t* stopLabel = lv_label_create(stopBtn);
         lv_label_set_text(stopLabel, "STOP");
+        lv_obj_set_style_text_font(stopLabel, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_color(stopLabel, lv_color_hex(0x000000), 0);
         lv_obj_center(stopLabel);
 
-        alarmOverlay = overlay;
+        alarmOverlay      = overlay;
+        _alarmBgText      = bgText;
+        _alarmStopBtn     = stopBtn;
+        _alarmStopLbl     = stopLabel;
+        _alarmBlinkPhase  = 0;
+        // Blink green ↔ full white ~2x/s so it's unmissable in a dark room.
+        _alarmBlinkTimer  = lv_timer_create(_alarmBlinkCb, 430, this);
+    }
+
+    // Alarm-overlay blink: alternate green ↔ white, flipping the big text and the
+    // STOP button so they stay legible on either background.
+    static void _alarmBlinkCb(lv_timer_t* t) {
+        UiManager* self = (UiManager*)t->user_data;
+        if (!self || !self->alarmOverlay) return;
+        self->_alarmBlinkPhase ^= 1;
+        bool green = (self->_alarmBlinkPhase == 0);
+        uint32_t bg    = green ? ALARM_GREEN : 0xffffff;
+        uint32_t big   = green ? 0xffffff    : ALARM_GREEN;
+        uint32_t btnBg = green ? 0xffffff    : ALARM_GREEN;
+        uint32_t btnFg = green ? 0x000000    : 0xffffff;
+        lv_obj_set_style_bg_color(self->alarmOverlay, lv_color_hex(bg), 0);
+        if (self->_alarmBgText)  lv_obj_set_style_text_color(self->_alarmBgText, lv_color_hex(big), 0);
+        if (self->_alarmStopBtn) {
+            lv_obj_set_style_bg_color(self->_alarmStopBtn, lv_color_hex(btnBg), 0);
+            lv_obj_set_style_border_color(self->_alarmStopBtn, lv_color_hex(btnFg), 0);
+        }
+        if (self->_alarmStopLbl) lv_obj_set_style_text_color(self->_alarmStopLbl, lv_color_hex(btnFg), 0);
     }
 
     std::function<void()> onAlarmDismissed;
@@ -383,6 +431,13 @@ private:
     ScreenId currentScreen = ScreenId::CLOCK;
     lv_obj_t* screens[(int)ScreenId::COUNT] = { nullptr };
     lv_obj_t* alarmOverlay = nullptr;
+    // Alarm overlay blink (green ↔ white) + big "TURBO ALARM!" background.
+    static constexpr uint32_t ALARM_GREEN = 0x43e397;   // matches the clock digits
+    lv_obj_t*    _alarmBgText     = nullptr;
+    lv_obj_t*    _alarmStopBtn    = nullptr;
+    lv_obj_t*    _alarmStopLbl    = nullptr;
+    lv_timer_t*  _alarmBlinkTimer = nullptr;
+    uint8_t      _alarmBlinkPhase = 0;
 
     // Screen timeout state
     uint32_t _lastTouchMs = 0;     // millis() of the last touch event
@@ -872,7 +927,9 @@ private:
     }
 
     void dismissAlarmOverlay() {
+        if (_alarmBlinkTimer) { lv_timer_del(_alarmBlinkTimer); _alarmBlinkTimer = nullptr; }
         if (alarmOverlay) { lv_obj_del(alarmOverlay); alarmOverlay = nullptr; }
+        _alarmBgText = _alarmStopBtn = _alarmStopLbl = nullptr;
         if (onAlarmDismissed) onAlarmDismissed();
     }
 
@@ -1087,7 +1144,9 @@ private:
             bool ver = storage.getIsVerified();
             nodeScreen.setVerified(ver);
             nodeScreen.setRewards(ver, storage.getTotalEarned());
-            uint32_t secs = millis() / 1000;
+            // Lifetime uptime (across reboots), synced from the server each
+            // heartbeat and ticked locally — no longer resets to "1m" on reboot.
+            uint32_t secs = storage.getTotalUptimeSecs();
             char ub[20];
             if      (secs < 3600)  snprintf(ub, sizeof(ub), "%lum", (unsigned long)(secs / 60));
             else if (secs < 86400) snprintf(ub, sizeof(ub), "%luh %lum",
