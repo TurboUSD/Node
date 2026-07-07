@@ -1390,7 +1390,10 @@ private:
         }
 
         // ── Time picker ───────────────────────────────────────────────────────
-        TimePickerRefs refs = addTimePicker(card, storage.getAlarmHour(), storage.getAlarmMinute());
+        // Honour the 12h/24h setting: in AM/PM mode the picker shows 1–12 plus an
+        // AM/PM wheel; the hour is decoded back to 0–23 on save.
+        bool alarm24h = (storage.getTimeFormat() == "24H");
+        TimePickerRefs refs = addTimePicker(card, storage.getAlarmHour(), storage.getAlarmMinute(), alarm24h);
 
         // ── Alarm on/off toggle ───────────────────────────────────────────────
         static bool sAlarmEnabled;
@@ -1431,12 +1434,12 @@ private:
         lv_obj_t* cancelBtn = addModalButton(btnRow, "CANCEL", false);
         lv_obj_t* saveBtn   = addModalButton(btnRow, "SAVE",   true);
 
-        static lv_obj_t* sHourRoller; static lv_obj_t* sMinRoller; static lv_obj_t* sCard;
-        sHourRoller = refs.hourRoller; sMinRoller = refs.minuteRoller; sCard = card;
+        static TimePickerRefs sRefs; static lv_obj_t* sCard;
+        sRefs = refs; sCard = card;
 
         lv_obj_add_event_cb(saveBtn, [](lv_event_t*) {
-            uint8_t h = lv_roller_get_selected(sHourRoller);
-            uint8_t m = lv_roller_get_selected(sMinRoller);
+            uint8_t h = decodePickerHour(sRefs);              // 0–23 regardless of 12/24h mode
+            uint8_t m = lv_roller_get_selected(sRefs.minuteRoller);
             storage.setAlarm(h, m, sAlarmEnabled);
             storage.setAlarmDays(sDayMask);
             // Short confirmation beep — doubles as an end-to-end test of the

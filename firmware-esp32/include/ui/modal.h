@@ -117,10 +117,27 @@ inline void fixRollerSelectedSpacing(lv_obj_t* roller) {
 struct TimePickerRefs {
     lv_obj_t* hourRoller = nullptr;
     lv_obj_t* minuteRoller = nullptr;
+    lv_obj_t* ampmRoller = nullptr;   // only in 12-hour mode; nullptr in 24h
+    bool      is24h       = true;     // how to read hourRoller back (see decodeHour)
 };
 
-inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t initialMinute) {
+// Convert the picker's current selection back to a 0–23 hour. In 24h mode the
+// hour roller's index IS the hour. In 12h mode the hour roller lists
+// 12,1,2,…,11 (index 0 = "12") and the AM/PM roller says which half of the day.
+inline uint8_t decodePickerHour(const TimePickerRefs& refs) {
+    if (refs.is24h || !refs.ampmRoller)
+        return (uint8_t)lv_roller_get_selected(refs.hourRoller);
+    int idx  = (int)lv_roller_get_selected(refs.hourRoller);   // 0="12", 1..11
+    int h12  = (idx == 0) ? 12 : idx;                          // 1..12
+    bool pm  = lv_roller_get_selected(refs.ampmRoller) == 1;
+    if (pm) return (uint8_t)((h12 == 12) ? 12 : h12 + 12);     // 12 PM = noon
+    return       (uint8_t)((h12 == 12) ?  0 : h12);            // 12 AM = midnight
+}
+
+inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t initialMinute,
+                                    bool is24h = true) {
     TimePickerRefs refs;
+    refs.is24h = is24h;
 
     lv_obj_t* row = lv_obj_create(card);
     lv_obj_set_size(row, LV_PCT(100), 120);
@@ -128,18 +145,24 @@ inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
     lv_obj_set_style_border_width(row, 0, 0);
+    if (!is24h) lv_obj_set_style_pad_column(row, 6, 0);   // room for the AM/PM wheel
     // ONLY the rollers scroll. The container itself must not — dragging just
     // outside a roller used to scroll this whole section, which felt broken.
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(row, LV_SCROLLBAR_MODE_OFF);
 
-    static const char* hourOptions =
+    // 24h: 00..23, index == hour. 12h: 12,01..11 (index 0 = "12"), paired with
+    // the AM/PM wheel — the standard iOS-style three-wheel time picker.
+    static const char* hourOptions24 =
         "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23";
+    static const char* hourOptions12 =
+        "12\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11";
     refs.hourRoller = lv_roller_create(row);
     // NORMAL mode (finite list). INFINITE was tried and reverted: even with
     // the selected-band line-space fix the wheel misbehaved on hardware.
-    lv_roller_set_options(refs.hourRoller, hourOptions, LV_ROLLER_MODE_NORMAL);
-    lv_roller_set_selected(refs.hourRoller, initialHour, LV_ANIM_OFF);
+    lv_roller_set_options(refs.hourRoller, is24h ? hourOptions24 : hourOptions12, LV_ROLLER_MODE_NORMAL);
+    // Selected index: 24h → the hour itself; 12h → hour % 12 (0/12 → "12" at idx 0).
+    lv_roller_set_selected(refs.hourRoller, is24h ? initialHour : (initialHour % 12), LV_ANIM_OFF);
     lv_obj_set_style_text_color(refs.hourRoller, lv_color_hex(0xe8b339), LV_PART_SELECTED);
     lv_obj_set_style_bg_color(refs.hourRoller, lv_color_hex(0x1a1a1a), LV_PART_SELECTED);
     fixRollerSelectedSpacing(refs.hourRoller);
@@ -164,6 +187,16 @@ inline TimePickerRefs addTimePicker(lv_obj_t* card, uint8_t initialHour, uint8_t
     lv_obj_set_style_text_color(refs.minuteRoller, lv_color_hex(0xe8b339), LV_PART_SELECTED);
     lv_obj_set_style_bg_color(refs.minuteRoller, lv_color_hex(0x1a1a1a), LV_PART_SELECTED);
     fixRollerSelectedSpacing(refs.minuteRoller);
+
+    // Third wheel: AM / PM (12-hour mode only).
+    if (!is24h) {
+        refs.ampmRoller = lv_roller_create(row);
+        lv_roller_set_options(refs.ampmRoller, "AM\nPM", LV_ROLLER_MODE_NORMAL);
+        lv_roller_set_selected(refs.ampmRoller, initialHour < 12 ? 0 : 1, LV_ANIM_OFF);
+        lv_obj_set_style_text_color(refs.ampmRoller, lv_color_hex(0xe8b339), LV_PART_SELECTED);
+        lv_obj_set_style_bg_color(refs.ampmRoller, lv_color_hex(0x1a1a1a), LV_PART_SELECTED);
+        fixRollerSelectedSpacing(refs.ampmRoller);
+    }
 
     return refs;
 }
