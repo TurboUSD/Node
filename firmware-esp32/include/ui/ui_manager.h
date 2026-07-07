@@ -73,15 +73,6 @@ public:
         updateClockIfNeeded();
         _checkScreenTimeout();
         _checkScreenCarousel();
-        // Keep the RGB panel's DMA aligned to the framebuffer. With the bounce
-        // buffer, a single missed refill (e.g. during a flash/cache-disable
-        // window) desyncs the panel: the image rolls, then settles a permanent
-        // half-frame vertical shift. `esp_lcd_rgb_panel_restart()` only sets a
-        // flag that the driver acts on at the next VSYNC, re-aligning the scan-
-        // out — the runtime equivalent of CONFIG_LCD_RGB_RESTART_IN_VSYNC (which
-        // we can't set in the precompiled Arduino sdkconfig). It's a no-op when
-        // already aligned, so calling it every loop keeps the picture locked.
-        if (_lcdPanel) esp_lcd_rgb_panel_restart(_lcdPanel);
     }
 
     // Set backlight brightness level 1–5 immediately via LEDC PWM.
@@ -911,13 +902,13 @@ private:
                                                      // default 0 for this panel).
         panelCfg.num_fbs           = 1;
         panelCfg.flags.fb_in_psram = 1;
-        // BOUNCE BUFFER (the flicker fix, now available on IDF 5.x): the frame
-        // buffer stays in PSRAM, but the LCD DMA no longer reads it directly.
-        // Instead the driver DMA-fills a pair of small SRAM bounce buffers ahead
-        // of scan-out, so a background task hammering PSRAM (decoding NFT art)
-        // can't starve the panel into tearing/flicker. 10 lines is Espressif's
-        // recommended size for a 480-wide panel.
-        panelCfg.bounce_buffer_size_px = LCD_H_RES * 10;
+        // NO bounce buffer: on the precompiled Arduino-ESP32 3.x libs the RGB
+        // refill ISR is NOT in IRAM and CONFIG_LCD_RGB_RESTART_IN_VSYNC is off,
+        // so during flash writes (LittleFS cache-disable) the bounce buffer
+        // underruns and the panel permanently desyncs (image rolls / shifts half
+        // a frame). Single framebuffer straight from PSRAM is rock-steady; the
+        // NFT-decode flicker is instead tamed by the disk-cache + nearest-decode
+        // work. (A double framebuffer would be the tear-free upgrade — see notes.)
 
         ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
         ESP_ERROR_CHECK(esp_lcd_panel_reset(_lcdPanel));
