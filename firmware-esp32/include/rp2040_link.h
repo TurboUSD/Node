@@ -50,7 +50,7 @@ public:
         cfg.parity     = UART_PARITY_DISABLE;
         cfg.stop_bits  = UART_STOP_BITS_1;
         cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
-        cfg.source_clk = UART_SCLK_APB;   // IDF 4.4 (Arduino 2.0.x) has no UART_SCLK_DEFAULT
+        cfg.source_clk = UART_SCLK_DEFAULT;   // IDF 5.x default UART clock source
 
         _e1 = uart_driver_install(LINK_UART, 512, 512, 0, nullptr, 0);
         _e2 = uart_param_config(LINK_UART, &cfg);

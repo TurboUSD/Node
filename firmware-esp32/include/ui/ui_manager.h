@@ -79,7 +79,7 @@ public:
     void setScreenBrightness(uint8_t level) {
         static const uint8_t DUTY[5] = { 25, 70, 130, 185, 255 };
         level = constrain(level, 1, 5);
-        ledcWrite(0, DUTY[level - 1]);  // channel 0 = backlight (see ledcSetup in initDisplayAndTouch)
+        ledcWrite(LCD_PIN_BL, DUTY[level - 1]);  // backlight PWM (addressed by pin in Arduino 3.x)
     }
 
     // Read brightness from NVS and apply it immediately. No-op while the
@@ -96,7 +96,7 @@ public:
     void toggleScreen() {
         _screenOn = !_screenOn;
         if (_screenOn) applyStoredBrightness();
-        else           ledcWrite(0, 0);   // backlight off (channel 0)
+        else           ledcWrite(LCD_PIN_BL, 0);   // backlight off (channel 0)
     }
 
     // Long press (3 s): "power off" — backlight off and enter light sleep. RAM
@@ -112,11 +112,11 @@ public:
         // flowing; on a wall charger real light sleep still happens.
         if (Serial) {
             _screenOn = false;
-            ledcWrite(0, 0);
+            ledcWrite(LCD_PIN_BL, 0);
             Log.println("sleep: USB host attached — screen off only (no light sleep)");
             return;
         }
-        ledcWrite(0, 0);                         // backlight off
+        ledcWrite(LCD_PIN_BL, 0);                         // backlight off
         gpio_wakeup_enable((gpio_num_t)BTN_USER_GPIO, GPIO_INTR_LOW_LEVEL);
         esp_sleep_enable_gpio_wakeup();
         // The main loop is FROZEN during light sleep — without a timer wake
@@ -465,7 +465,7 @@ public:
         uint32_t timeoutMs = (uint32_t)storage.getScreenTimeoutMins() * 60UL * 1000UL;
         if (_screenIsOn && (millis() - _lastTouchMs > timeoutMs)) {
             _screenIsOn = false;
-            ledcWrite(0, 0);  // channel 0 = backlight
+            ledcWrite(LCD_PIN_BL, 0);  // channel 0 = backlight
         }
     }
 
@@ -900,15 +900,14 @@ private:
         panelCfg.timings.flags.pclk_active_neg = 0;  // matches Seeed's verified Arduino
                                                      // reference (Arduino_GFX uses the
                                                      // default 0 for this panel).
+        panelCfg.num_fbs           = 1;
         panelCfg.flags.fb_in_psram = 1;
-        // BOUNCE BUFFER (the flicker fix): the framebuffer lives in PSRAM, and
-        // without this the LCD's DMA reads it DIRECTLY every frame. While a
-        // background task hammers PSRAM (decoding NFT artwork), those reads get
-        // starved and the panel underruns → the whole screen tears/flickers.
-        // A pair of small SRAM bounce buffers decouples the panel from PSRAM
-        // contention: the driver DMA-copies PSRAM→SRAM ahead of the scan-out, so
-        // the display keeps a steady feed no matter what the CPU is doing.
-        // 10 lines is the size Espressif recommends for 480-wide panels.
+        // BOUNCE BUFFER (the flicker fix, now available on IDF 5.x): the frame
+        // buffer stays in PSRAM, but the LCD DMA no longer reads it directly.
+        // Instead the driver DMA-fills a pair of small SRAM bounce buffers ahead
+        // of scan-out, so a background task hammering PSRAM (decoding NFT art)
+        // can't starve the panel into tearing/flicker. 10 lines is Espressif's
+        // recommended size for a 480-wide panel.
         panelCfg.bounce_buffer_size_px = LCD_H_RES * 10;
 
         ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
@@ -1004,10 +1003,10 @@ private:
 
         // 11. Enable backlight via LEDC PWM (GPIO 45, active HIGH).
         //     5 kHz / 8-bit resolution gives smooth dimming with no audible whine.
-        //     Arduino-ESP32 2.x API: ledcSetup(ch,freq,bits) + ledcAttachPin(pin,ch).
-        //     Channel 0 is reserved for the backlight (LCD_BL_LEDC_CH = 0).
-        ledcSetup(0, 5000, 8);
-        ledcAttachPin(LCD_PIN_BL, 0);
+        //     Arduino-ESP32 3.x API: ledcAttach(pin, freq, bits) sets it up AND
+        //     binds it in one call; PWM is then addressed by PIN, not channel
+        //     (so every ledcWrite() below uses LCD_PIN_BL, not a channel index).
+        ledcAttach(LCD_PIN_BL, 5000, 8);
         applyStoredBrightness();
     }
 
