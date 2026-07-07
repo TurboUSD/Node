@@ -27,23 +27,64 @@ const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const BASE_RPC_URL = Deno.env.get('BASE_RPC_URL') ?? 'https://mainnet.base.org'
 const HEARTBEAT_WINDOW_MINUTES = 15 // must match the "is_online" window used elsewhere
 const BLOCK_REWARD_TUSD = 100
+const BLOCK_INTERVAL_MS = 60 * 60_000 // one block window; must match the on-device/web countdown
+
+// Try the configured RPC first, then a couple of well-known public Base RPCs.
+// A single flaky endpoint used to throw and 500 the whole function → the block
+// never mined AND never reset (the reset only runs in the no-candidates path),
+// so a node could be online for hours and the chain still froze at 00:00. With
+// candidates present we now survive a total RPC outage (see the caller).
+const BASE_RPCS = [
+  BASE_RPC_URL,
+  'https://base.publicnode.com',
+  'https://base-rpc.publicnode.com',
+  'https://1rpc.io/base',
+]
+
+async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'eth_getBlockByNumber', params: ['latest', false],
+      }),
+      signal: ctrl.signal,
+    })
+  } finally {
+    clearTimeout(t)
+  }
+}
 
 async function fetchLatestBaseBlockHash(): Promise<string> {
   // Public, free RPC call -- no API key needed. This is the "nobody can
   // predict or steer this" ingredient: nobody (including us) controls what
   // the next Base block hash will be ahead of time.
-  const res = await fetch(BASE_RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_getBlockByNumber',
-      params: ['latest', false],
-    }),
-  })
-  const json = await res.json()
-  return json.result.hash as string // e.g. "0xabc123..."
+  //
+  // Resilience: several endpoints, each with a hard timeout, and a few full
+  // passes with a short backoff. A single slow/broken RPC can no longer stall
+  // the whole miner — it keeps trying until one answers.
+  const PASSES = 3
+  const PER_REQUEST_TIMEOUT_MS = 4000
+  let lastErr: unknown = null
+  for (let pass = 0; pass < PASSES; pass++) {
+    for (const url of BASE_RPCS) {
+      try {
+        const res = await fetchWithTimeout(url, PER_REQUEST_TIMEOUT_MS)
+        const json = await res.json()
+        const hash = json?.result?.hash as string | undefined
+        if (hash && hash.startsWith('0x') && hash.length >= 10) return hash
+        lastErr = new Error(`bad RPC response from ${url}`)
+      } catch (e) {
+        lastErr = e
+      }
+    }
+    // brief backoff before the next full pass (skip after the last)
+    if (pass < PASSES - 1) await new Promise(r => setTimeout(r, 500))
+  }
+  throw lastErr ?? new Error('all Base RPCs failed')
 }
 
 function pickWinnerIndex(randomnessHex: string, candidateCount: number): number {
@@ -63,7 +104,7 @@ Deno.serve(async (_req: Request) => {
   //    and have that override carry through to the winner credit and the next block.
   const { data: pending, error: pendingError } = await supabase
     .from('mining_blocks')
-    .select('id, block_number, reward_tusd')
+    .select('id, block_number, reward_tusd, created_at')
     .is('mined_at', null)
     .maybeSingle()
 
@@ -81,7 +122,7 @@ Deno.serve(async (_req: Request) => {
     const nextNumber = (lastBlock?.block_number ?? 0) + 1
     const { error: createError } = await supabase
       .from('mining_blocks')
-      .insert({ block_number: nextNumber, reward_tusd: BLOCK_REWARD_TUSD })
+      .insert({ block_number: nextNumber, reward_tusd: BLOCK_REWARD_TUSD, created_at: new Date().toISOString() })
     if (createError) {
       return new Response(JSON.stringify({ error: createError.message }), { status: 500 })
     }
@@ -101,12 +142,47 @@ Deno.serve(async (_req: Request) => {
   }
 
   if (!candidates || candidates.length === 0) {
-    // Nobody online right now — leave the block pending, try again next run.
+    // Nobody online right now — the block can't be mined. Previously we just
+    // left it pending, but its created_at never advanced, so the countdown
+    // (anchored on it) froze at 00:00 forever and mining appeared "stuck".
+    // Fix: once this block's window has fully elapsed with no winner, RESTART
+    // its countdown (created_at = now) so it visibly counts down again and
+    // keeps retrying every interval until a node is finally online to mine it.
+    const openedAt = pending.created_at ? new Date(pending.created_at).getTime() : 0
+    // Null created_at is treated as overdue too (self-heals a block that
+    // somehow opened without a timestamp — otherwise it could never reset).
+    const overdue = openedAt === 0 || (Date.now() - openedAt) >= BLOCK_INTERVAL_MS
+    if (overdue) {
+      const { error: resetError } = await supabase
+        .from('mining_blocks')
+        .update({ created_at: new Date().toISOString() })
+        .eq('id', pending.id)
+      if (resetError) {
+        return new Response(JSON.stringify({ error: resetError.message }), { status: 500 })
+      }
+      return new Response(JSON.stringify({
+        ok: true, action: 'reset_pending_countdown', block_number: pending.block_number,
+      }), { status: 200 })
+    }
+    // Window not elapsed yet — just wait for the next run.
     return new Response(JSON.stringify({ ok: true, action: 'no_active_candidates' }), { status: 200 })
   }
 
-  // 3. Pick a winner using public on-chain randomness.
-  const blockHash = await fetchLatestBaseBlockHash()
+  // 3. Pick a winner using public on-chain randomness. If EVERY RPC is down we
+  //    must not 500 (that would leave the block frozen forever, the exact stall
+  //    we hit at #16): instead restart the countdown and retry next interval.
+  let blockHash: string
+  try {
+    blockHash = await fetchLatestBaseBlockHash()
+  } catch (_e) {
+    await supabase
+      .from('mining_blocks')
+      .update({ created_at: new Date().toISOString() })
+      .eq('id', pending.id)
+    return new Response(JSON.stringify({
+      ok: true, action: 'randomness_unavailable_reset', block_number: pending.block_number,
+    }), { status: 200 })
+  }
   const winnerIndex = pickWinnerIndex(blockHash, candidates.length)
   const winner = candidates[winnerIndex]
 
@@ -167,6 +243,7 @@ Deno.serve(async (_req: Request) => {
   await supabase.from('mining_blocks').insert({
     block_number: (justMined?.block_number ?? pending.block_number) + 1,
     reward_tusd: blockReward,
+    created_at: new Date().toISOString(),
   })
 
   return new Response(

@@ -62,12 +62,26 @@ function getClientIp(req: Request): string {
   )
 }
 
-function generateNodeCode(): string {
-  // Short, human-friendly code shown on-device and in URLs, e.g. "A3F2"
-  const chars = '0123456789ABCDEF'
-  let code = ''
-  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)]
-  return code
+// Node code is DERIVED FROM THE DEVICE MAC (its last two octets) so it matches
+// the "TurboUSD-Setup-XXXX" WiFi hotspot the device shows during setup — the
+// firmware builds that hotspot name from the same two MAC bytes (mac[4]mac[5]).
+// e.g. MAC ...:31:E8 → hotspot "TurboUSD-Setup-31E8" → node_code "31E8".
+// (Previously this was random, so the setup hotspot and the final node code
+// never matched, which was confusing.)
+function nodeCodeFromMac(mac: string): string {
+  const octets = mac.split(':')                 // ["AA","BB","CC","DD","EE","FF"]
+  return (octets[4] + octets[5]).toUpperCase()  // last two octets → "EEFF"
+}
+
+// Deterministic fallback for the rare case two devices share the same last two
+// MAC bytes: fold the whole MAC into a different 4-hex code so we never store a
+// duplicate. (This variant won't match the hotspot name, but such collisions
+// are rare — only ~1 in 65536 devices.)
+function nodeCodeFallback(mac: string, salt: number): string {
+  const hex = mac.replace(/:/g, '')
+  let h = (salt * 0x9e3779b1) >>> 0
+  for (let i = 0; i < hex.length; i++) h = (Math.imul(h, 31) + hex.charCodeAt(i)) >>> 0
+  return h.toString(16).toUpperCase().padStart(8, '0').slice(-4)
 }
 
 Deno.serve(async (req: Request) => {
@@ -101,22 +115,32 @@ Deno.serve(async (req: Request) => {
   }
 
   if (existing) {
+    // Refresh the owner setup token for re-registrations too (e.g. after an
+    // NVS wipe the device generates a NEW token — the QR on the device must
+    // always be the one that works).
+    if (body.setup_token && /^[0-9a-f]{8,64}$/i.test(body.setup_token)) {
+      await supabase
+        .from('node_setup_tokens')
+        .upsert({ node_id: existing.id, token: body.setup_token, updated_at: new Date().toISOString() }, { onConflict: 'node_id' })
+    }
     return new Response(JSON.stringify({ node: existing, created: false }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })
   }
 
-  // Generate a node_code that doesn't collide with an existing one.
-  let nodeCode = generateNodeCode()
-  for (let attempt = 0; attempt < 5; attempt++) {
+  // Derive the node_code from the MAC so it matches the setup hotspot name.
+  // Fall back to a hashed variant only if that code is already taken by another
+  // device (rare), so we never store a duplicate.
+  let nodeCode = nodeCodeFromMac(macAddress)
+  for (let attempt = 0; attempt < 6; attempt++) {
     const { data: collision } = await supabase
       .from('nodes')
       .select('id')
       .eq('node_code', nodeCode)
       .maybeSingle()
     if (!collision) break
-    nodeCode = generateNodeCode()
+    nodeCode = nodeCodeFallback(macAddress, attempt + 1)
   }
 
   // Geolocate the device's public IP to pre-fill country/city/lat/lng.
@@ -136,7 +160,8 @@ Deno.serve(async (req: Request) => {
         lat:     geo.lat,
         lng:     geo.lng,
         country: geo.country,
-        city:    geo.city,
+        // city intentionally NOT auto-filled: it's a manual, payout-related
+        // profile field — geo-IP guesses kept polluting node bios.
       }),
     })
     .select('id, node_code, display_name, is_verified, created_at')
@@ -144,6 +169,13 @@ Deno.serve(async (req: Request) => {
 
   if (insertError) {
     return new Response(JSON.stringify({ error: insertError.message }), { status: 500 })
+  }
+
+  // Store the device's owner setup token (best-effort — see heartbeat).
+  if (body.setup_token && /^[0-9a-f]{8,64}$/i.test(body.setup_token)) {
+    await supabase
+      .from('node_setup_tokens')
+      .upsert({ node_id: created.id, token: body.setup_token, updated_at: new Date().toISOString() }, { onConflict: 'node_id' })
   }
 
   return new Response(JSON.stringify({ node: created, created: true }), {

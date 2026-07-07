@@ -25,7 +25,30 @@ function isLikelyEvmAddress(addr: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(addr)
 }
 
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
+}
+
+// CORS wrapper: the browser preflights JSON POSTs with an OPTIONS request;
+// without these headers every call from network.turbousd.com died in the
+// browser as a generic "Failed to fetch" (the function itself was fine).
 Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: CORS_HEADERS })
+  let res: Response
+  try {
+    res = await handle(req)
+  } catch (err) {
+    res = new Response(JSON.stringify({ error: `Internal error: ${(err as Error).message}` }), { status: 500 })
+  }
+  const headers = new Headers(res.headers)
+  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  return new Response(res.body, { status: res.status, headers })
+})
+
+async function handle(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 })
   }
@@ -69,4 +92,4 @@ Deno.serve(async (req: Request) => {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   })
-})
+}
