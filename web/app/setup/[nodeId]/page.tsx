@@ -12,7 +12,7 @@
 // Verification section: X post link (for verified badge).
 
 import React, { useEffect, useRef, useState } from 'react'
-import { supabase, callFunction } from '@/lib/supabase'
+import { supabase, callFunction, FUNCTIONS_BASE_URL } from '@/lib/supabase'
 import TickerBoard from './TickerBoard'
 
 // ── Brand tokens (mirrors treasury.turbousd.com dark theme) ──────────────────
@@ -685,13 +685,54 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               re-flashing the sensor chip; you press it with a paperclip during setup.
             </li>
           </ul>
-          <p style={{ margin: '14px 0 0', fontSize: 13, color: C.muted }}>
-            Firmware: <strong style={{ color: C.text }}>ESP32 v{node.firmware_version || 'unknown'}</strong>
-            {' '}&middot; RP2040 v0.1.0. The ESP32 version is reported by your node on its last check-in and is
-            what over-the-air updates compare against.
-          </p>
+          <FirmwareCheck current={node.firmware_version} />
         </Section>
       </div>
+    </div>
+  )
+}
+
+// Firmware version + OTA check. The web can't push OTA to the device (the
+// device pulls updates itself), so this reports the current version, checks the
+// latest published ESP32 image, and if newer tells the user to install it from
+// the device's Settings → Check for updates (which does the WiFi OTA).
+function FirmwareCheck({ current }: { current?: string | null }) {
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [busy, setBusy] = useState(false)
+  async function check() {
+    setBusy(true); setMsg(null)
+    try {
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
+      const res = await fetch(`${FUNCTIONS_BASE_URL}/latest-firmware?target=esp32s3`, {
+        headers: { Authorization: `Bearer ${anon}`, apikey: anon },
+      })
+      const j = await res.json()
+      const latest = j?.version as string | undefined
+      if (!res.ok || !latest) throw new Error(j?.error ?? 'Could not fetch the latest firmware info.')
+      const cur = current && current !== 'unknown' ? current : null
+      if (cur && cur === latest) {
+        setMsg({ text: `You're on the latest firmware (v${latest}).`, ok: true })
+      } else {
+        setMsg({
+          text: `Update available: v${latest}${cur ? ` (your node reports v${cur})` : ''}. On the device, open Settings (gear icon) and tap "Check for updates" to install it over WiFi.`,
+          ok: false,
+        })
+      }
+    } catch (e) {
+      setMsg({ text: e instanceof Error ? e.message : 'Check failed.', ok: false })
+    } finally { setBusy(false) }
+  }
+  return (
+    <div style={{ marginTop: 14 }}>
+      <p style={{ margin: '0 0 8px', fontSize: 13, color: C.muted }}>
+        Firmware: <strong style={{ color: C.text }}>ESP32 v{current || 'unknown'}</strong> &middot; RP2040 v0.1.0.
+        The ESP32 image updates over the air.
+      </p>
+      <button onClick={check} disabled={busy} style={{
+        padding: '8px 16px', background: '#1b2438', border: '1px solid #4a6aa8', borderRadius: 8,
+        color: '#dbe7ff', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
+      }}>{busy ? 'Checking…' : 'Check for updates'}</button>
+      {msg && <p style={{ marginTop: 8, fontSize: 13, color: msg.ok ? C.green : '#ffcf72' }}>{msg.text}</p>}
     </div>
   )
 }

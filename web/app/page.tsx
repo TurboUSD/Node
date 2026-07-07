@@ -142,7 +142,7 @@ export default function NetworkPage() {
   // mousedown+suppress-click hack made a block "disappear"/navigate when you
   // tried to drag). A real drag (>6 px) sets `moved`, which suppresses the
   // click-to-open-block navigation so dragging never opens a block page.
-  const blockLaneRef = useRef<HTMLDivElement>(null)
+  const blockLaneRef = useRef<HTMLDivElement | null>(null)
   const blockDrag    = useRef({ on: false, startX: 0, startScroll: 0, moved: false })
   function onBlockLaneDown(e: React.MouseEvent<HTMLDivElement>) {
     const el = blockLaneRef.current
