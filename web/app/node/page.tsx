@@ -53,13 +53,18 @@ interface MiningBlock {
   block_number:        number
   reward_tusd:         number
   winner_display_name: string | null
+  winner_country?:     string | null
   mined_at:            string | null
   created_at?:         string | null
 }
 
-function fmtCountdown(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+function timeSince(iso: string): string {
+  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (sec < 60)    return `${sec}s ago`
+  if (sec < 3600)  return `${Math.floor(sec / 60)}m ago`
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
+  const d = Math.floor(sec / 86400)
+  return d === 1 ? '1 day ago' : `${d} days ago`
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -107,7 +112,9 @@ export default function NodeProductPage() {
     if (last?.mined_at) return new Date(new Date(last.mined_at).getTime() + BLOCK_INTERVAL_MS)
     return null
   }, [blocks, pendingBlock])
-  const countdown = nextBlockAt ? fmtCountdown(Math.max(0, nextBlockAt.getTime() - nowMs)) : '--:--'
+  const msLeft    = nextBlockAt ? Math.max(0, nextBlockAt.getTime() - nowMs) : 0
+  const circlePct = nextBlockAt ? msLeft / BLOCK_INTERVAL_MS : 0   // 1→0
+  const minsLeft  = Math.ceil(msLeft / 60_000)
 
   return (
     <div style={s.root}>
@@ -154,12 +161,12 @@ export default function NodeProductPage() {
             text="Track ₸USD and any tokens you pick, with logos, sparklines and expandable candlestick charts. One or two columns, fully configured from your phone." />
           <Feature icon="⏰" title="Clock & alarm" color={C.blue}
             text="A proper bedside clock: big time, date, weekday alarms with a real buzzer. The screen wakes up on its own when the alarm fires, even from sleep." />
+          <Feature icon="🖼" title="NFT gallery" color={C.blue}
+            text="Show your Ethereum NFTs and Bitcoin Ordinals in 1×1, 2×2 or 3×3 grids with floor prices. Point it at your wallet and it curates by floor, or pin exactly the pieces you want on display." />
           <Feature icon="💸" title="Inflation game" color={C.red}
             text="Watch $10,000 lose purchasing power in real time, at the current US debt-derived rate, down to the fourth decimal, tick by tick. Painfully honest. Switch to 1-100 year horizons when you want the long view." />
           <Feature icon="🏛" title="US debt clock" color={C.red}
             text="The total US national debt, live and climbing, with a chart of how it got there and per-second / per-minute / per-hour rates since any window you choose." />
-          <Feature icon="🖼" title="NFT gallery" color={C.blue}
-            text="Show your Ethereum NFTs and Bitcoin Ordinals in 1×1, 2×2 or 3×3 grids with floor prices. Point it at your wallet and it curates by floor, or pin exactly the pieces you want on display." />
         </div>
       </section>
 
@@ -257,7 +264,7 @@ export default function NodeProductPage() {
             the left, dashed divider, pending block pinned on the right.
             Scrollbar hidden; the lane is click-drag scrollable (and swipes
             natively on touch). */}
-        <BlocksStrip mined={minedOldestFirst} pending={pendingBlock} countdown={countdown} />
+        <BlocksStrip mined={minedOldestFirst} pending={pendingBlock} circlePct={circlePct} minsLeft={minsLeft} />
 
         <MiniMap nodes={nodes} />
 
@@ -375,8 +382,10 @@ function DeviceRenderCarousel() {
 }
 
 // ── Blocks strip (network-page layout + drag-to-scroll, hidden scrollbar) ─────
-function BlocksStrip({ mined, pending, countdown }: {
-  mined: MiningBlock[]; pending: MiningBlock | null; countdown: string
+const CIRC = 2 * Math.PI * 20  // r=20 → circumference ≈ 125.66
+
+function BlocksStrip({ mined, pending, circlePct, minsLeft }: {
+  mined: MiningBlock[]; pending: MiningBlock | null; circlePct: number; minsLeft: number
 }) {
   const laneRef = useRef<HTMLDivElement>(null)
   const drag    = useRef({ on: false, startX: 0, startScroll: 0 })
@@ -422,19 +431,27 @@ function BlocksStrip({ mined, pending, countdown }: {
         {mined.map(b => (
           <div key={b.block_number} style={{ ...s.blockTile, ...s.blockMined }}>
             <div style={s.blockNum}>#{b.block_number}</div>
-            <div style={{ fontSize: 14, fontWeight: 'bold', color: C.green }}>₸{b.reward_tusd}</div>
-            <div style={{ fontSize: 10, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 84 }}>
-              {b.winner_display_name ?? '—'}
-            </div>
+            <div style={s.blockAgo}>{b.mined_at ? timeSince(b.mined_at) : ''}</div>
+            <div style={s.blockReward}>₸{b.reward_tusd}</div>
+            <div style={s.blockWinner}>{b.winner_display_name ?? '—'}</div>
+            <div style={s.blockCountry}>{b.winner_country || ' '}</div>
           </div>
         ))}
       </div>
       <div style={s.blockDivider} />
       {pending && (
-        <div style={{ ...s.blockTile, ...s.blockPending, marginRight: 2 }}>
+        <div style={{ ...s.blockTile, ...s.blockPending }}>
           <div style={s.blockNum}>#{pending.block_number}</div>
-          <div style={{ fontSize: 15, fontWeight: 'bold', color: C.yellow, fontVariantNumeric: 'tabular-nums' }}>{countdown}</div>
-          <div style={{ fontSize: 10, color: C.muted }}>mining…</div>
+          <div style={s.blockAgo}>mining…</div>
+          <svg width="44" height="44" viewBox="0 0 52 52">
+            <circle cx="26" cy="26" r="20" fill="none" stroke={`${C.yellow}22`} strokeWidth="3" />
+            <circle cx="26" cy="26" r="20" fill="none" stroke={C.yellow} strokeWidth="3" strokeLinecap="round"
+              strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - Math.max(0, Math.min(1, circlePct)))}
+              transform="rotate(-90 26 26)" />
+            <text x="26" y="26" textAnchor="middle" dominantBaseline="central"
+              fill={C.yellow} fontSize="15" fontWeight="bold" fontFamily="system-ui, sans-serif">{minsLeft}</text>
+          </svg>
+          <div style={s.blockCountry}>Pending miner</div>
         </div>
       )}
     </div>
@@ -631,28 +648,35 @@ const s: Record<string, React.CSSProperties> = {
     padding: '12px 8px', textAlign: 'center', flex: '1 1 0', minWidth: 110,
   },
 
-  // Blocks strip: mined lane | dashed divider | pending (fixed right)
-  blockStrip: { display: 'flex', alignItems: 'stretch', padding: '4px 0 6px' },
+  // Blocks strip: mined lane | dashed divider | pending. Matches the network
+  // page layout (same tile height + info) so both read identically.
+  blockStrip: { display: 'flex', alignItems: 'stretch', padding: '4px 0 14px' },   // bottom pad = gap to the map
   blockLane: {
-    display: 'flex', gap: 12, overflowX: 'auto', minWidth: 0, flex: 1,
+    display: 'flex', gap: 14, overflowX: 'auto', minWidth: 0, flex: 1,
     cursor: 'grab', scrollbarWidth: 'none' as const, msOverflowStyle: 'none' as const,
-    paddingBottom: 22, userSelect: 'none' as const,   // room for the deeper 3D shadow
+    paddingBottom: 16, userSelect: 'none' as const,   // room for the 3D shadow
   },
-  blockDivider: { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '4px 12px', opacity: 0.7, flexShrink: 0 },
+  blockDivider: { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '4px 14px 20px', opacity: 0.7, flexShrink: 0 },
   blockTile: {
-    minWidth: 92, padding: '10px 10px 9px', borderRadius: 8, textAlign: 'center', flexShrink: 0,
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, justifyContent: 'center',
+    minWidth: 100, height: 104, padding: '8px 9px', borderRadius: 8, textAlign: 'center', flexShrink: 0,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 8,   // extra room below for the shadow
   },
-  // mempool.space-style 3D block. Depth falls to the LEFT + down (negative x)
-  // with four stacked "thickness" layers — chunkier, less flat.
+  // Single-tone 3D extrusion to the lower-LEFT (matches the network page).
   blockMined:   { background: '#1b4d2e', border: `1px solid ${C.green}66`,
-                  boxShadow: '-3px 5px 0 #1e6e44, -6px 10px 0 #155232, -9px 15px 0 #0d3a23, -11px 20px 22px rgba(0,0,0,0.6)' },
-  blockPending: { background: '#4d3c15', border: `1px solid ${C.yellow}66`,
-                  boxShadow: '-3px 5px 0 #7a6323, -6px 10px 0 #5a4917, -9px 15px 0 #3d3110, -11px 20px 22px rgba(0,0,0,0.6)' },
-  blockNum:     { fontSize: 11, fontWeight: 700, color: '#c4c4cc', letterSpacing: 0.5 },
+                  boxShadow: '-3px 4px 0 #143f26, -6px 8px 0 #143f26, -8px 12px 0 #143f26, -9px 15px 13px rgba(0,0,0,0.5)' },
+  blockPending: { background: '#4d3c15', border: `1px solid ${C.yellow}66`, marginLeft: 6,
+                  boxShadow: '-3px 4px 0 #3a2c0f, -6px 8px 0 #3a2c0f, -8px 12px 0 #3a2c0f, -9px 15px 13px rgba(0,0,0,0.5)' },
+  blockNum:     { fontSize: 12, fontWeight: 700, color: '#e8e8ea', letterSpacing: 0.5 },
+  blockAgo:     { fontSize: 9,  color: '#a4a8b2' },
+  blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green },
+  blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
+  blockCountry: { fontSize: 9, color: '#a4a8b2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
 
   miniMapWrap: {
-    position: 'relative', height: 240, borderRadius: 14, overflow: 'hidden',
+    // Full 240 on desktop; ~25% shorter on phones (48vw ≈ 180 on a ~390px
+    // screen) so the map doesn't dominate the mobile layout.
+    position: 'relative', height: 'clamp(170px, 48vw, 240px)', borderRadius: 14, overflow: 'hidden',
     border: `1px solid ${C.border}`, marginTop: 6, cursor: 'pointer',
   },
   // Transparent overlay: swallows map interactions so the whole thing acts as a link

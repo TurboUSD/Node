@@ -334,7 +334,7 @@ export default function NetworkPage() {
           </div>
           <div style={s.tickerDivider} />
           {pendingBlock && (
-            <div style={{ padding: '12px 8px 26px 8px', flexShrink: 0 }}>
+            <div style={{ padding: '12px 8px 16px 14px', flexShrink: 0 }}>
               <BlockTile block={pendingBlock} circlePct={circlePct} minsLeft={minsLeft} />
             </div>
           )}
@@ -533,7 +533,7 @@ function BlockTile({ block, circlePct, minsLeft }: {
         <>
           {/* When it was mined */}
           <div style={s.blockAgo}>{block.mined_at ? timeSince(block.mined_at) : ''}</div>
-          {/* Reward — center, prominent */}
+          {/* Reward — prominent */}
           <div style={s.blockReward}>₸{block.reward_tusd}</div>
           {/* Winner name (or #id if no name), marquee if it doesn't fit */}
           <Marquee
@@ -541,33 +541,28 @@ function BlockTile({ block, circlePct, minsLeft }: {
             style={s.blockWinner}
           />
           {/* Country under the name */}
-          {block.winner_country && <div style={s.blockCountry}>{block.winner_country}</div>}
+          <div style={s.blockCountry}>{block.winner_country || ' '}</div>
         </>
       ) : (
-        /* Pending: circular countdown */
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flex: 1, justifyContent: 'center' }}>
-          <svg width="52" height="52" viewBox="0 0 52 52">
-            {/* track */}
+        <>
+          {/* "mining…" right under the block number */}
+          <div style={s.blockAgo}>mining…</div>
+          {/* Circular countdown */}
+          <svg width="44" height="44" viewBox="0 0 52 52">
             <circle cx="26" cy="26" r="20" fill="none" stroke={`${C.yellow}22`} strokeWidth="3" />
-            {/* progress arc — rotated so it starts at top */}
             <circle
               cx="26" cy="26" r="20" fill="none"
-              stroke={C.yellow} strokeWidth="3"
-              strokeLinecap="round"
+              stroke={C.yellow} strokeWidth="3" strokeLinecap="round"
               strokeDasharray={CIRC}
               strokeDashoffset={CIRC * (1 - Math.max(0, Math.min(1, circlePct)))}
               transform="rotate(-90 26 26)"
             />
-            {/* minutes remaining in center */}
-            <text
-              x="26" y="26"
-              textAnchor="middle" dominantBaseline="central"
-              fill={C.yellow} fontSize="13" fontWeight="bold"
-              fontFamily="system-ui, sans-serif"
-            >{minsLeft}</text>
+            <text x="26" y="26" textAnchor="middle" dominantBaseline="central"
+              fill={C.yellow} fontSize="15" fontWeight="bold" fontFamily="system-ui, sans-serif">{minsLeft}</text>
           </svg>
-          <div style={{ fontSize: 9, color: C.yellow, opacity: 0.5, letterSpacing: 0.5 }}>min left</div>
-        </div>
+          {/* Bottom label mirrors the winner line on mined tiles */}
+          <div style={s.blockCountry}>Pending miner</div>
+        </>
       )}
     </div>
   )
@@ -1224,35 +1219,32 @@ const s: Record<string, React.CSSProperties> = {
   // divider + pending) sits CENTERED; when it grows past ~70% width it clips
   // on the left, keeping the newest blocks visible next to the divider.
   tickerMinedLane: {
-    display: 'flex', gap: 14, padding: '12px 8px 26px', overflowX: 'auto' as const, overflowY: 'hidden' as const,
+    display: 'flex', gap: 14, padding: '12px 8px 16px', overflowX: 'auto' as const, overflowY: 'hidden' as const,
     minWidth: 0, maxWidth: 'calc(100% - 180px)',
     // Scrollbar hidden — the lane drag-scrolls with the mouse (see
     // laneDragStart) and swipes natively on touch.
     scrollbarWidth: 'none' as const, msOverflowStyle: 'none' as const,
     cursor: 'grab', userSelect: 'none' as const,
   },
-  // Symmetric margins so the mined block and the pending block sit the SAME
-  // distance from the dashed line (mined-side gap = 8+14, pending-side = 14+8).
-  tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '10px 14px', opacity: 0.75 },
+  tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '8px 14px', opacity: 0.75 },
 
   block: {
-    minWidth: 100, height: 128, padding: '9px 9px 8px',
+    minWidth: 100, height: 104, padding: '8px 9px',
     borderRadius: 8, textAlign: 'center', flexShrink: 0,
-    display: 'flex', flexDirection: 'column', alignItems: 'center',
-    // Extra bottom margin so the deeper 3D shadow isn't clipped by the lane.
-    marginBottom: 16,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
+    // Room for the 3D shadow below without a big empty gap under the strip.
+    marginBottom: 8,
   },
-  // mempool.space-style 3D block. Depth now falls to the LEFT + down (negative
-  // x) with FOUR stacked "thickness" layers for a chunkier, less-flat look.
+  // mempool.space-style 3D block: single-tone extrusion to the lower-LEFT.
   blockMined:   { background: '#1b4d2e', border: `1px solid ${C.green}66`,
-                  boxShadow: '-3px 5px 0 #1e6e44, -6px 10px 0 #155232, -9px 15px 0 #0d3a23, -11px 20px 22px rgba(0,0,0,0.6)' },
+                  boxShadow: '-3px 4px 0 #143f26, -6px 8px 0 #143f26, -8px 12px 0 #143f26, -9px 15px 13px rgba(0,0,0,0.5)' },
   blockPending: { background: '#4d3c15', border: `1px solid ${C.yellow}66`,
-                  boxShadow: '-3px 5px 0 #7a6323, -6px 10px 0 #5a4917, -9px 15px 0 #3d3110, -11px 20px 22px rgba(0,0,0,0.6)' },
+                  boxShadow: '-3px 4px 0 #3a2c0f, -6px 8px 0 #3a2c0f, -8px 12px 0 #3a2c0f, -9px 15px 13px rgba(0,0,0,0.5)' },
   blockNum:     { fontSize: 12, fontWeight: 700, color: '#e8e8ea', letterSpacing: 0.5 },
-  blockAgo:     { fontSize: 9,  color: '#a4a8b2', marginTop: 1, marginBottom: 2 },
-  blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green, flex: 1, display: 'flex', alignItems: 'center' },
+  blockAgo:     { fontSize: 9,  color: '#a4a8b2' },
+  blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green },
   blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', maxWidth: 92, textAlign: 'center' },
-  blockCountry: { fontSize: 9, color: '#a4a8b2', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
+  blockCountry: { fontSize: 9, color: '#a4a8b2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
 
   // Stats
   // nowrap + flexible pills: the three stats must share ONE line even on
