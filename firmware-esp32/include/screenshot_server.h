@@ -81,6 +81,15 @@ inline void _sendBmp() {
     _u32(hd + 58, 0x07E0);                       // G mask
     _u32(hd + 62, 0x001F);                       // B mask
 
+    // Force a proper filename+extension on save. Without this some browsers
+    // (notably iOS Safari, which ignores the <a download> attribute) saved the
+    // file as "shot.download" and the user had to rename it to .bmp by hand.
+    // `?dl=1` → attachment (Save button); plain /shot.bmp stays inline so the
+    // <img> preview still renders.
+    if (s_srv->hasArg("dl"))
+        s_srv->sendHeader("Content-Disposition", "attachment; filename=\"node-screen.bmp\"");
+    else
+        s_srv->sendHeader("Content-Disposition", "inline; filename=\"node-screen.bmp\"");
     s_srv->setContentLength(66 + pxBytes);
     s_srv->send(200, "image/bmp", "");
     WiFiClient c = s_srv->client();
@@ -110,9 +119,10 @@ inline void _sendIndex() {
         "<img id='s' src='/shot.bmp'>"
         "<div>"
         "<button onclick=\"document.getElementById('s').src='/shot.bmp?'+Date.now()\">Refresh</button>"
-        "<a href='/shot.bmp' download='node-screen.bmp'>Save BMP</a>"
+        "<a href='/shot.bmp?dl=1' download='node-screen.bmp'>Save BMP</a>"
+        "<a href='/logs'>Logs &rarr;</a>"
         "</div>"
-        "<p style='color:#6e7280;font-size:12px'>Swipe the device to the screen you want, then Refresh.</p>"
+        "<p style='color:#8a8f9a;font-size:12px'>Swipe the device to the screen you want, then Refresh.</p>"
         "</body></html>");
 }
 
@@ -128,7 +138,12 @@ inline void _sendLogTxt() {
     free(buf);
 }
 
-// Auto-refreshing HTML log viewer.
+// Auto-refreshing HTML log viewer with Pause / Jump-to-bottom / Screenshot
+// controls. The live refresh used to wipe any text you were selecting the
+// instant it ticked (every 1.5 s), so copying with the mouse was impossible.
+// Now: (1) a Pause button freezes the refresh, and (2) the refresh auto-skips
+// whenever there's an active text selection — so just selecting text holds the
+// log still until you release, and the copy sticks.
 inline void _sendLogPage() {
     s_srv->send(200, "text/html",
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
@@ -136,16 +151,32 @@ inline void _sendLogPage() {
         "<title>TurboUSD Node logs</title>"
         "<style>html,body{margin:0;background:#000;color:#d8f0d8;"
         "font-family:ui-monospace,Menlo,Consolas,monospace}"
-        "#bar{position:sticky;top:0;background:#0a0a0a;border-bottom:1px solid #1c1c1c;"
-        "padding:8px 12px;font-size:13px;color:#8a8a8a}"
+        "#bar{position:sticky;top:0;background:#0a0a0a;border-bottom:1px solid #262626;"
+        "padding:8px 10px;font-size:13px;color:#9096a1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}"
+        "#bar .t{font-weight:600}#bar .sp{flex:1}"
+        "#bar button,#bar a{font:inherit;font-size:12px;font-weight:600;cursor:pointer;"
+        "background:#161a17;color:#d8f0d8;border:1px solid #2a2f2b;border-radius:16px;"
+        "padding:5px 12px;text-decoration:none;line-height:1}"
+        "#bar button:hover,#bar a:hover{background:#20261f}"
+        "#bar #shot{background:#3aff7a;color:#000;border-color:#3aff7a}"
         "#l{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.45;"
-        "padding:10px 12px 40px}b{color:#3aff7a}</style></head><body>"
-        "<div id='bar'>TurboUSD Node logs · <b>live</b> · auto-refresh 1.5s</div>"
+        "padding:10px 12px 60px}b{color:#3aff7a}</style></head><body>"
+        "<div id='bar'><span class='t'>TurboUSD logs</span>"
+        "<b id='st'>live</b><span class='sp'></span>"
+        "<button id='pz'>Pause</button>"
+        "<button id='bt'>Bottom &darr;</button>"
+        "<a id='shot' href='/'>&#128247; Screenshot</a></div>"
         "<div id='l'>loading…</div>"
-        "<script>let follow=true;const e=document.getElementById('l');"
+        "<script>let follow=true,paused=false;"
+        "const e=document.getElementById('l'),st=document.getElementById('st'),"
+        "pz=document.getElementById('pz');"
         "addEventListener('scroll',()=>{follow=(innerHeight+scrollY)>=(document.body.scrollHeight-60)});"
-        "async function u(){try{let r=await fetch('/log.txt',{cache:'no-store'});"
+        "function hasSel(){return window.getSelection&&String(window.getSelection()).length>0}"
+        "async function u(){if(paused||hasSel())return;try{let r=await fetch('/log.txt',{cache:'no-store'});"
         "e.textContent=await r.text();if(follow)scrollTo(0,document.body.scrollHeight)}catch(x){}}"
+        "pz.onclick=()=>{paused=!paused;pz.textContent=paused?'Resume':'Pause';"
+        "st.textContent=paused?'paused':'live';st.style.color=paused?'#ffcf72':'#3aff7a'};"
+        "document.getElementById('bt').onclick=()=>{follow=true;scrollTo(0,document.body.scrollHeight)};"
         "u();setInterval(u,1500);</script></body></html>");
 }
 

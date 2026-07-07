@@ -67,12 +67,43 @@ inline uint8_t* loadAlloc(const char* ns, const char* key, size_t* outLen) {
     return buf;
 }
 
+// Free space (bytes) currently available on the cache partition.
+inline size_t _freeBytes() { return LittleFS.totalBytes() - LittleFS.usedBytes(); }
+
+// Evict the OLDEST cache entries (by last-write time) until at least `need`
+// bytes are free. Before this, a full partition simply refused every new write,
+// so once it filled (a 40-NFT wallet does), nothing new ever cached and every
+// image re-downloaded + re-decoded on each visit/reboot. LRU-by-write eviction
+// keeps the cache useful. Deleting a still-displayed blob is harmless — its
+// pixels already live in PSRAM; only the disk copy goes.
+inline void _evictUntil(size_t need) {
+    if (!s_ok) return;
+    int guard = 0;
+    while (_freeBytes() < need && guard++ < 256) {
+        File dir = LittleFS.open("/");
+        if (!dir) return;
+        String oldestPath; time_t oldestT = 0; bool first = true;
+        for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
+            if (!f.isDirectory()) {
+                time_t t = f.getLastWrite();
+                String p = f.path();
+                if (first || t < oldestT) { oldestT = t; oldestPath = p; first = false; }
+            }
+            f.close();
+        }
+        dir.close();
+        if (oldestPath.length() == 0) break;   // nothing left to evict
+        LittleFS.remove(oldestPath);
+    }
+}
+
 inline bool save(const char* ns, const char* key, const uint8_t* data, size_t len) {
     if (!s_ok || !data || len == 0) return false;
-    // Leave headroom: if the partition is nearly full just skip (no eviction
-    // policy needed at our sizes — logos are ~5 KB, NFT source images ~25 KB).
-    if (LittleFS.totalBytes() - LittleFS.usedBytes() < len + 16 * 1024) {
-        Log.printf("DiskCache: full, skipping %s\n", key);
+    // Make room by evicting oldest entries rather than refusing forever.
+    const size_t HEADROOM = 16 * 1024;
+    if (_freeBytes() < len + HEADROOM) _evictUntil(len + HEADROOM);
+    if (_freeBytes() < len + 2 * 1024) {   // couldn't free enough (blob too big)
+        Log.printf("DiskCache: cannot fit %s (%u B) even after eviction\n", key, (unsigned)len);
         return false;
     }
     String path = _pathFor(ns, key);

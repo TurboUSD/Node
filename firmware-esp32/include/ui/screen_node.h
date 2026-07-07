@@ -205,9 +205,11 @@ public:
             lv_obj_set_pos(minedBlocks[i].container, slotX, 16);
         }
         pendingBlock = buildBlockWidget(miningTrack, false);
-        // Pending block sits just right of the divider line
+        // Pending block sits just right of the divider line. Offset +20 (not +18)
+        // so its gap to the dashed line (14 px) matches the newest mined block's
+        // gap on the other side — they were 12 vs 14 before (asymmetric).
         lv_obj_set_pos(pendingBlock.container,
-                       (lv_coord_t)(NODE_MINED_BLOCKS_SHOWN * NODE_BLOCK_SLOT_WIDTH + 18), 16);
+                       (lv_coord_t)(NODE_MINED_BLOCKS_SHOWN * NODE_BLOCK_SLOT_WIDTH + 20), 16);
         lv_label_set_text(pendingBlock.numberLabel, "NEXT");
 
         // Local "always mining" animation: continuously fill the pending block's
@@ -298,7 +300,7 @@ public:
         int minedIdx = 0;
         for (int i = 0; i < count && minedIdx < NODE_MINED_BLOCKS_SHOWN; i++) {
             if (!entries[i].mined) continue;
-            setBlockContent(minedBlocks[minedIdx], entries[i].blockNumber, entries[i].rewardTusd, entries[i].winnerDisplayName);
+            setBlockContent(minedBlocks[minedIdx], entries[i].blockNumber, entries[i].rewardTusd, entries[i].winnerDisplayName, entries[i].winnerCountry);
             minedIdx++;
         }
         for (int i = 0; i < count; i++) {
@@ -436,6 +438,7 @@ private:
         lv_obj_t* numberLabel = nullptr;
         lv_obj_t* rewardLabel = nullptr;
         lv_obj_t* minerNameLabel = nullptr;
+        lv_obj_t* minerCountryLabel = nullptr;   // country under the winner name
         lv_obj_t* ring = nullptr;
         lv_obj_t* centerLabel = nullptr;
         bool isMinedSlot = false;
@@ -474,7 +477,9 @@ private:
             lv_label_set_text(w.rewardLabel, "");
             lv_obj_set_style_text_font(w.rewardLabel, tengeFont20(), 0);   // "₸100"
             lv_obj_set_style_text_color(w.rewardLabel, lv_color_white(), 0);
-            lv_obj_align(w.rewardLabel, LV_ALIGN_CENTER, 0, -2);
+            // Nudged up so the number/reward/name/country stack is evenly
+            // spaced now that a country line sits at the bottom.
+            lv_obj_align(w.rewardLabel, LV_ALIGN_CENTER, 0, -8);
 
             w.minerNameLabel = lv_label_create(w.container);
             lv_label_set_text(w.minerNameLabel, "");
@@ -483,7 +488,17 @@ private:
             lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_10, 0);
             lv_obj_set_style_text_color(w.minerNameLabel, lv_color_hex(0xd8ffe6), 0);
             lv_obj_set_style_text_align(w.minerNameLabel, LV_TEXT_ALIGN_CENTER, 0);
-            lv_obj_align(w.minerNameLabel, LV_ALIGN_BOTTOM_MID, 0, -5);
+            lv_obj_align(w.minerNameLabel, LV_ALIGN_BOTTOM_MID, 0, -17);
+
+            // Country under the name — dim green, one line, ellipsised.
+            w.minerCountryLabel = lv_label_create(w.container);
+            lv_label_set_text(w.minerCountryLabel, "");
+            lv_obj_set_width(w.minerCountryLabel, NODE_BLOCK_W - 14);
+            lv_label_set_long_mode(w.minerCountryLabel, LV_LABEL_LONG_DOT);
+            lv_obj_set_style_text_font(w.minerCountryLabel, &lv_font_montserrat_8, 0);
+            lv_obj_set_style_text_color(w.minerCountryLabel, lv_color_hex(0x89b39a), 0);
+            lv_obj_set_style_text_align(w.minerCountryLabel, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_align(w.minerCountryLabel, LV_ALIGN_BOTTOM_MID, 0, -4);
         } else {
             w.numberLabel = lv_label_create(w.container);
             lv_label_set_text(w.numberLabel, "");
@@ -519,9 +534,18 @@ private:
     void styleBlock(BlockWidget& w, bool mined) {
         lv_obj_set_style_bg_color(w.container, mined ? lv_color_hex(0x1c5c30) : lv_color_hex(0x5a3d0c), 0);
         lv_obj_set_style_border_color(w.container, mined ? lv_color_hex(0x3aff7a) : lv_color_hex(0xe8b339), 0);
+        // Slight 3D volume: a soft coloured drop shadow to the lower-LEFT (like
+        // the web tiles), so the flat cards read as chunky blocks.
+        lv_obj_set_style_shadow_width(w.container, 12, 0);
+        lv_obj_set_style_shadow_spread(w.container, 0, 0);
+        lv_obj_set_style_shadow_ofs_x(w.container, -4, 0);
+        lv_obj_set_style_shadow_ofs_y(w.container, 7, 0);
+        lv_obj_set_style_shadow_opa(w.container, LV_OPA_60, 0);
+        lv_obj_set_style_shadow_color(w.container, mined ? lv_color_hex(0x0c3a20) : lv_color_hex(0x3a2c08), 0);
     }
 
-    void setBlockContent(BlockWidget& w, long blockNumber, double reward, const String& minerName) {
+    void setBlockContent(BlockWidget& w, long blockNumber, double reward, const String& minerName,
+                         const String& country = String("")) {
         bool isNewBlock = (w.lastBlockNumber != blockNumber);
         w.lastBlockNumber = blockNumber;
 
@@ -530,6 +554,8 @@ private:
         char rewardBuf[16]; snprintf(rewardBuf, sizeof(rewardBuf), "\xE2\x82\xB8%d", (int)reward);
         lv_label_set_text(w.rewardLabel, rewardBuf);
         lv_label_set_text(w.minerNameLabel, minerName.length() ? minerName.c_str() : "--");
+        if (w.minerCountryLabel)
+            lv_label_set_text(w.minerCountryLabel, country.length() ? country.c_str() : "");
         lv_obj_clear_flag(w.container, LV_OBJ_FLAG_HIDDEN);
 
         if (!isNewBlock) return; // periodic refresh of the same block's data, no slide needed

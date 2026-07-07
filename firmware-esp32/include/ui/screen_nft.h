@@ -380,6 +380,8 @@ private:
         lv_obj_t* nameLbl   = nullptr;
         lv_obj_t* floorLbl  = nullptr;
         lv_obj_t* dotRow    = nullptr;   // carousel position dots
+        lv_obj_t* placeholder = nullptr; // shown while no bitmap decoded yet
+        lv_obj_t* editBtns[3] = { nullptr, nullptr, nullptr }; // ◀ ✕ ▶ overlay
         int       nftStart  = 0;        // index of first NFT in this cell's "group"
         int       nftCount  = 0;        // how many NFTs are in this cell's group
         int       nftCurrent= 0;        // which one is displayed right now
@@ -590,8 +592,17 @@ private:
             int code = http.GET();
             if (code != 200) { http.end(); delay(NFT_RATELIMIT_DELAY_MS); continue; }
 
+            // Filter: the single-NFT response carries traits/rarity/owners arrays
+            // we never read. Parsing only the 3 fields we use caps heap use and
+            // speeds the parse (matches _dexPriceUsd / the wallet scan, already filtered).
+            JsonDocument nftFilter;
+            nftFilter["nft"]["name"] = true;
+            nftFilter["nft"]["display_image_url"] = true;
+            nftFilter["nft"]["image_url"] = true;
+            nftFilter["nft"]["collection"] = true;
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, http.getStream());
+            DeserializationError err = deserializeJson(doc, http.getStream(),
+                                          DeserializationOption::Filter(nftFilter));
             http.end();
             if (err) { delay(NFT_RATELIMIT_DELAY_MS); continue; }
 
@@ -1142,11 +1153,14 @@ private:
         CellWidgets& cw = _cells[idx];
         if (!cw.container) return;
 
-        // Clean and rebuild cell contents
-        lv_obj_clean(cw.container);
-        cw.nameLbl  = nullptr;
-        cw.floorLbl = nullptr;
-        cw.dotRow   = nullptr;
+        // IN-PLACE update (finding B): the image + caption labels are created
+        // ONCE and reused — only their source/text is updated. The old code did
+        // lv_obj_clean(container) + recreate every refresh (carousel advance,
+        // image-ready, slideshow), which churned alloc/free and restarted the
+        // name marquee on every tick. Transient overlays (placeholder, edit
+        // buttons, dots) are still delete+recreate via tracked pointers, so no
+        // full clean is needed. On a grid rebuild _cells[i]={} nulls every
+        // pointer and the container is recreated, so nothing dangles.
 
         int nftIdx = cw.nftStart + (cw.nftCurrent % cw.nftCount);
         if (nftIdx >= (int)_nftCache.size()) nftIdx = (int)_nftCache.size() - 1;
@@ -1188,6 +1202,7 @@ private:
         if (px && pw > 0) {
             // Decoded image available (RGB565 in PSRAM). One dsc PER CELL —
             // a shared static one made every cell display the same image.
+            if (cw.placeholder) { lv_obj_del(cw.placeholder); cw.placeholder = nullptr; }
             cw.imgDsc.header.always_zero = 0;
             cw.imgDsc.header.w           = pw;
             cw.imgDsc.header.h           = ph;
@@ -1200,39 +1215,48 @@ private:
             // bands where the aspect doesn't match. NO lv_img zoom here:
             // runtime transforms re-scale every frame and made the whole
             // screen shimmer ("interference").
-            lv_obj_t* imgObj = lv_img_create(cw.container);
-            lv_img_set_src(imgObj, &cw.imgDsc);
+            if (!cw.img) {
+                cw.img = lv_img_create(cw.container);
+                lv_obj_clear_flag(cw.img, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
+            }
+            lv_img_set_src(cw.img, &cw.imgDsc);
+            lv_obj_invalidate(cw.img);   // dsc.data changed in place → force a repaint
             // Centered within the ART AREA (cell minus the caption band —
             // or the whole cell when the Data captions are toggled off).
             lv_coord_t artH = storage.getNftShowData() ? (lv_coord_t)(cw_h - NFT_CAPTION_H) : cw_h;
             lv_coord_t yOff = (artH > (lv_coord_t)ph) ? (lv_coord_t)((artH - ph) / 2) : 0;
-            lv_obj_align(imgObj, LV_ALIGN_TOP_MID, 0, yOff);
-            lv_obj_clear_flag(imgObj, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
+            lv_obj_align(cw.img, LV_ALIGN_TOP_MID, 0, yOff);
         } else {
             // No decoded image — show a coloured tile with a subtle grid icon
-            lv_obj_t* placeholder = lv_obj_create(cw.container);
-            lv_obj_set_size(placeholder, cw_w, cw_h - NFT_CAPTION_H);
-            lv_obj_align(placeholder, LV_ALIGN_TOP_MID, 0, 0);
-            lv_obj_set_style_bg_color(placeholder, lv_color_hex(bgColor == NFT_CLR_GREY ? 0x2a2a2e : bgColor), 0);
-            lv_obj_set_style_border_width(placeholder, 0, 0);
-            lv_obj_set_style_radius(placeholder, 4, 0);
-            lv_obj_clear_flag(placeholder, LV_OBJ_FLAG_SCROLLABLE);
-
-            // Show image URL hint (tiny text, so owner knows it loaded but img decode needed)
-            if (item.image_url[0]) {
-                lv_obj_t* hint = lv_label_create(placeholder);
-                lv_label_set_text(hint, LV_SYMBOL_IMAGE);
-                lv_obj_set_style_text_color(hint, lv_color_hex(0x444448), 0);
-                lv_obj_center(hint);
+            if (cw.img) { lv_obj_del(cw.img); cw.img = nullptr; }
+            if (!cw.placeholder) {
+                cw.placeholder = lv_obj_create(cw.container);
+                lv_obj_set_style_border_width(cw.placeholder, 0, 0);
+                lv_obj_set_style_radius(cw.placeholder, 4, 0);
+                lv_obj_clear_flag(cw.placeholder, LV_OBJ_FLAG_SCROLLABLE);
+                // Show image URL hint (tiny text, so owner knows it loaded but img decode needed)
+                if (item.image_url[0]) {
+                    lv_obj_t* hint = lv_label_create(cw.placeholder);
+                    lv_label_set_text(hint, LV_SYMBOL_IMAGE);
+                    lv_obj_set_style_text_color(hint, lv_color_hex(0x444448), 0);
+                    lv_obj_center(hint);
+                }
             }
+            lv_obj_set_size(cw.placeholder, cw_w, cw_h - NFT_CAPTION_H);
+            lv_obj_align(cw.placeholder, LV_ALIGN_TOP_MID, 0, 0);
+            lv_obj_set_style_bg_color(cw.placeholder, lv_color_hex(bgColor == NFT_CLR_GREY ? 0x2a2a2e : bgColor), 0);
         }
 
         // ── Edit-mode overlay: [◀] [✕] [▶] reorder/delete controls ──
+        // Rebuilt each refresh (rare + transient) via tracked pointers.
+        for (int b = 0; b < 3; b++)
+            if (cw.editBtns[b]) { lv_obj_del(cw.editBtns[b]); cw.editBtns[b] = nullptr; }
         if (_editMode && _gridSize != 1) {
             static const char* glyphs[3] = { LV_SYMBOL_LEFT, LV_SYMBOL_CLOSE, LV_SYMBOL_RIGHT };
             static lv_event_cb_t cbs[3]  = { _onCellMoveLeft, _onCellDelete, _onCellMoveRight };
             for (int b = 0; b < 3; b++) {
                 lv_obj_t* btn = lv_btn_create(cw.container);
+                cw.editBtns[b] = btn;
                 lv_obj_set_size(btn, 34, 30);
                 lv_obj_set_style_bg_color(btn, lv_color_hex(0x000000), 0);
                 lv_obj_set_style_bg_opa(btn, LV_OPA_70, 0);
@@ -1250,7 +1274,12 @@ private:
             }
         }
 
-        if (!storage.getNftShowData()) return;   // "Data" toggle off → no captions
+        if (!storage.getNftShowData()) {   // "Data" toggle off → no captions
+            if (cw.nameLbl)  { lv_obj_del(cw.nameLbl);  cw.nameLbl  = nullptr; }
+            if (cw.floorLbl) { lv_obj_del(cw.floorLbl); cw.floorLbl = nullptr; }
+            if (cw.dotRow)   { lv_obj_del(cw.dotRow);   cw.dotRow   = nullptr; }
+            return;
+        }
 
         // ── Caption band (dedicated dark strip UNDER the artwork): name on
         // the left, floor on the right, SAME baseline row — readable always,
@@ -1264,23 +1293,36 @@ private:
         lv_coord_t nameAvail = (lv_coord_t)(cw_w - 52);   // floor takes ~48 px
         if (nameAvail < 20) nameAvail = 20;
 
-        cw.nameLbl = lv_label_create(cw.container);
-        lv_label_set_text(cw.nameLbl, nameTxt);
-        lv_obj_set_width(cw.nameLbl, nameAvail);
-        lv_obj_set_style_text_font(cw.nameLbl, nameFont, 0);
-        lv_obj_set_style_text_color(cw.nameLbl, lv_color_hex(NFT_CLR_TEXT), 0);
-        lv_point_t tsz;
-        lv_txt_get_size(&tsz, nameTxt, nameFont, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        if (tsz.x > nameAvail) {
-            lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_SCROLL_CIRCULAR);
-            lv_obj_set_style_anim_speed(cw.nameLbl, 12, 0);   // ~12 px/s — slow, readable
-        } else {
-            lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_CLIP);
+        // Reuse the label; only re-apply text/layout when the NAME actually
+        // changed. Re-setting text every refresh restarted the circular marquee
+        // (it jumped back to the start on every image-ready/carousel tick).
+        bool nameNew = false;
+        if (!cw.nameLbl) { cw.nameLbl = lv_label_create(cw.container); nameNew = true; }
+        const char* curName = nameNew ? nullptr : lv_label_get_text(cw.nameLbl);
+        if (nameNew || !curName || strcmp(curName, nameTxt) != 0) {
+            lv_label_set_text(cw.nameLbl, nameTxt);
+            lv_obj_set_width(cw.nameLbl, nameAvail);
+            lv_obj_set_style_text_font(cw.nameLbl, nameFont, 0);
+            lv_obj_set_style_text_color(cw.nameLbl, lv_color_hex(NFT_CLR_TEXT), 0);
+            lv_point_t tsz;
+            lv_txt_get_size(&tsz, nameTxt, nameFont, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (tsz.x > nameAvail) {
+                lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_SCROLL_CIRCULAR);
+                lv_obj_set_style_anim_speed(cw.nameLbl, 12, 0);   // ~12 px/s — slow, readable
+            } else {
+                lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_CLIP);
+            }
+            lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -2);
         }
-        lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -2);
 
         if (item.floor_price_eth > 0) {
-            cw.floorLbl = lv_label_create(cw.container);
+            if (!cw.floorLbl) {
+                cw.floorLbl = lv_label_create(cw.container);
+                lv_obj_set_style_text_font(cw.floorLbl, ethXiFont10(), 0);
+                // Same colour as the name for EVERY cell — the old per-tier
+                // gold/blue/green colouring made the caption band look random.
+                lv_obj_set_style_text_color(cw.floorLbl, lv_color_hex(NFT_CLR_TEXT), 0);
+            }
             char floorBuf[24];
             // Two decimals to save caption space (three below 0.01 so dust
             // floors don't render as 0.00). Ξ for ETH, ₿ for Ordinals.
@@ -1290,15 +1332,15 @@ private:
             else
                 snprintf(floorBuf, sizeof(floorBuf), "%.2f %s", item.floor_price_eth, sym);
             lv_label_set_text(cw.floorLbl, floorBuf);
-            lv_obj_set_style_text_font(cw.floorLbl, ethXiFont10(), 0);
-            // Same colour as the name for EVERY cell — the old per-tier
-            // gold/blue/green colouring made the caption band look random.
-            lv_obj_set_style_text_color(cw.floorLbl, lv_color_hex(NFT_CLR_TEXT), 0);
             lv_obj_align(cw.floorLbl, LV_ALIGN_BOTTOM_RIGHT, 0, -2);   // same row as the name
+        } else if (cw.floorLbl) {
+            lv_obj_del(cw.floorLbl); cw.floorLbl = nullptr;
         }
 
         // Carousel dots — bottom edge of the ART area. Hidden by default
         // (they were visual noise); they appear for a moment after a tap.
+        // Transient → delete+recreate via the tracked pointer.
+        if (cw.dotRow) { lv_obj_del(cw.dotRow); cw.dotRow = nullptr; }
         bool dotsVisible = cw.dotsAt && (millis() - cw.dotsAt < 2500);
         if (dotsVisible && cw.nftCount > 1 && cw_h > 40) {
             cw.dotRow = lv_obj_create(cw.container);
@@ -1771,7 +1813,10 @@ private:
     static void _bgImgFetchFn(void* /*pvArg*/) {
         NftScreen* self = s_instance;
         if (!self) { vTaskDelete(nullptr); return; }
-        netLock();   // exclusive TLS ownership — see net_lock.h
+        // netLock is NOT held for the whole batch anymore (finding C). It's taken
+        // per image, only around the HTTP fetch+decode, and released between
+        // images + during the rate-limit delay, so heartbeat/treasury/prices get
+        // a window between every image instead of stalling for the whole batch.
 
         uint16_t myGen = self->_imgGen;   // snapshot: invalidation aborts this run
         int g = self->_gridClass();
@@ -1819,6 +1864,7 @@ private:
                     if (q >= 0) base = base.substring(0, q);
                     bool fromDisk = diskcache::has("img", it.image_url);
                     uint16_t w = 0, h = 0;
+                    netLock();   // exclusive TLS only for THIS image's fetch+decode
                     uint8_t* px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
                                                       boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                     if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
@@ -1831,6 +1877,7 @@ private:
                         String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=jpg";
                         px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                     }
+                    netUnlock();   // released before the flash write + rate-limit delay
 
                     if (myGen != self->_imgGen) {
                         // Grid/cache changed mid-decode: wrong size or wrong
@@ -1874,7 +1921,7 @@ private:
         if (fetched > 0 || aborted)
             Log.printf("NFT img worker: %d slots decoded%s\n", fetched, aborted ? " (aborted: params changed)" : "");
 
-        netUnlock();
+        // (no netUnlock here — the lock is now taken/released per image above)
         if (s_instance) s_instance->_imgTask = nullptr;   // ALWAYS clear before self-delete
         vTaskDelete(nullptr);
     }

@@ -179,19 +179,24 @@ void checkAlarmTrigger() {
 
     const bool shouldFire = enabled && activeToday && timeMatch && (minuteId != lastFiredMinuteId);
 
-    // Diagnostic: log the full decision once a second while we're inside the
-    // target minute OR the minute right before it, so the serial log shows
-    // EXACTLY why the alarm did or didn't fire (enabled? right day? time match?
-    // already fired?). Silent the rest of the time so we don't flood the log.
-    static int lastLoggedSec = -1;
+    // Diagnostic: log the alarm decision only when its STATE CHANGES while we're
+    // inside the target minute (or the minute right before it), so the log still
+    // shows EXACTLY why the alarm did/didn't fire — without the per-second flood
+    // that used to spam ~120 identical lines across those two minutes. The FIRING
+    // line and the overlay re-send line below cover the actual fire event.
+    static int lastLoggedState = -1;
     const bool nearAlarm = timeValid && enabled &&
         (t.tm_hour == alarmH) && (t.tm_min == alarmM || (t.tm_min + 1) % 60 == alarmM);
-    if (nearAlarm && t.tm_sec != lastLoggedSec) {
-        lastLoggedSec = t.tm_sec;
+    const int alarmStateKey = (enabled ? 1 : 0) | (activeToday ? 2 : 0) | (timeMatch ? 4 : 0)
+        | ((minuteId == lastFiredMinuteId) ? 8 : 0) | (uiManager.isAlarmOverlayActive() ? 16 : 0);
+    if (nearAlarm && alarmStateKey != lastLoggedState) {
+        lastLoggedState = alarmStateKey;
         Log.printf("ALARM chk %02d:%02d:%02d | enabled=%d activeToday=%d set=%02u:%02u vol=%u "
                       "timeMatch=%d firedThisMin=%d overlay=%d\n",
                       t.tm_hour, t.tm_min, t.tm_sec, enabled, activeToday, alarmH, alarmM, alarmVol,
                       timeMatch, (minuteId == lastFiredMinuteId), uiManager.isAlarmOverlayActive());
+    } else if (!nearAlarm) {
+        lastLoggedState = -1;   // re-arm so the next approach logs its first state
     }
 
     static uint32_t alarmFiredAt = 0;

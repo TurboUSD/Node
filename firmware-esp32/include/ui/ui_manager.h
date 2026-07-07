@@ -457,6 +457,20 @@ private:
     int     _swipeCount = (int)ScreenId::COUNT;   // visible screens (hidden ones filtered out)
     int     _currentSwipePos = 0;
 
+    // Swipe-vs-tap disambiguation. The touch read_cb records where a press
+    // started and, if the finger travels past TAP_SLOP_PX before release, marks
+    // the whole gesture as a swipe. Popup-opening handlers (alarm, calendar,
+    // gear, …) consult _touchWasSwipe and bail, so a swipe that HAPPENS to start
+    // on an icon no longer also fires that icon's click — which used to open the
+    // popup on the screen you just swiped to. LVGL doesn't cancel CLICKED on
+    // movement by itself (the icons aren't in a scrollable container), so we
+    // gate it explicitly here.
+    static constexpr lv_coord_t TAP_SLOP_PX = 22;
+    bool       _pressActive  = false;
+    bool       _touchWasSwipe = false;
+    lv_coord_t _pressStartX  = 0;
+    lv_coord_t _pressStartY  = 0;
+
     TurboScreen  turboScreen;
     DebtScreen   debtScreen;
     GameScreen   gameScreen;
@@ -906,12 +920,31 @@ private:
                     data->point.x = (LCD_H_RES - 1) - rawX;
                     data->point.y = (LCD_V_RES - 1) - rawY;
                     data->state   = LV_INDEV_STATE_PRESSED;
+                    // Swipe-vs-tap tracking: remember where the press began; once
+                    // the finger travels past TAP_SLOP_PX, flag the gesture as a
+                    // swipe so popup handlers ignore the trailing click.
+                    UiManager* ui = static_cast<UiManager*>(drv->user_data);
+                    if (!ui->_pressActive) {
+                        ui->_pressActive   = true;
+                        ui->_touchWasSwipe = false;
+                        ui->_pressStartX   = data->point.x;
+                        ui->_pressStartY   = data->point.y;
+                    } else {
+                        lv_coord_t dx = data->point.x - ui->_pressStartX;
+                        lv_coord_t dy = data->point.y - ui->_pressStartY;
+                        if (dx*dx + dy*dy > TAP_SLOP_PX*TAP_SLOP_PX) ui->_touchWasSwipe = true;
+                    }
                     // Any touch resets the inactivity timer (and wakes screen if off)
-                    static_cast<UiManager*>(drv->user_data)->_onTouchActivity();
+                    ui->_onTouchActivity();
                 } else {
+                    // Release: keep _touchWasSwipe intact so the CLICKED handler
+                    // that fires right after can read it; clear the active flag so
+                    // the next press starts a fresh gesture.
+                    static_cast<UiManager*>(drv->user_data)->_pressActive = false;
                     data->state = LV_INDEV_STATE_RELEASED;
                 }
             } else {
+                static_cast<UiManager*>(drv->user_data)->_pressActive = false;
                 data->state = LV_INDEV_STATE_RELEASED;
             }
         };
@@ -1280,6 +1313,7 @@ private:
     static void onVerifyBadgeTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openVerifyTooltip(); }
 
     void openAlarmPicker() {
+        if (_touchWasSwipe) return;   // a swipe that started on the bell — not a tap
         lv_obj_t* card = openModal(lv_scr_act());
 
         lv_obj_t* title = lv_label_create(card);
@@ -1419,6 +1453,7 @@ private:
     }
 
     void openCalendarPopup() {
+        if (_touchWasSwipe) return;   // a swipe that started on the date — not a tap
         lv_obj_t* card = openModal(lv_scr_act());
 
         // Custom month grid. LVGL 8's lv_calendar always lays the week out
@@ -1509,6 +1544,7 @@ private:
     }
 
     void openConfigPopup() {
+        if (_touchWasSwipe) return;   // a swipe that started on the gear — not a tap
         lv_obj_t* card = openModal(lv_scr_act());
         lv_obj_t* title = lv_label_create(card);
         lv_label_set_text(title, "DEVICE SETUP");
@@ -1586,6 +1622,7 @@ private:
     }
 
     void openVerifyTooltip() {
+        if (_touchWasSwipe) return;   // a swipe that started on the badge — not a tap
         // No bottom button: the modal's corner X closes it, and the freed
         // space goes to the instructions text.
         lv_obj_t* card = openModal(lv_scr_act());

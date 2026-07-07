@@ -51,6 +51,7 @@ struct MiningFeedEntry {
     long blockNumber = 0;
     double rewardTusd = 0;
     String winnerDisplayName = "";
+    String winnerCountry = "";  // shown under the winner name on mined block tiles
     bool mined = false;         // false = this is the currently-pending block
     time_t createdAtUtc = 0;    // when the block was opened (drives the countdown ring)
     time_t minedAtUtc   = 0;    // when it was mined (countdown fallback: minedAt + 1 h)
@@ -546,6 +547,8 @@ public:
                 outEntries[count].winnerDisplayName = String("#") + row["winner_node_code"].as<String>();
             else
                 outEntries[count].winnerDisplayName = "";
+            outEntries[count].winnerCountry = row["winner_country"].isNull()
+                ? String("") : row["winner_country"].as<String>();
             outEntries[count].mined = !row["mined_at"].isNull();
             outEntries[count].createdAtUtc = parseIso8601Utc(row["created_at"] | "");
             outEntries[count].minedAtUtc   = parseIso8601Utc(row["mined_at"]   | "");

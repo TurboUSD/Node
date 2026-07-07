@@ -175,10 +175,7 @@ static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
 
     if (cacheKey) {
         body = diskcache::loadAlloc("img", cacheKey, &len);
-        if (body) {
-            fromDisk = true;
-            Log.printf("img[%s] from disk cache (%u B)\n", tag, (unsigned)len);
-        }
+        if (body) fromDisk = true;   // (routine per-image log dropped — see below)
     }
 
     if (!body) {
