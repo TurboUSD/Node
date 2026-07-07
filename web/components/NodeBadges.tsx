@@ -30,12 +30,12 @@ const GENESIS_HELP =
 
 const LOCATION_HELP =
   'This location is approximate, anonymized to roughly country level (about 300 km).\n\n' +
-  'The network NEVER stores a node’s real position: the IP-derived coordinates are ' +
-  'snapped to a coarse grid before they ever reach the database. The owner can set the ' +
-  'country and city manually from the setup page, so the shown location may be self-chosen.'
+  'The network NEVER stores a node’s real position: the location is derived from the ' +
+  'node’s IP address and snapped to a coarse grid before it ever reaches the database. ' +
+  'It is never editable, so no exact address can be entered.'
 
-// Small "*" shown next to any country/location. Tap/hover explains that the
-// location is anonymized and never stored precisely (see LOCATION_HELP).
+// Small circled "i" info icon shown next to a node's location. Tap/hover explains
+// that the location is anonymized and never stored precisely (see LOCATION_HELP).
 export function LocationNote({ color = MUTED }: { color?: string }) {
   const [open, setOpen] = useState(false)
   return (
@@ -43,8 +43,13 @@ export function LocationNote({ color = MUTED }: { color?: string }) {
       <span
         title="Approximate location (anonymized). Tap to learn more"
         onClick={e => { e.stopPropagation(); e.preventDefault(); setOpen(true) }}
-        style={{ color, cursor: 'help', fontWeight: 700, marginLeft: 2, userSelect: 'none' }}
-      >*</span>
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 14, height: 14, borderRadius: '50%', border: `1px solid ${color}`,
+          color, fontSize: 10, fontWeight: 700, fontStyle: 'italic', lineHeight: 1,
+          cursor: 'help', marginLeft: 5, userSelect: 'none', verticalAlign: 'middle',
+        }}
+      >i</span>
       {open && <InfoModal title="Approximate location" body={LOCATION_HELP} onClose={() => setOpen(false)} />}
     </>
   )

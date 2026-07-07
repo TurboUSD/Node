@@ -79,10 +79,13 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
         setLoading(false)
       })
 
-    // Fetch adjacent block numbers for prev/next navigation
+    // Fetch adjacent block numbers for prev/next navigation. MUST use the public
+    // view (like the queries above) — the raw `mining_blocks` table is blocked by
+    // RLS for anonymous visitors, so those lookups returned null and the Prev/Next
+    // buttons were permanently disabled.
     Promise.all([
-      supabase.from('mining_blocks').select('block_number').eq('block_number', blockNum - 1).maybeSingle(),
-      supabase.from('mining_blocks').select('block_number').eq('block_number', blockNum + 1).maybeSingle(),
+      supabase.from('public_mining_feed').select('block_number').eq('block_number', blockNum - 1).maybeSingle(),
+      supabase.from('public_mining_feed').select('block_number').eq('block_number', blockNum + 1).maybeSingle(),
     ]).then(([prev, next]) => {
       setPrevNum(prev.data?.block_number ?? null)
       setNextNum(next.data?.block_number ?? null)

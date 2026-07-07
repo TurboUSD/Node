@@ -5,7 +5,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import SiteHeader from '@/components/SiteHeader'
-import { LocationNote } from '@/components/NodeBadges'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
 const C = {
@@ -545,7 +544,7 @@ function BlockTile({ block, circlePct, minsLeft }: {
             style={s.blockWinner}
           />
           {/* Country under the name */}
-          <div style={s.blockCountry}>{block.winner_country ? `${block.winner_country}*` : ' '}</div>
+          <div style={s.blockCountry}>{block.winner_country || ' '}</div>
         </>
       ) : (
         <>
@@ -1023,7 +1022,7 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
             {/* Location under the name — also shown on desktop leaderboard */}
             {node.country && (
               <div style={{ fontSize: 11, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {node.country}{node.city ? ` · ${node.city}` : ''}<LocationNote />
+                {node.country}{node.city ? ` · ${node.city}` : ''}
               </div>
             )}
           </div>
@@ -1063,7 +1062,7 @@ function NodeRowCard({ node, right, prefix, onClick }: {
         {node.country && (
           <div style={s.nodeMeta}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {node.country}{node.city ? ` · ${node.city}` : ''}<LocationNote />
+              {node.country}{node.city ? ` · ${node.city}` : ''}
             </span>
           </div>
         )}
@@ -1127,7 +1126,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
               )}
               {node.country && (
                 <span style={{ fontSize: 12, color: C.muted }}>
-                  {node.country}{node.city ? ` · ${node.city}` : ''}<LocationNote />
+                  {node.country}{node.city ? ` · ${node.city}` : ''}
                 </span>
               )}
             </div>

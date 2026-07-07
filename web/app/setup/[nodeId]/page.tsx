@@ -13,6 +13,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase, callFunction, FUNCTIONS_BASE_URL } from '@/lib/supabase'
+import { InfoModal } from '@/components/NodeBadges'
 import TickerBoard from './TickerBoard'
 
 // ── Brand tokens (mirrors treasury.turbousd.com dark theme) ──────────────────
@@ -77,31 +78,30 @@ interface NodeConfig {
 
 interface NodeStats {
   uptime_pct:    number
+  total_uptime_seconds: number | null
+  uptime_seconds: number | null
   blocks_won:    number
   windows_online: number
   total_tusd_earned: number
 }
 
-// ISO 3166-1 alpha-2 country list (abbreviated, add more as needed)
-const COUNTRIES: [string, string][] = [
-  ['', 'Select country…'],
-  ['AR', '🇦🇷 Argentina'], ['AU', '🇦🇺 Australia'], ['AT', '🇦🇹 Austria'],
-  ['BE', '🇧🇪 Belgium'], ['BR', '🇧🇷 Brazil'], ['CA', '🇨🇦 Canada'],
-  ['CL', '🇨🇱 Chile'], ['CO', '🇨🇴 Colombia'], ['HR', '🇭🇷 Croatia'],
-  ['CZ', '🇨🇿 Czech Republic'], ['DK', '🇩🇰 Denmark'], ['EG', '🇪🇬 Egypt'],
-  ['FI', '🇫🇮 Finland'], ['FR', '🇫🇷 France'], ['DE', '🇩🇪 Germany'],
-  ['GR', '🇬🇷 Greece'], ['HK', '🇭🇰 Hong Kong'], ['HU', '🇭🇺 Hungary'],
-  ['IN', '🇮🇳 India'], ['ID', '🇮🇩 Indonesia'], ['IE', '🇮🇪 Ireland'],
-  ['IL', '🇮🇱 Israel'], ['IT', '🇮🇹 Italy'], ['JP', '🇯🇵 Japan'],
-  ['KR', '🇰🇷 South Korea'], ['MX', '🇲🇽 Mexico'], ['NL', '🇳🇱 Netherlands'],
-  ['NZ', '🇳🇿 New Zealand'], ['NG', '🇳🇬 Nigeria'], ['NO', '🇳🇴 Norway'],
-  ['PL', '🇵🇱 Poland'], ['PT', '🇵🇹 Portugal'], ['RO', '🇷🇴 Romania'],
-  ['RU', '🇷🇺 Russia'], ['SA', '🇸🇦 Saudi Arabia'], ['SG', '🇸🇬 Singapore'],
-  ['ZA', '🇿🇦 South Africa'], ['ES', '🇪🇸 Spain'], ['SE', '🇸🇪 Sweden'],
-  ['CH', '🇨🇭 Switzerland'], ['TW', '🇹🇼 Taiwan'], ['TH', '🇹🇭 Thailand'],
-  ['TR', '🇹🇷 Turkey'], ['UA', '🇺🇦 Ukraine'], ['AE', '🇦🇪 UAE'],
-  ['GB', '🇬🇧 United Kingdom'], ['US', '🇺🇸 United States'], ['VE', '🇻🇪 Venezuela'],
-]
+// Verification steps — SAME text the device shows in its "Verified badge" popup.
+const VERIFY_STEPS =
+  'To get verified:\n' +
+  '1. Post a video on X showing this node running, tagging @turbousd\n' +
+  '2. Write your node name on paper, show it matches your screen\n' +
+  '3. Include the wallet holding your ₸USD\n' +
+  '4. We manually review and whitelist your node'
+
+function fmtUptime(secs: number): string {
+  if (secs <= 0) return '—'
+  if (secs < 60)    return `${secs}s`
+  if (secs < 3600)  return `${Math.floor(secs / 60)}m`
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
+  return `${Math.floor(secs / 86400)}d ${Math.floor((secs % 86400) / 3600)}h`
+}
+
+// (Country list removed: location is IP-derived + anonymized, never user-set.)
 
 // ── ENS resolution ────────────────────────────────────────────────────────────
 // Lets the NFT wallet field accept "tonysoprano.eth" and swap in the 0x
@@ -161,7 +161,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
     // Fetch stats from the directory view (includes uptime_pct)
     supabase
       .from('public_node_directory')
-      .select('uptime_pct, blocks_won, windows_online, total_tusd_earned')
+      .select('uptime_pct, total_uptime_seconds, uptime_seconds, blocks_won, windows_online, total_tusd_earned')
       .eq('node_code', nodeCode)
       .maybeSingle()
       .then(({ data }) => {
@@ -273,8 +273,8 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         bio:                   node.bio,
         wallet_address:        node.wallet_address,
         twitter_handle:        node.twitter_handle,
-        country:               node.country,
-        city:                  node.city,
+        // country/city are intentionally NOT sent: location is IP-derived and
+        // anonymized server-side, never user-editable.
         temp_unit:             node.temp_unit,
         date_format:           node.date_format,
         time_format:           node.time_format,
@@ -335,8 +335,6 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
   if (accessDenied) return <AccessDenied nodeCode={nodeCode} />
   if (!node)        return <NotFound nodeCode={nodeCode} />
 
-  const isProfileComplete = !!(node.wallet_address && node.display_name && node.country)
-
   return (
     <div style={s.root}>
       <Header nodeCode={node.node_code} isVerified={node.is_verified} isGenesis={node.is_genesis} stats={stats} />
@@ -346,11 +344,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
 
           {/* ── Profile ── */}
           <Section title="Profile" accent={C.green}>
-            {!isProfileComplete && (
-              <Banner color={C.yellow}>
-                Complete your profile to start receiving ₸USD rewards, wallet address is required for payouts.
-              </Banner>
-            )}
+            {!node.is_verified && <VerifyRewardsBanner />}
             <Field label="Node name" hint="Shown on your device and the public network page. Max 24 chars.">
               <input style={s.input} maxLength={24} placeholder="e.g. Satoshi's Garage"
                 value={node.display_name ?? ''}
@@ -363,24 +357,9 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
                 onChange={e => setNode({ ...node, bio: e.target.value })}
               />
             </Field>
-            <Row>
-              <Field label="Country">
-                <select style={s.input}
-                  value={node.country ?? ''}
-                  onChange={e => setNode({ ...node, country: e.target.value || null })}
-                >
-                  {COUNTRIES.map(([code, name]) => (
-                    <option key={code} value={code}>{name}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="City (optional)">
-                <input style={s.input} maxLength={64} placeholder="Madrid, London, …"
-                  value={node.city ?? ''}
-                  onChange={e => setNode({ ...node, city: e.target.value || null })}
-                />
-              </Field>
-            </Row>
+            {/* Location is NOT editable: it's derived from the node's IP and
+                anonymized to ~300 km before it's ever stored, so there is no
+                country/city field to set. The map/cards show that coarse value. */}
           </Section>
 
           {/* ── Rewards ── */}
@@ -822,12 +801,29 @@ function Header({ nodeCode, isVerified, stats }: {
       </header>
       {stats && (
         <div style={s.statsBar}>
-          <StatChip label="Uptime"   value={`${stats.uptime_pct}%`}  color={stats.uptime_pct >= 90 ? '#43e397' : stats.uptime_pct >= 60 ? '#ffcf72' : '#6e7280'} />
+          <StatChip label="Uptime"   value={fmtUptime(stats.total_uptime_seconds ?? stats.uptime_seconds ?? 0)} color="#d2d2d8" />
           <StatChip label="Earned"   value={`₸${stats.total_tusd_earned.toFixed(2)}`} color="#43e397" />
           <StatChip label="Blocks"   value={String(stats.blocks_won)}   color="#5b8dee" />
         </div>
       )}
     </>
+  )
+}
+
+// Shown until the node is verified: prompts the owner to verify to receive
+// rewards. "verified" is underlined and opens the same steps the device shows.
+function VerifyRewardsBanner() {
+  const [open, setOpen] = useState(false)
+  return (
+    <Banner color={C.yellow}>
+      Your node must be{' '}
+      <span
+        onClick={() => setOpen(true)}
+        style={{ textDecoration: 'underline', cursor: 'pointer', fontWeight: 700 }}
+      >verified</span>
+      {' '}to receive ₸USD rewards.
+      {open && <InfoModal title="Verify your node" body={VERIFY_STEPS} onClose={() => setOpen(false)} />}
+    </Banner>
   )
 }
 

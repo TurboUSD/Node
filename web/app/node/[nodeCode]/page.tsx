@@ -21,6 +21,7 @@ const C = {
   green:  '#43e397',
   yellow: '#ffcf72',
   blue:   '#5b8dee',
+  statVal:'#d2d2d8',   // unified stat value colour, matches the overlay card
 }
 
 interface NodeProfile {
@@ -36,11 +37,21 @@ interface NodeProfile {
 }
 
 interface NodeStats {
-  uptime_pct:        number
-  blocks_won:        number
-  total_tusd_earned: number
-  is_online:         boolean
-  last_seen_at:      string | null
+  uptime_pct:            number
+  total_uptime_seconds:  number | null
+  uptime_seconds:        number | null
+  blocks_won:            number
+  total_tusd_earned:     number
+  is_online:             boolean
+  last_seen_at:          string | null
+}
+
+function fmtUptime(secs: number): string {
+  if (secs <= 0) return '—'
+  if (secs < 60)    return `${secs}s`
+  if (secs < 3600)  return `${Math.floor(secs / 60)}m`
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
+  return `${Math.floor(secs / 86400)}d ${Math.floor((secs % 86400) / 3600)}h`
 }
 
 function timeSince(iso: string): string {
@@ -77,7 +88,7 @@ export default function PublicNodePage() {
       })
     supabase
       .from('public_node_directory')
-      .select('uptime_pct, blocks_won, total_tusd_earned, is_online, last_seen_at')
+      .select('uptime_pct, total_uptime_seconds, uptime_seconds, blocks_won, total_tusd_earned, is_online, last_seen_at')
       .eq('node_code', nodeCode)
       .maybeSingle()
       .then(({ data }) => { if (data) setStats(data as NodeStats) })
@@ -103,8 +114,7 @@ export default function PublicNodePage() {
   }
 
   const name = node.display_name || `Node ${node.node_code}`
-  const uptime = stats?.uptime_pct ?? 0
-  const uptimeColor = uptime >= 90 ? C.green : uptime >= 60 ? C.yellow : C.muted
+  const totalUptime = stats?.total_uptime_seconds ?? stats?.uptime_seconds ?? 0
   const location = [node.city, node.country].filter(Boolean).join(', ')
 
   return (
@@ -135,11 +145,12 @@ export default function PublicNodePage() {
 
         {node.bio && <p style={{ color: C.text, fontSize: 15, lineHeight: 1.7, margin: '0 0 20px' }}>{node.bio}</p>}
 
+        {/* Same four cards, order and colours as the overlay card. */}
         <div style={s.statsGrid}>
-          <Stat label="Uptime"  value={`${uptime}%`}                                        color={uptimeColor} />
-          <Stat label="Earned"  value={`₸${(stats?.total_tusd_earned ?? 0).toFixed(2)}`}    color={C.green} />
-          <Stat label="Blocks"  value={String(stats?.blocks_won ?? 0)}                       color={C.blue} />
-          <Stat label="Since"   value={joinDate(node.created_at)}                            color={C.yellow} />
+          <Stat label="Earned"  value={`₸${(stats?.total_tusd_earned ?? 0).toFixed(2)}`}    color={C.statVal} />
+          <Stat label="Blocks"  value={String(stats?.blocks_won ?? 0)}                       color={C.statVal} />
+          <Stat label="Uptime"  value={fmtUptime(totalUptime)}                               color={C.statVal} />
+          <Stat label="Since"   value={joinDate(node.created_at)}                            color={C.statVal} />
         </div>
       </div>
 
