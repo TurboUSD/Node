@@ -21,11 +21,11 @@ const C = {
   yellow:  '#ffcf72',
   red:     '#ff6b6b',
   bg:      '#000000',
-  card:    '#0c0c0c',
-  surface: '#141414',
-  border:  '#1c1c1c',
+  card:    '#121214',   // was #0c0c0c — cards were nearly invisible on black
+  surface: '#1b1b1e',   // was #141414
+  border:  '#2a2a2e',   // was #1c1c1c
   text:    '#e8e8e8',
-  muted:   '#6e7280',
+  muted:   '#9096a1',   // was #6e7280 — secondary text was too dark
 }
 
 const BLOCK_INTERVAL_MS = 60 * 60 * 1000
@@ -634,21 +634,21 @@ const s: Record<string, React.CSSProperties> = {
   // Blocks strip: mined lane | dashed divider | pending (fixed right)
   blockStrip: { display: 'flex', alignItems: 'stretch', padding: '4px 0 6px' },
   blockLane: {
-    display: 'flex', gap: 8, overflowX: 'auto', minWidth: 0, flex: 1,
+    display: 'flex', gap: 12, overflowX: 'auto', minWidth: 0, flex: 1,
     cursor: 'grab', scrollbarWidth: 'none' as const, msOverflowStyle: 'none' as const,
-    paddingBottom: 12, userSelect: 'none' as const,   // room for the 3D depth shadow
+    paddingBottom: 22, userSelect: 'none' as const,   // room for the deeper 3D shadow
   },
-  blockDivider: { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '4px 14px', opacity: 0.7, flexShrink: 0 },
+  blockDivider: { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '4px 12px', opacity: 0.7, flexShrink: 0 },
   blockTile: {
     minWidth: 92, padding: '10px 10px 9px', borderRadius: 8, textAlign: 'center', flexShrink: 0,
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, justifyContent: 'center',
   },
-  // mempool.space-style 3D block: visible green/amber "thickness" faces below +
-  // slight right offset for an isometric look (dark-on-black was invisible).
+  // mempool.space-style 3D block. Depth falls to the LEFT + down (negative x)
+  // with four stacked "thickness" layers — chunkier, less flat.
   blockMined:   { background: 'linear-gradient(160deg,#0c2417,rgba(39,93,59,0.6))', border: `1px solid ${C.green}66`,
-                  boxShadow: '2px 5px 0 #1a6640, 3px 9px 0 #0f4227, 4px 13px 14px rgba(0,0,0,0.6)' },
+                  boxShadow: '-3px 5px 0 #1e6e44, -6px 10px 0 #155232, -9px 15px 0 #0d3a23, -11px 20px 22px rgba(0,0,0,0.6)' },
   blockPending: { background: 'linear-gradient(160deg,#241a00,rgba(93,78,39,0.6))', border: `1px solid ${C.yellow}66`,
-                  boxShadow: '2px 5px 0 #6b571f, 3px 9px 0 #443713, 4px 13px 14px rgba(0,0,0,0.6)' },
+                  boxShadow: '-3px 5px 0 #7a6323, -6px 10px 0 #5a4917, -9px 15px 0 #3d3110, -11px 20px 22px rgba(0,0,0,0.6)' },
   blockNum:     { fontSize: 11, fontWeight: 700, color: '#c4c4cc', letterSpacing: 0.5 },
 
   miniMapWrap: {

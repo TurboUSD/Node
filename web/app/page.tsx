@@ -14,11 +14,12 @@ const C = {
   yellow:  '#ffcf72',
   red:     '#ff6b6b',
   bg:      '#000000',
-  card:    '#0c0c0c',
-  surface: '#141414',
-  border:  '#1c1c1c',
+  card:    '#121214',   // was #0c0c0c — cards were nearly invisible on black
+  surface: '#1b1b1e',   // was #141414
+  border:  '#2a2a2e',   // was #1c1c1c — edges now actually read
   text:    '#e8e8e8',
-  muted:   '#6e7280',
+  muted:   '#9096a1',   // was #6e7280 — secondary text was too dark to read
+  statVal: '#d2d2d8',   // unified stat value colour (slightly-muted white)
 }
 
 const BLOCK_INTERVAL_MS = 60 * 60 * 1000  // 1 hour
@@ -333,7 +334,7 @@ export default function NetworkPage() {
           </div>
           <div style={s.tickerDivider} />
           {pendingBlock && (
-            <div style={{ padding: '12px 10px 12px 6px', flexShrink: 0 }}>
+            <div style={{ padding: '12px 8px 26px 8px', flexShrink: 0 }}>
               <BlockTile block={pendingBlock} circlePct={circlePct} minsLeft={minsLeft} />
             </div>
           )}
@@ -1130,17 +1131,18 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
         </div>
 
         {node.bio && (
-          <p style={{ color: C.muted, fontSize: 14, lineHeight: 1.7, margin: '0 0 20px' }}>{node.bio}</p>
+          <p style={{ color: '#c6c6cd', fontSize: 14, lineHeight: 1.7, margin: '0 0 20px' }}>{node.bio}</p>
         )}
 
-        {/* Stats grid */}
+        {/* Stats grid — all four values share ONE muted-white colour (the old
+            per-tier green/blue/yellow made the row look random). */}
         <div style={s.detailGrid}>
-          <DetailStat label="Total earned" value={`₸${node.total_tusd_earned.toFixed(4)}`} color={C.green}  />
-          <DetailStat label="Blocks won"   value={String(node.blocks_won)}                 color={C.blue}   />
+          <DetailStat label="Total earned" value={`₸${node.total_tusd_earned.toFixed(4)}`} color={C.statVal} />
+          <DetailStat label="Blocks won"   value={String(node.blocks_won)}                 color={C.statVal} />
           <DetailStat label="Uptime"
             value={totalUptime(node) > 0 ? fmtUptimeSecs(totalUptime(node)) : '—'}
-            color={C.green} />
-          <DetailStat label="Since"        value={new Date(node.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} color={C.yellow} />
+            color={C.statVal} />
+          <DetailStat label="Since"        value={new Date(node.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} color={C.statVal} />
         </div>
 
         {/* Last block won */}
@@ -1166,7 +1168,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
         </button>
 
         {node.last_seen_at && (
-          <p style={{ fontSize: 11, color: C.muted, marginTop: 16, opacity: 0.5 }}>
+          <p style={{ fontSize: 11, color: C.muted, marginTop: 16 }}>
             Last seen {timeSince(node.last_seen_at)}
           </p>
         )}
@@ -1222,39 +1224,41 @@ const s: Record<string, React.CSSProperties> = {
   // divider + pending) sits CENTERED; when it grows past ~70% width it clips
   // on the left, keeping the newest blocks visible next to the divider.
   tickerMinedLane: {
-    display: 'flex', gap: 8, padding: '12px 8px', overflowX: 'auto' as const, overflowY: 'hidden' as const,
+    display: 'flex', gap: 14, padding: '12px 8px 26px', overflowX: 'auto' as const, overflowY: 'hidden' as const,
     minWidth: 0, maxWidth: 'calc(100% - 180px)',
     // Scrollbar hidden — the lane drag-scrolls with the mouse (see
     // laneDragStart) and swipes natively on touch.
     scrollbarWidth: 'none' as const, msOverflowStyle: 'none' as const,
     cursor: 'grab', userSelect: 'none' as const,
   },
-  tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '10px 16px', opacity: 0.75 },
+  // Symmetric margins so the mined block and the pending block sit the SAME
+  // distance from the dashed line (mined-side gap = 8+14, pending-side = 14+8).
+  tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '10px 14px', opacity: 0.75 },
 
   block: {
     minWidth: 100, height: 128, padding: '9px 9px 8px',
     borderRadius: 8, textAlign: 'center', flexShrink: 0,
     display: 'flex', flexDirection: 'column', alignItems: 'center',
-    // mempool.space-style chunky 3D block depth (stacked layers below).
-    marginBottom: 8,
+    // Extra bottom margin so the deeper 3D shadow isn't clipped by the lane.
+    marginBottom: 16,
   },
-  // mempool.space-style 3D block: visible green/amber "thickness" faces below
-  // (dark-on-black was invisible), slight right offset for an isometric look.
+  // mempool.space-style 3D block. Depth now falls to the LEFT + down (negative
+  // x) with FOUR stacked "thickness" layers for a chunkier, less-flat look.
   blockMined:   { background: 'linear-gradient(160deg,#0c2417,rgba(39,93,59,0.6))', border: `1px solid ${C.green}66`,
-                  boxShadow: '2px 5px 0 #1a6640, 3px 9px 0 #0f4227, 4px 13px 14px rgba(0,0,0,0.6)' },
+                  boxShadow: '-3px 5px 0 #1e6e44, -6px 10px 0 #155232, -9px 15px 0 #0d3a23, -11px 20px 22px rgba(0,0,0,0.6)' },
   blockPending: { background: 'linear-gradient(160deg,#241a00,rgba(93,78,39,0.6))', border: `1px solid ${C.yellow}66`,
-                  boxShadow: '2px 5px 0 #6b571f, 3px 9px 0 #443713, 4px 13px 14px rgba(0,0,0,0.6)' },
+                  boxShadow: '-3px 5px 0 #7a6323, -6px 10px 0 #5a4917, -9px 15px 0 #3d3110, -11px 20px 22px rgba(0,0,0,0.6)' },
   blockNum:     { fontSize: 12, fontWeight: 700, color: '#e8e8ea', letterSpacing: 0.5 },
-  blockAgo:     { fontSize: 9,  color: '#8a8f96', marginTop: 1, marginBottom: 2 },
+  blockAgo:     { fontSize: 9,  color: '#a4a8b2', marginTop: 1, marginBottom: 2 },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green, flex: 1, display: 'flex', alignItems: 'center' },
   blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', maxWidth: 92, textAlign: 'center' },
-  blockCountry: { fontSize: 9, color: '#8a8f96', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
+  blockCountry: { fontSize: 9, color: '#a4a8b2', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
 
   // Stats
   // nowrap + flexible pills: the three stats must share ONE line even on
   // narrow phones (the fixed 28px side padding used to push "Verified" down).
   statsBar: { display: 'flex', justifyContent: 'center', gap: 8, padding: '20px 12px 8px', flexWrap: 'nowrap' },
-  statPill: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center', flex: '1 1 0', maxWidth: 150, minWidth: 0 },
+  statPill: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: '10px 8px', textAlign: 'center', flex: '1 1 0', maxWidth: 150, minWidth: 0 },
 
   // Get notified banner — inside content div, matches content width automatically
   notifBanner: {
@@ -1281,7 +1285,7 @@ const s: Record<string, React.CSSProperties> = {
   nodeName:     { fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: C.text },
   verifiedBadge:{ color: C.blue, fontSize: 11, marginLeft: 6, fontWeight: 'normal' },
   genesisBadge: { fontSize: 11, marginLeft: 4 },
-  nodeCode:     { color: C.muted, fontSize: 10, marginLeft: 6, fontWeight: 'normal', opacity: 0.65 },
+  nodeCode:     { color: C.muted, fontSize: 10, marginLeft: 6, fontWeight: 'normal', opacity: 0.85 },
   nodeMeta:     { display: 'flex', gap: 8, fontSize: 13, color: C.muted, marginTop: 2, overflow: 'hidden' },
 
   // Leaderboard toggle

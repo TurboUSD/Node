@@ -14,10 +14,10 @@ import { VerifiedBadge, UnverifiedBadge, GenesisBadge } from '@/components/NodeB
 
 const C = {
   bg:     '#0a0a0a',
-  card:   '#111',
-  border: '#262626',
+  card:   '#141416',   // was #111
+  border: '#2a2a2e',
   text:   '#e8e8ea',
-  muted:  '#6e7280',
+  muted:  '#9096a1',   // was #6e7280 — secondary text was too dark
   green:  '#43e397',
   yellow: '#ffcf72',
   blue:   '#5b8dee',

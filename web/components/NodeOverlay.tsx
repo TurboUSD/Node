@@ -11,7 +11,9 @@ import { VerifiedBadge, UnverifiedBadge, GenesisBadge } from './NodeBadges'
 
 const C = {
   green: '#43e397', blue: '#5b8dee', yellow: '#ffcf72',
-  card: 'rgb(24, 24, 24)', border: '#262626', text: '#e8e8ea', muted: '#6e7280',
+  card: 'rgb(24, 24, 24)', border: '#2f2f33', text: '#e8e8ea',
+  muted: '#9096a1',      // was #6e7280 — secondary text was too dark
+  statVal: '#d2d2d8',    // unified stat value colour (slightly-muted white)
 }
 
 interface NodeRow {
@@ -117,10 +119,10 @@ export default function NodeOverlay({ nodeCode, onClose }: { nodeCode: string; o
             {node.bio && <p style={{ color: C.text, fontSize: 15, lineHeight: 1.7, margin: '0 0 20px' }}>{node.bio}</p>}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, borderTop: `1px solid ${C.border}`, paddingTop: 18 }}>
-              <Stat label="Earned" value={`₸${node.total_tusd_earned.toFixed(2)}`} color={C.green} />
-              <Stat label="Blocks" value={String(node.blocks_won)} color={C.blue} />
-              <Stat label="Uptime" value={fmtUptime(totalUptime)} color={C.green} />
-              <Stat label="Since" value={joinDate(node.created_at)} color={C.yellow} />
+              <Stat label="Earned" value={`₸${node.total_tusd_earned.toFixed(2)}`} color={C.statVal} />
+              <Stat label="Blocks" value={String(node.blocks_won)} color={C.statVal} />
+              <Stat label="Uptime" value={fmtUptime(totalUptime)} color={C.statVal} />
+              <Stat label="Since" value={joinDate(node.created_at)} color={C.statVal} />
             </div>
 
             <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
