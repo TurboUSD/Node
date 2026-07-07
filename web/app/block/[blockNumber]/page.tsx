@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import NodeOverlay from '@/components/NodeOverlay'
 
 const C = {
   green:   '#43e397',
@@ -56,9 +57,16 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
   const [loading, setLoading] = useState(true)
   const [prevNum, setPrevNum] = useState<number | null>(null)
   const [nextNum, setNextNum] = useState<number | null>(null)
+  const [tipNum,  setTipNum]  = useState<number | null>(null)   // latest mined block → depth
+  const [overlayCode, setOverlayCode] = useState<string | null>(null)
 
   useEffect(() => {
     if (isNaN(blockNum)) { setLoading(false); return }
+
+    // Latest mined block number → block "depth" (how many blocks on top), mempool-style.
+    supabase.from('public_mining_feed').select('block_number').not('mined_at', 'is', null)
+      .order('block_number', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => setTipNum(data?.block_number ?? null))
 
     supabase
       .from('public_mining_feed')
@@ -116,6 +124,11 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
             {/* Main grid */}
             <div style={s.card}>
               <Row label="Block"        value={`#${block.block_number}`} mono />
+              {tipNum != null && (
+                <Row label="Depth"      value={tipNum - block.block_number === 0
+                                                 ? 'Chain tip (0 blocks deep)'
+                                                 : `${tipNum - block.block_number} block${tipNum - block.block_number !== 1 ? 's' : ''} deep`} />
+              )}
               <Row label="Timestamp"    value={formatTs(block.mined_at)} />
               <Row label="Reward"       value={`${block.reward_tusd} ₸USD`} color={C.green} />
               <Row label="Candidates"   value={block.candidates_count != null ? `${block.candidates_count} node${block.candidates_count !== 1 ? 's' : ''} online` : '—'} />
@@ -124,9 +137,12 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
                 value={
                   block.winner_node_code ? (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <a href={`/setup/${block.winner_node_code}`} style={s.link}>
-                        {block.winner_display_name || block.winner_node_code}
-                      </a>
+                      {/* Tap the name (or the id when there's no name) → node card overlay */}
+                      <button onClick={() => setOverlayCode(block.winner_node_code)} style={s.nameBtn}>
+                        {block.winner_display_name
+                          ? <>{block.winner_display_name} <span style={{ color: C.muted, fontWeight: 400 }}>({block.winner_node_code})</span></>
+                          : block.winner_node_code}
+                      </button>
                       {block.winner_is_verified && <span style={s.verBadge}>✓ verified</span>}
                       {block.winner_is_genesis   && <span style={s.genBadge}>⚡ genesis</span>}
                     </span>
@@ -175,6 +191,8 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
           </>
         )}
       </div>
+
+      {overlayCode && <NodeOverlay nodeCode={overlayCode} onClose={() => setOverlayCode(null)} />}
     </div>
   )
 }
@@ -237,6 +255,7 @@ const s: Record<string, React.CSSProperties> = {
   genBadge: { fontSize: 11, color: C.yellow, fontWeight: 'bold' },
 
   link:     { color: C.green, textDecoration: 'none', fontWeight: 600 },
+  nameBtn:  { background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: C.green, fontWeight: 600, fontSize: 14, fontFamily: 'inherit' },
   hashLink: { color: C.blue, textDecoration: 'none', fontFamily: 'monospace', fontSize: 13 },
   code:     { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '2px 5px', fontFamily: 'monospace', fontSize: 12 },
 
@@ -244,6 +263,7 @@ const s: Record<string, React.CSSProperties> = {
   btn: { display: 'inline-block', padding: '10px 20px', border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, textDecoration: 'none', fontSize: 14, marginTop: 16 },
 
   navRow:         { display: 'flex', justifyContent: 'space-between', gap: 12 },
-  navBtn:         { padding: '10px 18px', background: '#1e1e24', border: '1px solid #4a4a52', borderRadius: 8, color: '#ffffff', textDecoration: 'none', fontSize: 13, fontWeight: 700, display: 'inline-block', cursor: 'pointer' },
-  navBtnDisabled: { padding: '10px 18px', background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 13, opacity: 0.4, display: 'inline-block' },
+  // Clearer, in the blue tone of the "how the winner was chosen" box.
+  navBtn:         { padding: '11px 20px', background: `${C.blue}22`, border: `1px solid ${C.blue}66`, borderRadius: 8, color: '#dbe7ff', textDecoration: 'none', fontSize: 14, fontWeight: 700, display: 'inline-block', cursor: 'pointer' },
+  navBtnDisabled: { padding: '11px 20px', background: `${C.blue}08`, border: `1px solid ${C.blue}20`, borderRadius: 8, color: C.muted, fontSize: 14, fontWeight: 700, opacity: 0.5, display: 'inline-block' },
 }

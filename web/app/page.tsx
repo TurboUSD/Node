@@ -51,6 +51,7 @@ interface MiningBlock {
   reward_tusd:         number
   winner_display_name: string | null
   winner_node_code:    string | null
+  winner_country?:     string | null   // shown under the winner name on mined tiles
   mined_at:            string | null
   created_at?:         string | null   // when the block was opened (pending countdown)
   candidates_count:    number | null
@@ -272,7 +273,7 @@ export default function NetworkPage() {
 
   const leaderboard = leaderSort === 'rewards'
     ? [...nodes].sort((a, b) => b.total_tusd_earned - a.total_tusd_earned)
-    : [...nodes].sort((a, b) => b.uptime_pct - a.uptime_pct)
+    : [...nodes].sort((a, b) => totalUptime(b) - totalUptime(a))
 
   // Ticker layout: mined blocks flow on the LEFT (newest pushes the rest
   // leftwards), the pending block sits FIXED on the right behind a dashed
@@ -396,11 +397,11 @@ export default function NetworkPage() {
                   />
                   <LeaderColumn
                     title="Uptime"
-                    nodes={[...nodes].sort((a, b) => b.uptime_pct - a.uptime_pct)}
+                    nodes={[...nodes].sort((a, b) => totalUptime(b) - totalUptime(a))}
                     right={(node: NodeRow) => (
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 'bold', color: node.uptime_pct >= 90 ? C.green : node.uptime_pct >= 60 ? C.yellow : C.muted }}>
-                          {node.uptime_pct}%
+                        <div style={{ fontSize: 13, fontWeight: 'bold', color: node.is_online ? C.green : C.muted }}>
+                          {fmtUptimeSecs(totalUptime(node))}
                         </div>
                         <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>uptime</div>
                       </div>
@@ -424,8 +425,8 @@ export default function NetworkPage() {
                               <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{node.blocks_won} blocks</div>
                             </div>
                           : <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                              <div style={{ fontSize: 14, fontWeight: 'bold', color: node.uptime_pct >= 90 ? C.green : node.uptime_pct >= 60 ? C.yellow : C.muted }}>
-                                {node.uptime_pct}%
+                              <div style={{ fontSize: 14, fontWeight: 'bold', color: node.is_online ? C.green : C.muted }}>
+                                {fmtUptimeSecs(totalUptime(node))}
                               </div>
                               <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>uptime</div>
                             </div>
@@ -475,12 +476,38 @@ export default function NetworkPage() {
           from { transform: translateX(48px); opacity: 0; }
           to   { transform: translateX(0);    opacity: 1; }
         }
+        /* Winner-name marquee: text is duplicated, so -50% loops seamlessly. */
+        @keyframes tickerMarquee {
+          from { transform: translateX(0); }
+          to   { transform: translateX(-50%); }
+        }
         body { margin: 0; background: #000; }
         button { transition: opacity .15s; }
         button:hover { opacity: .8; }
         a { transition: opacity .15s; }
         a:hover { opacity: .8; }
       `}</style>
+    </div>
+  )
+}
+
+// Horizontally-scrolling text ONLY when it overflows its container (e.g. a long
+// winner name on a narrow block tile). Otherwise renders static.
+function Marquee({ text, style }: { text: string; style?: React.CSSProperties }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [overflow, setOverflow] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (el) setOverflow(el.scrollWidth > el.clientWidth + 2)
+  }, [text])
+  return (
+    <div style={{ overflow: 'hidden', width: '100%', ...style }}>
+      <div ref={ref} style={{
+        whiteSpace: 'nowrap', display: 'inline-block',
+        animation: overflow ? 'tickerMarquee 7s linear infinite' : 'none',
+      }}>
+        {text}{overflow && <span>{'  ·  '}{text}</span>}
+      </div>
     </div>
   )
 }
@@ -503,10 +530,17 @@ function BlockTile({ block, circlePct, minsLeft }: {
 
       {mined ? (
         <>
+          {/* When it was mined */}
+          <div style={s.blockAgo}>{block.mined_at ? timeSince(block.mined_at) : ''}</div>
           {/* Reward — center, prominent */}
           <div style={s.blockReward}>₸{block.reward_tusd}</div>
-          {/* Winner — bottom */}
-          <div style={s.blockWinner}>{block.winner_display_name ?? (block.winner_node_code ? `#${block.winner_node_code}` : '—')}</div>
+          {/* Winner name (or #id if no name), marquee if it doesn't fit */}
+          <Marquee
+            text={block.winner_display_name || (block.winner_node_code ? `#${block.winner_node_code}` : '—')}
+            style={s.blockWinner}
+          />
+          {/* Country under the name */}
+          {block.winner_country && <div style={s.blockCountry}>{block.winner_country}</div>}
         </>
       ) : (
         /* Pending: circular countdown */
@@ -749,7 +783,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
               </div>
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
                 <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Uptime</div>
-                <div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-top:2px">${node.uptime_pct}%</div>
+                <div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-top:2px">${fmtUptimeSecs(totalUptime(node))}</div>
               </div>
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
                 <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Member</div>
@@ -1198,15 +1232,21 @@ const s: Record<string, React.CSSProperties> = {
   tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '10px 16px', opacity: 0.75 },
 
   block: {
-    minWidth: 96, height: 110, padding: '10px 10px 8px',
+    minWidth: 100, height: 128, padding: '9px 9px 8px',
     borderRadius: 8, textAlign: 'center', flexShrink: 0,
     display: 'flex', flexDirection: 'column', alignItems: 'center',
+    // mempool.space-style chunky 3D block depth (stacked layers below).
+    marginBottom: 8,
   },
-  blockMined:   { background: 'linear-gradient(160deg,#081a10,rgba(39,93,59,0.57))', border: `1px solid ${C.green}55` },
-  blockPending: { background: 'linear-gradient(160deg,#1a1300,rgba(93,78,39,0.57))', border: `1px solid ${C.yellow}55` },
-  blockNum:     { fontSize: 12, fontWeight: 700, color: '#c4c4cc', letterSpacing: 0.5, marginBottom: 4 },
+  blockMined:   { background: 'linear-gradient(160deg,#0c2417,rgba(39,93,59,0.6))', border: `1px solid ${C.green}66`,
+                  boxShadow: `0 3px 0 rgba(20,58,38,0.95), 0 6px 0 rgba(11,36,24,0.95), 0 9px 12px rgba(0,0,0,0.5)` },
+  blockPending: { background: 'linear-gradient(160deg,#241a00,rgba(93,78,39,0.6))', border: `1px solid ${C.yellow}66`,
+                  boxShadow: `0 3px 0 rgba(60,50,20,0.95), 0 6px 0 rgba(38,32,12,0.95), 0 9px 12px rgba(0,0,0,0.5)` },
+  blockNum:     { fontSize: 12, fontWeight: 700, color: '#e8e8ea', letterSpacing: 0.5 },
+  blockAgo:     { fontSize: 9,  color: '#8a8f96', marginTop: 1, marginBottom: 2 },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green, flex: 1, display: 'flex', alignItems: 'center' },
-  blockWinner: { fontSize: 12, fontWeight: 600, color: '#e8e8e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 96 },
+  blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', maxWidth: 92, textAlign: 'center' },
+  blockCountry: { fontSize: 9, color: '#8a8f96', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
 
   // Stats
   // nowrap + flexible pills: the three stats must share ONE line even on
