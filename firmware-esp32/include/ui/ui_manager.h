@@ -901,6 +901,15 @@ private:
                                                      // reference (Arduino_GFX uses the
                                                      // default 0 for this panel).
         panelCfg.flags.fb_in_psram = 1;
+        // BOUNCE BUFFER (the flicker fix): the framebuffer lives in PSRAM, and
+        // without this the LCD's DMA reads it DIRECTLY every frame. While a
+        // background task hammers PSRAM (decoding NFT artwork), those reads get
+        // starved and the panel underruns → the whole screen tears/flickers.
+        // A pair of small SRAM bounce buffers decouples the panel from PSRAM
+        // contention: the driver DMA-copies PSRAM→SRAM ahead of the scan-out, so
+        // the display keeps a steady feed no matter what the CPU is doing.
+        // 10 lines is the size Espressif recommends for 480-wide panels.
+        panelCfg.bounce_buffer_size_px = LCD_H_RES * 10;
 
         ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
         ESP_ERROR_CHECK(esp_lcd_panel_reset(_lcdPanel));
@@ -1660,41 +1669,6 @@ private:
         if (!storage.getScreenCarousel())
             lv_obj_add_flag(sCarouselSecsRow, LV_OBJ_FLAG_HIDDEN);
 
-        // ── FIRMWARE & UPDATES (kept high in the popup so the "Check for updates"
-        // button is always visible without scrolling to the very bottom) ──
-        lv_obj_t* fwTitle = lv_label_create(card);
-        lv_label_set_text(fwTitle, "FIRMWARE & UPDATES");
-        lv_obj_set_style_text_color(fwTitle, lv_color_hex(0x9a9a9e), 0);
-
-        // Firmware versions (ESP32 = the OTA-managed image; RP2040 = the paired
-        // co-processor build, see config.h).
-        lv_obj_t* verInfo = lv_label_create(card);
-        {
-            // Real RP2040 version from its version frame; fall back to the paired
-            // build constant until the first frame arrives.
-            String rpv = rp2040Link.rpVersion();
-            char verBuf[80];
-            snprintf(verBuf, sizeof(verBuf), "Firmware  ESP32 v%s   RP2040 v%s",
-                     FIRMWARE_VERSION, rpv.length() ? rpv.c_str() : RP2040_FIRMWARE_VERSION);
-            lv_label_set_text(verInfo, verBuf);
-        }
-        lv_obj_set_style_text_color(verInfo, lv_color_hex(0x6a6a6e), 0);
-        lv_obj_set_style_text_font(verInfo, &lv_font_montserrat_10, 0);
-        lv_label_set_long_mode(verInfo, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(verInfo, LV_PCT(100));
-        lv_obj_set_style_text_align(verInfo, LV_TEXT_ALIGN_CENTER, 0);
-
-        // "Check for updates" → requests an OTA check on the network thread; the
-        // main loop shows the install badge if a newer ESP32 image exists, or an
-        // "up to date" bar otherwise. The install itself is the existing badge flow.
-        lv_obj_t* otaBtn = addModalButton(card, "CHECK FOR UPDATES", true);
-        static lv_obj_t* sOtaCard; sOtaCard = card;
-        lv_obj_add_event_cb(otaBtn, [](lv_event_t* e) {
-            UiManager* self = (UiManager*)lv_event_get_user_data(e);
-            if (self) { self->otaCheckRequested = true; self->showOtaInfo("Checking for updates\xE2\x80\xA6"); }
-            closeModal(sOtaCard);
-        }, LV_EVENT_CLICKED, this);
-
         // Button reference (informational).
         lv_obj_t* btnInfo = lv_label_create(card);
         lv_label_set_text(btnInfo,
@@ -1726,6 +1700,36 @@ private:
         lv_label_set_long_mode(diagInfo, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(diagInfo, LV_PCT(100));
         lv_obj_set_style_text_align(diagInfo, LV_TEXT_ALIGN_CENTER, 0);
+
+        // ── FIRMWARE & UPDATES (at the bottom; the card scrolls so it's reachable) ──
+        lv_obj_t* verInfo = lv_label_create(card);
+        {
+            String rpv = rp2040Link.rpVersion();
+            char verBuf[80];
+            snprintf(verBuf, sizeof(verBuf), "Firmware  ESP32 v%s   RP2040 v%s",
+                     FIRMWARE_VERSION, rpv.length() ? rpv.c_str() : RP2040_FIRMWARE_VERSION);
+            lv_label_set_text(verInfo, verBuf);
+        }
+        lv_obj_set_style_text_color(verInfo, lv_color_hex(0x6a6a6e), 0);
+        lv_obj_set_style_text_font(verInfo, &lv_font_montserrat_10, 0);
+        lv_label_set_long_mode(verInfo, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(verInfo, LV_PCT(100));
+        lv_obj_set_style_text_align(verInfo, LV_TEXT_ALIGN_CENTER, 0);
+
+        // Tappable "Check for updates" link (WiFi OTA, no USB). A plain clickable
+        // label rather than a big button, per request — sits under the versions.
+        lv_obj_t* otaLink = lv_label_create(card);
+        lv_label_set_text(otaLink, "Check for updates \xC2\xBB");
+        lv_obj_set_style_text_color(otaLink, lv_color_hex(0x3aff7a), 0);
+        lv_obj_set_style_text_font(otaLink, &lv_font_montserrat_12, 0);
+        lv_obj_add_flag(otaLink, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(otaLink, 10);   // easier to tap
+        static lv_obj_t* sOtaCard; sOtaCard = card;
+        lv_obj_add_event_cb(otaLink, [](lv_event_t* e) {
+            UiManager* self = (UiManager*)lv_event_get_user_data(e);
+            if (self) { self->otaCheckRequested = true; self->showOtaInfo("Checking for updates\xE2\x80\xA6"); }
+            closeModal(sOtaCard);
+        }, LV_EVENT_CLICKED, this);
 
         lv_obj_t* closeBtn = addModalButton(card, "CLOSE", false);
         static lv_obj_t* sCard; sCard = card;

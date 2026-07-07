@@ -213,7 +213,11 @@ static uint8_t* fetchRgb565(const char* url, int maxW, int maxH,
             http.end();
             return nullptr;
         }
-        const size_t CAP = 300 * 1024;
+        // 640 KB: some marketplace CDNs return a big high-quality JPEG even at
+        // ?w=512 (e.g. Citizen of Vibetown was ~430 KB and got rejected at the
+        // old 300 KB cap → those cells never showed art). The download buffer is
+        // temporary PSRAM; the decoded bitmap is still shrunk to the cell size.
+        const size_t CAP = 640 * 1024;
         int declared = http.getSize();
         if (declared > (int)CAP) { Log.printf("img[%s] too big (%d B)\n", tag, declared); http.end(); return nullptr; }
         body = _alloc(declared > 0 ? declared : CAP);

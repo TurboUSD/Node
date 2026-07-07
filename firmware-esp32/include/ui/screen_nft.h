@@ -436,8 +436,21 @@ private:
         int       nftStart  = 0;        // index of first NFT in this cell's "group"
         int       nftCount  = 0;        // how many NFTs are in this cell's group
         int       nftCurrent= 0;        // which one is displayed right now
+        const int* nftOrder = nullptr;  // explicit index list (1x1 carousel); null = contiguous [nftStart..)
     } _cells[9];
     int _cellCount = 0;
+    // 1x1 carousel index list: the VISIBLE NFTs (hidden collections filtered,
+    // manual order applied) so 1x1 matches the multi-cell grids instead of
+    // cycling the raw cache (which showed hidden collections in floor order).
+    int _oneUpOrder[NFT_MAX_ITEMS] = {};
+
+    // Resolve which cache index a cell shows at carousel position `cur`. Honours
+    // an explicit nftOrder list (1x1) or the contiguous [nftStart, +count) range.
+    int _cellNftIdx(const CellWidgets& cw, int cur) const {
+        if (cw.nftCount <= 0) return cw.nftStart;
+        int off = ((cur % cw.nftCount) + cw.nftCount) % cw.nftCount;
+        return cw.nftOrder ? cw.nftOrder[off] : (cw.nftStart + off);
+    }
 
     // One collection group in the (floor-sorted) cache: contiguous run.
     struct NftGrp {
@@ -856,7 +869,7 @@ private:
             for (int i = 0; i < _cellCount; i++) {
                 CellWidgets& cw = _cells[i];
                 if (!cw.container || cw.nftCount <= 0) continue;
-                int idx = cw.nftStart + (cw.nftCurrent % cw.nftCount);
+                int idx = _cellNftIdx(cw, cw.nftCurrent);
                 if (idx < 0 || idx >= (int)_nftCache.size()) continue;
                 const uint8_t* want = _nftCache[idx].px[gCls];
                 if (want && want != cw.shownPx) _refreshCell(i);
@@ -1175,7 +1188,24 @@ private:
         int total = (int)_nftCache.size();
         int gStart[9], gCount[9], groups = 0;
         if (n == 1) {
-            gStart[0] = 0; gCount[0] = total; groups = 1;
+            // 1x1: ONE carousel over ALL VISIBLE NFTs, respecting the hidden list
+            // + manual order exactly like 2x2/3x3. The old code used the raw cache
+            // (gStart=0,count=total), so it showed HIDDEN collections and in a
+            // different order than the multi-cell grids.
+            int cnt = 0;
+            NftGrp* g = _allocGroups();
+            if (g) {
+                int gn = _buildGroups(g, NFT_MAX_COLLECTIONS, NFT_MAX_COLLECTIONS);
+                for (int k = 0; k < gn; k++)
+                    for (int j = 0; j < g[k].count && cnt < NFT_MAX_ITEMS; j++)
+                        _oneUpOrder[cnt++] = g[k].start + j;
+                free(g);
+            }
+            if (cnt == 0) { _oneUpOrder[cnt++] = 0; }   // safety: never empty
+            // nftStart is unused for the 1x1 cell (nftOrder overrides it), but
+            // point it at the first visible item so the /logs diagnostic below
+            // names the right collection.
+            gStart[0] = _oneUpOrder[0]; gCount[0] = cnt; groups = 1;
         } else {
             NftGrp* g = (NftGrp*)heap_caps_malloc(sizeof(NftGrp) * NFT_MAX_COLLECTIONS,
                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1207,7 +1237,8 @@ private:
         }
 
         for (int ci = 0; ci < groups; ci++)
-            _buildCell(ci, ci, side, cellW, cellH, gStart[ci], gCount[ci]);
+            _buildCell(ci, ci, side, cellW, cellH, gStart[ci], gCount[ci],
+                       (n == 1) ? _oneUpOrder : nullptr);
         _cellCount = groups;
         _slideshowSecs  = storage.getNftSlideshowSecs();
         _slideshowCount = _slideshowSecs;
@@ -1215,11 +1246,13 @@ private:
         _startImageFetch();   // download/decode artwork for what's now visible
     }
 
-    void _buildCell(int idx, int pos, int side, lv_coord_t w, lv_coord_t h, int nftStart, int nftCount) {
+    void _buildCell(int idx, int pos, int side, lv_coord_t w, lv_coord_t h, int nftStart, int nftCount,
+                    const int* nftOrder = nullptr) {
         CellWidgets& cw = _cells[idx];
         cw.nftStart   = nftStart;
         cw.nftCount   = max(1, nftCount);
         cw.nftCurrent = 0;
+        cw.nftOrder   = nftOrder;   // 1x1: explicit visible-index list; else nullptr
 
         int col = pos % side;
         int row = pos / side;
@@ -1271,7 +1304,7 @@ private:
         // full clean is needed. On a grid rebuild _cells[i]={} nulls every
         // pointer and the container is recreated, so nothing dangles.
 
-        int nftIdx = cw.nftStart + (cw.nftCurrent % cw.nftCount);
+        int nftIdx = _cellNftIdx(cw, cw.nftCurrent);
         if (nftIdx >= (int)_nftCache.size()) nftIdx = (int)_nftCache.size() - 1;
         if (nftIdx < 0) return;
 
@@ -1556,7 +1589,7 @@ private:
         _refreshCell(idx);
         // The first NFT_IMG_MAX_FETCH images load eagerly; anything beyond
         // that gets fetched the moment the carousel reaches it.
-        int nftIdx = cw.nftStart + (cw.nftCurrent % cw.nftCount);
+        int nftIdx = _cellNftIdx(cw, cw.nftCurrent);
         int gCls = _gridClass();
         if (nftIdx < (int)_nftCache.size() && !_nftCache[nftIdx].px[gCls]
             && !_nftCache[nftIdx].tried[gCls])
@@ -1584,7 +1617,7 @@ private:
             CellWidgets& cw = _cells[i];
             if (!cw.container || cw.nftCount <= 1) continue;
             for (int step = 1; step < cw.nftCount; step++) {
-                int cand = cw.nftStart + ((cw.nftCurrent + step) % cw.nftCount);
+                int cand = _cellNftIdx(cw, cw.nftCurrent + step);
                 if (cand >= 0 && cand < (int)_nftCache.size() && _nftCache[cand].px[gCls]) {
                     cw.nftCurrent = (cw.nftCurrent + step) % cw.nftCount;
                     _refreshCell(i);
@@ -1981,7 +2014,7 @@ private:
         int total = (int)self->_nftCache.size();
         for (int c = 0; c < self->_cellCount && on < NFT_IMG_MAX_FETCH; c++) {
             CellWidgets& cw = self->_cells[c];
-            int i = cw.nftStart + (cw.nftCount > 0 ? (cw.nftCurrent % cw.nftCount) : 0);
+            int i = self->_cellNftIdx(cw, cw.nftCurrent);
             if (i >= 0 && i < total) order[on++] = i;
         }
         for (int i = 0; i < total && on < NFT_IMG_MAX_FETCH; i++) {

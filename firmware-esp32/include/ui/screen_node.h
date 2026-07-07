@@ -585,10 +585,9 @@ private:
         lv_label_set_text(w.rewardLabel, rewardBuf);
         lv_label_set_text(w.minerNameLabel, minerName.length() ? minerName.c_str() : "--");
         if (w.minerCountryLabel) {
-            // Trailing * = anonymized location (never the real one; ~300 km /
-            // country level, owner-configurable). Explained on the web.
-            String cc = country.length() ? (country + "*") : String("");
-            lv_label_set_text(w.minerCountryLabel, cc.c_str());
+            // Location is always the anonymized (~300 km) IP-derived country; no
+            // marker needed here (the "i" info note lives on the web cards).
+            lv_label_set_text(w.minerCountryLabel, country.c_str());
         }
         lv_obj_clear_flag(w.container, LV_OBJ_FLAG_HIDDEN);
 
