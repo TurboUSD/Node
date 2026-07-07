@@ -93,7 +93,11 @@ inline void _sendBmp() {
     s_srv->setContentLength(66 + pxBytes);
     s_srv->send(200, "image/bmp", "");
     WiFiClient c = s_srv->client();
-    c.write(hd, sizeof(hd));
+    // Write the header robustly too (short writes are possible under load).
+    for (size_t ho = 0; ho < sizeof(hd) && c.connected(); ) {
+        size_t wr = c.write(hd + ho, sizeof(hd) - ho);
+        if (wr > 0) ho += wr; else delay(2);
+    }
     const uint8_t* p = (const uint8_t*)fb;
     // Streaming ~460 KB over WiFi blocks the main loop for ~150 ms, during which
     // lv_timer_handler() never runs — the UI froze and then jumped, which read
@@ -103,11 +107,22 @@ inline void _sendBmp() {
     // is a plain sequential call, not re-entrancy. Worst case the capture tears
     // one frame — already an accepted tradeoff for this debug aid.
     uint32_t lastLv = millis();
+    uint32_t stallStart = millis();
     for (uint32_t off = 0; off < pxBytes; ) {
+        if (!c.connected()) break;               // client truly gone
         size_t n = min((uint32_t)8192, pxBytes - off);
         size_t wr = c.write(p + off, n);
-        if (wr == 0) break;                      // client gone
-        off += wr;
+        if (wr > 0) {
+            off += wr;
+            stallStart = millis();
+        } else {
+            // TCP send buffer momentarily full: retry instead of aborting. A
+            // premature break sent FEWER bytes than Content-Length, so Chrome
+            // never finalized the file and left it as ".crdownload". Only give
+            // up after a real ~8 s stall (the client hung).
+            if (millis() - stallStart > 8000) break;
+            delay(2);
+        }
         if (millis() - lastLv >= 20) { lv_timer_handler(); lastLv = millis(); }
         delay(0);                                // feed the watchdog
     }
@@ -177,7 +192,9 @@ inline void _sendLogPage() {
         "<div id='bar'><span class='t'>TurboUSD logs</span>"
         "<span style='color:#6a6a6e;font-size:11px'>ESP32 v" FIRMWARE_VERSION
         " &middot; RP2040 v" RP2040_FIRMWARE_VERSION "</span>"
-        "<b id='st'>live</b><span class='sp'></span>"
+        "<b id='st'>live</b>"
+        "<span id='clk' style='color:#7fd0a0;font-size:12px;font-weight:600'></span>"
+        "<span class='sp'></span>"
         "<button id='pz'>Pause</button>"
         "<button id='bt'>Bottom &darr;</button>"
         "<a href='/log.txt?dl=1' download='turbousd-log.txt'>&#11015; Download</a>"
@@ -193,6 +210,8 @@ inline void _sendLogPage() {
         "pz.onclick=()=>{paused=!paused;pz.textContent=paused?'Resume':'Pause';"
         "st.textContent=paused?'paused':'live';st.style.color=paused?'#ffcf72':'#3aff7a'};"
         "document.getElementById('bt').onclick=()=>{follow=true;scrollTo(0,document.body.scrollHeight)};"
+        "const clk=document.getElementById('clk');"
+        "function tk(){clk.textContent=new Date().toLocaleTimeString()}tk();setInterval(tk,1000);"
         "u();setInterval(u,1500);</script></body></html>");
 }
 

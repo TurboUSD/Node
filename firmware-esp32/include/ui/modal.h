@@ -274,7 +274,9 @@ inline void _stepperPaintValue(StepperState* s) {
     char b[16]; snprintf(b, sizeof(b), "%d%s", s->val, s->suffix);
     lv_label_set_text(s->valLbl, b);
 }
-inline void addStepperRow(lv_obj_t* card, const char* label, int initial,
+// Returns the row container so the caller can hide/show it (e.g. hide the
+// seconds picker while its parent toggle is OFF).
+inline lv_obj_t* addStepperRow(lv_obj_t* card, const char* label, int initial,
                           int minV, int maxV, int step, const char* suffix,
                           void (*onChange)(int newVal)) {
     lv_obj_t* row = lv_obj_create(card);
@@ -359,6 +361,7 @@ inline void addStepperRow(lv_obj_t* card, const char* label, int initial,
         s->val += s->step; if (s->val > s->maxV) s->val = s->maxV;
         _stepperPaintValue(s); s->onChange(s->val);
     }, LV_EVENT_CLICKED, nullptr);
+    return row;
 }
 
 inline void addPrefToggleRow(lv_obj_t* card, const char* label, const char* leftLabel, const char* rightLabel,

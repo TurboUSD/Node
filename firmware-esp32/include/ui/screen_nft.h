@@ -1060,7 +1060,7 @@ private:
             for (int cls = 1; cls <= 2; cls++) {
                 if (!_entitledSlot(cls, i)) continue;
                 size_t blobLen = 0;
-                uint8_t* blob = diskcache::loadAlloc("dec2", _decKey(_nftCache[i].image_url, cls, _nftCache[i].bg_color).c_str(), &blobLen);
+                uint8_t* blob = diskcache::loadAlloc("dec3", _decKey(_nftCache[i].image_url, cls, _nftCache[i].bg_color).c_str(), &blobLen);
                 if (!blob) continue;
                 uint16_t w = 0, h = 0;
                 if (blobLen > 4) { memcpy(&w, blob, 2); memcpy(&h, blob + 2, 2); }
@@ -2018,20 +2018,23 @@ private:
                     bool fromDisk = diskcache::has("img", it.image_url);
                     uint16_t w = 0, h = 0;
                     // Ordinals (ordinals.com/content/…) serve the RAW inscription.
-                    // NodeMonkes etc. are tiny pixel art (28x28); weserv won't enlarge
-                    // past native, so the proxy returns the crisp 28px PNG and the
-                    // NEAREST scaler blows it up with hard edges — exactly how satflow
-                    // and other marketplaces render it (bilinear here made it a blurry
-                    // "low quality" blob). We still route through the wsrv proxy (PNG,
-                    // no JPEG artifacts on flat colours) and key the cache by the PROXY
-                    // url, not it.image_url — otherwise loadAlloc() returns a stale blob
-                    // cached under it.image_url and the proxy is never fetched.
+                    // NodeMonkes etc. are tiny pixel art (28x28). Fetch it at its
+                    // NATIVE size (proxy WITHOUT &w) — NOT a weserv pre-upscale to
+                    // 512: 512 isn't an integer multiple of 28, so the cell downscale
+                    // baked in uneven pixels ("messy"). The device's integer-nearest
+                    // scaler blows the native grid up to equal NxN blocks = clean pixel
+                    // art (how satflow/marketplaces render it). We still route through
+                    // the wsrv proxy (transcodes anything to PNG, no JPEG artifacts on
+                    // flat colours) and key the cache by the PROXY url, not it.image_url
+                    // — otherwise loadAlloc() returns a stale blob cached under
+                    // it.image_url and the proxy is never fetched.
                     bool isOrdinal = it.floor_btc || strstr(it.image_url, "ordinals.com") != nullptr;
-                    String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=png";
+                    String prox     = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=png";
+                    String proxNat  = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&output=png";
                     netLock();   // exclusive TLS only for THIS image's fetch+decode
                     uint8_t* px = nullptr;
                     if (isOrdinal) {
-                        px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, prox.c_str(), &w, &h, it.bg_color);
+                        px = imgdec::fetchRgb565(proxNat.c_str(), boxW, boxH, it.name, proxNat.c_str(), &w, &h, it.bg_color);
                         if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                     } else {
                         bool unsup = false;
@@ -2083,7 +2086,7 @@ private:
                                 memcpy(blob, &w, 2);
                                 memcpy(blob + 2, &h, 2);
                                 memcpy(blob + 4, px, (size_t)w * h * 2);
-                                diskcache::save("dec2", _decKey(it.image_url, cls, it.bg_color).c_str(), blob, blobLen);
+                                diskcache::save("dec3", _decKey(it.image_url, cls, it.bg_color).c_str(), blob, blobLen);
                                 free(blob);
                             }
                         }

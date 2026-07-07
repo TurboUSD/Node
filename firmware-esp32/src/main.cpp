@@ -347,10 +347,16 @@ void loop() {
     //   heartbeat RECEIVED (from pollRx) but ping FAILED → ESP→RP dead
     //   neither, ever  → RP→ESP dead too (electrical / pad level)
     static uint32_t lastPingAt = 0;
+    static int lastPingOk = -1;   // -1 = unknown, 0 = fail, 1 = ok
     if (millis() - lastPingAt > 30000) {
         lastPingAt = millis();
         bool ok = rp2040Link.ping(300);
-        Log.printf("RP-link: ping %s\n", ok ? "OK — link is ALIVE both ways" : "FAILED — no ACK from RP2040");
+        // Only log on a STATE CHANGE (first result, or ok<->fail), not every 30 s
+        // forever — a steadily-alive link was flooding the log with "ping OK".
+        if ((int)ok != lastPingOk) {
+            lastPingOk = ok;
+            Log.printf("RP-link: ping %s\n", ok ? "OK — link is ALIVE both ways" : "FAILED — no ACK from RP2040");
+        }
     }
 
     // While the provisioning portal is up, prioritize serving it.

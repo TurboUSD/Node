@@ -141,9 +141,16 @@ public:
         }
         static uint32_t lastLogAt = 0;
         if (hello) {
-            if (millis() - lastLogAt > 4000) {
-                lastLogAt = millis();
-                Log.println("RP-link: RP2040 heartbeat RECEIVED — RP->ESP direction ALIVE, new RP firmware confirmed");
+            // Log the "link is alive" line ONCE, not on every 5 s hello (the RP2040
+            // emits one for the first 2 minutes → the log used to be flooded).
+            // "firmware confirmed" here only ever meant "the RP is running the new
+            // firmware that emits heartbeats", not that an update was found.
+            if (!_helloLogged) {
+                _helloLogged = true;
+                if (_rpVersion[0])
+                    Log.printf("RP-link: RP2040 link alive (firmware v%s)\n", _rpVersion);
+                else
+                    Log.println("RP-link: RP2040 link alive");
             }
             return;
         }
@@ -214,6 +221,7 @@ private:
     bool _ok = false;
     esp_err_t _e1 = ESP_FAIL, _e2 = ESP_FAIL, _e3 = ESP_FAIL;   // init results, reprintable
     char _rpVersion[16] = {};   // RP2040 firmware version from its version frame ("" until received)
+    bool _helloLogged = false;  // "link alive" logged once (the 5 s hellos used to spam)
 
     // Non-blocking single-byte read; -1 when nothing is waiting.
     int _readByte() {

@@ -132,6 +132,22 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
     if (outW < 1) outW = 1;
     if (outH < 1) outH = 1;
 
+    // PIXEL-ART pass: a genuinely tiny source (e.g. a 28x28 Ordinal / NodeMonke)
+    // blown up to a big cell must scale by an INTEGER factor, otherwise a
+    // fractional fit (28 -> 350 = 12.5x) makes some source pixels 12 device px
+    // wide and their neighbours 13 — the uneven, "messy pixelated" look the user
+    // saw next to the clean CryptoPunk (which arrives pre-rendered at 336px).
+    // Snapping to the largest N that fits gives equal NxN blocks = crisp pixel
+    // art, centred by the caller. Only for small sources; photos are never <=128.
+    if ((outW > (int)iw || outH > (int)ih) && iw <= 128 && ih <= 128) {
+        int k = (int)(maxW / iw);
+        int kh = (int)(maxH / ih);
+        if (kh < k) k = kh;
+        if (k < 1) k = 1;
+        outW = (int)iw * k;
+        outH = (int)ih * k;
+    }
+
     // Scale → RGB565 little-endian ([lo, hi] per pixel), NEAREST-NEIGHBOUR both
     // ways. Pixel-art Ordinals (e.g. a 28x28 NodeMonke) are the reason: bilinear
     // ENLARGING smears the hard pixel edges into a blurry low-quality blob, which

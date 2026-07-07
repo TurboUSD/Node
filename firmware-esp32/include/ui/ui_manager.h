@@ -1641,46 +1641,27 @@ private:
         // Auto screen carousel: cycle through every screen on a timer, looping
         // back to Home. OFF by default. The seconds stepper sets the dwell time
         // per screen. Both push to the web on the next heartbeat (dirty flag).
+        // The "ROTATE EVERY" row is only shown while AUTO ROTATE is ON (a
+        // function-local static holds it so the toggle's captureless callback can
+        // hide/show it, same pattern as sOtaCard below).
+        static lv_obj_t* sCarouselSecsRow;
         addPrefToggleRow(card, "AUTO ROTATE", "ON", "OFF",
                           storage.getScreenCarousel(),
-                          [](bool leftActive){ storage.setScreenCarousel(leftActive); });
-        addStepperRow(card, "ROTATE EVERY", storage.getScreenCarouselSecs(),
+                          [](bool leftActive){
+                              storage.setScreenCarousel(leftActive);
+                              if (sCarouselSecsRow) {
+                                  if (leftActive) lv_obj_clear_flag(sCarouselSecsRow, LV_OBJ_FLAG_HIDDEN);
+                                  else            lv_obj_add_flag(sCarouselSecsRow, LV_OBJ_FLAG_HIDDEN);
+                              }
+                          });
+        sCarouselSecsRow = addStepperRow(card, "ROTATE EVERY", storage.getScreenCarouselSecs(),
                       5, 120, 5, "s",
                       [](int v){ storage.setScreenCarouselSecs((uint8_t)v); });
+        if (!storage.getScreenCarousel())
+            lv_obj_add_flag(sCarouselSecsRow, LV_OBJ_FLAG_HIDDEN);
 
-        // Button reference (informational) — bottom of the preferences card.
-        lv_obj_t* btnInfo = lv_label_create(card);
-        lv_label_set_text(btnInfo,
-            "Top button: tap to toggle the screen, or to silence a ringing alarm. "
-            "On the NFT gallery, double-tap for fullscreen (double-tap again to exit).");
-        lv_obj_set_style_text_color(btnInfo, lv_color_hex(0x6e7280), 0);
-        lv_obj_set_style_text_font(btnInfo, &lv_font_montserrat_10, 0);
-        // Without wrap the sentence renders on one line and overflows the card
-        // sides. Wrap it to the card width and centre it like the notes below.
-        lv_label_set_long_mode(btnInfo, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(btnInfo, LV_PCT(100));
-        lv_obj_set_style_text_align(btnInfo, LV_TEXT_ALIGN_CENTER, 0);
-
-        // Diagnostics over WiFi (screen mirror + live logs) — at the very bottom.
-        // Works even when the USB serial console is unavailable. Shows the
-        // mDNS name and the raw IP (Android can't resolve .local → use the IP).
-        lv_obj_t* diagInfo = lv_label_create(card);
-        {
-            String ip = WiFi.localIP().toString();
-            String s = String("Logs & screen (same WiFi):\n")
-                     + "http://turbousd.local/logs\n"
-                     + "http://" + ip + "/logs";
-            lv_label_set_text(diagInfo, s.c_str());
-        }
-        // Same muted tone as the URL under the QR (was bright green, which drew
-        // the eye more than the setup URL above it).
-        lv_obj_set_style_text_color(diagInfo, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_text_font(diagInfo, &lv_font_montserrat_10, 0);
-        lv_label_set_long_mode(diagInfo, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(diagInfo, LV_PCT(100));
-        lv_obj_set_style_text_align(diagInfo, LV_TEXT_ALIGN_CENTER, 0);
-
-        // ── FIRMWARE & UPDATES (own labelled block at the very bottom) ──
+        // ── FIRMWARE & UPDATES (kept high in the popup so the "Check for updates"
+        // button is always visible without scrolling to the very bottom) ──
         lv_obj_t* fwTitle = lv_label_create(card);
         lv_label_set_text(fwTitle, "FIRMWARE & UPDATES");
         lv_obj_set_style_text_color(fwTitle, lv_color_hex(0x9a9a9e), 0);
@@ -1713,6 +1694,38 @@ private:
             if (self) { self->otaCheckRequested = true; self->showOtaInfo("Checking for updates\xE2\x80\xA6"); }
             closeModal(sOtaCard);
         }, LV_EVENT_CLICKED, this);
+
+        // Button reference (informational).
+        lv_obj_t* btnInfo = lv_label_create(card);
+        lv_label_set_text(btnInfo,
+            "Top button: tap to toggle the screen, or to silence a ringing alarm. "
+            "On the NFT gallery, double-tap for fullscreen (double-tap again to exit).");
+        lv_obj_set_style_text_color(btnInfo, lv_color_hex(0x6e7280), 0);
+        lv_obj_set_style_text_font(btnInfo, &lv_font_montserrat_10, 0);
+        // Without wrap the sentence renders on one line and overflows the card
+        // sides. Wrap it to the card width and centre it like the notes below.
+        lv_label_set_long_mode(btnInfo, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(btnInfo, LV_PCT(100));
+        lv_obj_set_style_text_align(btnInfo, LV_TEXT_ALIGN_CENTER, 0);
+
+        // Diagnostics over WiFi (screen mirror + live logs) — at the very bottom.
+        // Works even when the USB serial console is unavailable. Shows the
+        // mDNS name and the raw IP (Android can't resolve .local → use the IP).
+        lv_obj_t* diagInfo = lv_label_create(card);
+        {
+            String ip = WiFi.localIP().toString();
+            String s = String("Logs & screen (same WiFi):\n")
+                     + "http://turbousd.local/logs\n"
+                     + "http://" + ip + "/logs";
+            lv_label_set_text(diagInfo, s.c_str());
+        }
+        // Same muted tone as the URL under the QR (was bright green, which drew
+        // the eye more than the setup URL above it).
+        lv_obj_set_style_text_color(diagInfo, lv_color_hex(0x9a9a9e), 0);
+        lv_obj_set_style_text_font(diagInfo, &lv_font_montserrat_10, 0);
+        lv_label_set_long_mode(diagInfo, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(diagInfo, LV_PCT(100));
+        lv_obj_set_style_text_align(diagInfo, LV_TEXT_ALIGN_CENTER, 0);
 
         lv_obj_t* closeBtn = addModalButton(card, "CLOSE", false);
         static lv_obj_t* sCard; sCard = card;

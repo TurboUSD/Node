@@ -13,6 +13,7 @@
 
 #pragma once
 #include <Arduino.h>
+#include <time.h>
 
 namespace weblog {
   static const size_t CAP = 16000;      // ring-buffer capacity (bytes)
@@ -38,15 +39,36 @@ namespace weblog {
 }
 
 class WebLog : public Print {
-public:
-  size_t write(uint8_t c) override {
+  bool _atLineStart = true;   // next byte begins a new line → prepend a timestamp
+
+  // Emit "[HH:MM:SS] " (local wall-clock once NTP has synced) or "[+<secs>s] "
+  // uptime before the first sync, so every log line is timestamped to the second
+  // for diagnosing when things happened.
+  void _emitPrefix() {
+    char ts[20];
+    time_t now = time(nullptr);
+    struct tm t;
+    if (now > 1600000000 && localtime_r(&now, &t)) {
+      snprintf(ts, sizeof(ts), "[%02d:%02d:%02d] ", t.tm_hour, t.tm_min, t.tm_sec);
+    } else {
+      snprintf(ts, sizeof(ts), "[+%lus] ", (unsigned long)(millis() / 1000));
+    }
+    size_t tl = strlen(ts);
+    Serial.write((const uint8_t*)ts, tl);
+    weblog::append((const uint8_t*)ts, tl);
+  }
+
+  inline void _put(uint8_t c) {
+    if (_atLineStart && c != '\n' && c != '\r') _emitPrefix();
+    _atLineStart = (c == '\n');
     Serial.write(c);
     weblog::append(&c, 1);
-    return 1;
   }
+
+public:
+  size_t write(uint8_t c) override { _put(c); return 1; }
   size_t write(const uint8_t* b, size_t n) override {
-    Serial.write(b, n);
-    weblog::append(b, n);
+    for (size_t i = 0; i < n; i++) _put(b[i]);
     return n;
   }
 };
