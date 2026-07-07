@@ -32,7 +32,29 @@ permissions:
   contents: write
 
 jobs:
+  # Detect which firmware directory actually changed in this push, so we only
+  # rebuild the chip that changed (an ESP32-only push no longer recompiles and
+  # re-releases the RP2040, and vice-versa). Manual runs (workflow_dispatch)
+  # build both.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      esp32:  ${{ steps.filter.outputs.esp32 }}
+      rp2040: ${{ steps.filter.outputs.rp2040 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            esp32:
+              - 'firmware-esp32/**'
+            rp2040:
+              - 'firmware-rp2040/**'
+
   build-esp32:
+    needs: changes
+    if: ${{ needs.changes.outputs.esp32 == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.extract_version.outputs.version }}
@@ -158,6 +180,8 @@ jobs:
           path: esp32s3-sha256.txt
 
   build-rp2040:
+    needs: changes
+    if: ${{ needs.changes.outputs.rp2040 == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.extract_version.outputs.version }}
@@ -206,23 +230,35 @@ jobs:
           path: rp2040-sha256.txt
 
   publish-release:
-    needs: [build-esp32, build-rp2040]
+    needs: [changes, build-esp32, build-rp2040]
+    # Run as long as at least one chip actually built (the other may be skipped
+    # because it didn't change). !cancelled() lets us proceed past skipped needs.
+    if: ${{ !cancelled() && (needs.build-esp32.result == 'success' || needs.build-rp2040.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download ESP32 artifacts
+        if: needs.build-esp32.result == 'success'
+        uses: actions/download-artifact@v4
         with: { name: esp32s3-firmware, path: ./artifacts }
-      - uses: actions/download-artifact@v4
+      - name: Download ESP32 sha
+        if: needs.build-esp32.result == 'success'
+        uses: actions/download-artifact@v4
         with: { name: esp32s3-sha256, path: ./artifacts }
-      - uses: actions/download-artifact@v4
+      - name: Download RP2040 artifacts
+        if: needs.build-rp2040.result == 'success'
+        uses: actions/download-artifact@v4
         with: { name: rp2040-firmware, path: ./artifacts }
-      - uses: actions/download-artifact@v4
+      - name: Download RP2040 sha
+        if: needs.build-rp2040.result == 'success'
+        uses: actions/download-artifact@v4
         with: { name: rp2040-sha256, path: ./artifacts }
 
-      - name: Create GitHub Release with both binaries
+      - name: Create GitHub Release
         id: release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: fw-${{ needs.build-esp32.outputs.version }}-${{ github.run_number }}
+          # Fall back to whichever chip built for the tag/version.
+          tag_name: fw-${{ needs.build-esp32.outputs.version || needs.build-rp2040.outputs.version }}-${{ github.run_number }}
           files: |
             artifacts/esp32s3-*.bin
             artifacts/firmware-esp32s3.bin
@@ -232,21 +268,25 @@ jobs:
             artifacts/app.bin
             artifacts/firmware-esp32/manifest.json
             artifacts/rp2040-*.uf2
+          fail_on_unmatched_files: false   # only the built chip's files exist
           generate_release_notes: true
 
-      - name: Register release with Supabase
+      - name: Register ESP32 release with Supabase
+        if: needs.build-esp32.result == 'success'
         run: |
           ESP32_SHA=$(cat artifacts/esp32s3-sha256.txt)
-          RP2040_SHA=$(cat artifacts/rp2040-sha256.txt)
           ESP32_URL=$(ls artifacts/esp32s3-*.bin | xargs -I{} basename {})
-          RP2040_URL=$(ls artifacts/rp2040-*.uf2 | xargs -I{} basename {})
-
           curl -s -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/firmware_releases" \
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json" \
             -d "{\"target\":\"esp32s3\",\"version\":\"${{ needs.build-esp32.outputs.version }}\",\"binary_url\":\"https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag_name }}/$ESP32_URL\",\"sha256\":\"$ESP32_SHA\"}"
 
+      - name: Register RP2040 release with Supabase
+        if: needs.build-rp2040.result == 'success'
+        run: |
+          RP2040_SHA=$(cat artifacts/rp2040-sha256.txt)
+          RP2040_URL=$(ls artifacts/rp2040-*.uf2 | xargs -I{} basename {})
           curl -s -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/firmware_releases" \
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
