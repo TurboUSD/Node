@@ -526,16 +526,6 @@ private:
     uint32_t lastMiningFeedFetch = 0;
 
     esp_lcd_panel_handle_t _lcdPanel = nullptr;
-    SemaphoreHandle_t _vsyncSem = nullptr;   // given on each RGB-panel VSYNC flip
-
-    // RGB panel VSYNC callback (ISR context): releases the flush's wait so LVGL
-    // knows the buffer it just handed over is now on screen and the other is free.
-    static bool _onVsyncCb(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void* user_ctx) {
-        UiManager* self = static_cast<UiManager*>(user_ctx);
-        BaseType_t hpw = pdFALSE;
-        if (self && self->_vsyncSem) xSemaphoreGiveFromISR(self->_vsyncSem, &hpw);
-        return hpw == pdTRUE;
-    }
     lv_obj_t* _otaBadge = nullptr;
 
     // TCA9535 IO expander output shadow registers (one byte per 8-pin port).
@@ -910,54 +900,41 @@ private:
         panelCfg.timings.flags.pclk_active_neg = 0;  // matches Seeed's verified Arduino
                                                      // reference (Arduino_GFX uses the
                                                      // default 0 for this panel).
-        panelCfg.num_fbs           = 2;    // DOUBLE framebuffer (needs IDF 5.x).
+        panelCfg.num_fbs           = 1;    // single framebuffer (known-good, aligned)
         panelCfg.flags.fb_in_psram = 1;
-        // DOUBLE FRAMEBUFFER, no bounce buffer: LVGL renders each frame fully into
-        // one of the driver's two PSRAM framebuffers; the panel flips scan-out to
-        // it at the next VSYNC and LVGL draws the next frame into the OTHER buffer.
-        // The panel therefore always shows a COMPLETE, consistent frame — no
-        // tearing and no partial-write flicker while NFT artwork decodes — and the
-        // per-frame flip re-syncs the DMA, so it can't roll like the bounce buffer
-        // did (which needed sdkconfig options the precompiled Arduino libs lack).
+        // Single framebuffer straight from PSRAM: rock-steady and correctly
+        // aligned. (Double-fb + full_refresh mis-rendered on this panel — bad
+        // alignment + flicker — and the bounce buffer rolls on the precompiled
+        // Arduino libs, so we stay here. Decode-time shimmer is tamed by the
+        // disk-cache + nearest-decode work instead.)
 
         ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
         ESP_ERROR_CHECK(esp_lcd_panel_reset(_lcdPanel));
         ESP_ERROR_CHECK(esp_lcd_panel_init(_lcdPanel));
 
-        // 9. LVGL display driver in DOUBLE-BUFFER / FULL-REFRESH mode: the two LVGL
-        //    draw buffers ARE the panel's framebuffers, so a flush is just a flip.
-        void* fb0 = nullptr;
-        void* fb1 = nullptr;
-        ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(_lcdPanel, 2, &fb0, &fb1));
-
-        // VSYNC semaphore: flush waits for the flip before LVGL reuses the other
-        // buffer (so it never draws into the frame currently on screen). Bounded
-        // wait so a missed VSYNC (driver ISR can't run during a flash write)
-        // degrades to a rare tear instead of a hang.
-        _vsyncSem = xSemaphoreCreateBinary();
-        esp_lcd_rgb_panel_event_callbacks_t cbs = {};
-        cbs.on_vsync = _onVsyncCb;
-        esp_lcd_rgb_panel_register_event_callbacks(_lcdPanel, &cbs, this);
-
+        // 9. Register LVGL display driver.
+        //    Draw buffer: 480×20 lines in internal SRAM (fast partial rendering).
+        //    LVGL calls flush_cb for each dirty region; we blit it to the RGB
+        //    framebuffer via esp_lcd_panel_draw_bitmap().
         static lv_disp_draw_buf_t drawBuf;
-        lv_disp_draw_buf_init(&drawBuf, fb0, fb1, LCD_H_RES * LCD_V_RES);
+        static lv_color_t         lvBuf[LCD_H_RES * 20];
+        lv_disp_draw_buf_init(&drawBuf, lvBuf, nullptr, LCD_H_RES * 20);
 
         static lv_disp_drv_t dispDrv;
         lv_disp_drv_init(&dispDrv);
-        dispDrv.hor_res      = LCD_H_RES;
-        dispDrv.ver_res      = LCD_V_RES;
-        dispDrv.draw_buf     = &drawBuf;
-        dispDrv.user_data    = this;
-        dispDrv.full_refresh = 1;          // render whole frame → clean double-buffer flips
-        dispDrv.flush_cb     = [](lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* colorP) {
-            (void)area;
-            UiManager* self = static_cast<UiManager*>(drv->user_data);
-            esp_lcd_panel_draw_bitmap(self->_lcdPanel, 0, 0, LCD_H_RES, LCD_V_RES, colorP);
-            if (self->_vsyncSem) xSemaphoreTake(self->_vsyncSem, pdMS_TO_TICKS(100));
-            screenshot::setLiveFb(colorP);   // the now-visible full frame → /shot.bmp
+        dispDrv.hor_res   = LCD_H_RES;
+        dispDrv.ver_res   = LCD_V_RES;
+        dispDrv.draw_buf  = &drawBuf;
+        dispDrv.user_data = _lcdPanel;
+        dispDrv.flush_cb  = [](lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* colorP) {
+            esp_lcd_panel_handle_t panel = static_cast<esp_lcd_panel_handle_t>(drv->user_data);
+            esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1,
+                                      area->x2 + 1, area->y2 + 1, colorP);
+            screenshot::mirror(area, colorP);   // shadow fb for http://<ip>/shot.bmp
             lv_disp_flush_ready(drv);
         };
         lv_disp_drv_register(&dispDrv);
+        screenshot::ensureShadow();
 
         // 10. Register LVGL touch input driver (FT6336U, polled — no INT pin).
         //     Reads 5 bytes from I2C 0x48: [touch_count, xH, xL, yH, yL].

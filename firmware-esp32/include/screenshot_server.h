@@ -27,21 +27,34 @@
 
 namespace screenshot {
 
-static WebServer*     s_srv    = nullptr;
-static const uint16_t* s_liveFb = nullptr;   // last full frame LVGL flipped on screen
+static WebServer* s_srv    = nullptr;
+static uint16_t*  s_shadow = nullptr;   // 480×480 RGB565 mirror of the panel
 
 inline bool started() { return s_srv != nullptr; }
 
-// Called from the LVGL flush_cb after each full-frame flip: remember which of the
-// two PSRAM framebuffers is now on screen, so /shot.bmp reads it directly. No more
-// per-region shadow copy — LVGL renders whole frames in double-buffer mode now.
-inline void setLiveFb(const void* fb) { s_liveFb = static_cast<const uint16_t*>(fb); }
+// Called once from the display bring-up.
+inline void ensureShadow() {
+    if (s_shadow) return;
+    s_shadow = (uint16_t*)heap_caps_malloc((size_t)LCD_H_RES * LCD_V_RES * 2,
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_shadow) Log.println("Screenshot: shadow fb alloc FAILED (no captures)");
+}
+
+// Called from the LVGL flush_cb with every region blitted to the panel.
+inline void mirror(const lv_area_t* area, const lv_color_t* px) {
+    if (!s_shadow) return;
+    int w = area->x2 - area->x1 + 1;
+    for (int y = area->y1; y <= area->y2; y++)
+        memcpy(&s_shadow[(size_t)y * LCD_H_RES + area->x1],
+               (const uint16_t*)px + (size_t)(y - area->y1) * w,
+               (size_t)w * 2);
+}
 
 inline void _u16(uint8_t* p, uint16_t v)  { p[0] = v & 0xFF; p[1] = v >> 8; }
 inline void _u32(uint8_t* p, uint32_t v)  { p[0] = v & 0xFF; p[1] = (v >> 8) & 0xFF; p[2] = (v >> 16) & 0xFF; p[3] = v >> 24; }
 
 inline void _sendBmp() {
-    const void* fb = s_liveFb;
+    const void* fb = s_shadow;
     if (!fb) {
         s_srv->send(500, "text/plain", "framebuffer unavailable");
         return;
