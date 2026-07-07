@@ -157,6 +157,9 @@ static const lv_font_t* ethXiFont10() {
 class NftScreen {
 public:
     static NftScreen* s_instance;
+    // Mirrors _fullscreen for the static decode helpers (_cellInnerFor runs
+    // inside the static image-fetch task, which has no `this`).
+    static bool _sFsDecode;
 
     // Call once at startup. Builds the skeleton; data loaded on first onShow().
     void build(lv_obj_t* parentScreen, lv_event_cb_t onLogoTapped,
@@ -345,7 +348,54 @@ public:
     SharedHeaderRefs header;
     SharedFooterRefs footer;
 
+    // Fullscreen "digital photo frame" mode: hides the header, footer, the
+    // grid-size bar and every caption, and expands the grid to the whole 480×480
+    // panel. Grid size, carousel and the left/right cell taps are all preserved;
+    // only the chrome goes away. Toggled by a double-press of the top button
+    // (handled in ui_manager/main). Swipe navigation is disabled while it's on,
+    // so the only way out is another double-press.
+    bool isFullscreen() const { return _fullscreen; }
+    void setFullscreen(bool fs) {
+        if (_fullscreen == fs || !_body) return;
+        _fullscreen = fs;
+        _sFsDecode  = fs;
+        // The current grid class was decoded for the windowed cell size; drop
+        // those covers so _rebuildGrid()'s fetch re-decodes them edge-to-edge
+        // (fullscreen) or back to the captioned size (windowed). Bump the gen
+        // so any in-flight worker aborts before writing stale-sized buffers.
+        _imgGen++;
+        {
+            int gCls = _gridClass();
+            for (auto& it : _nftCache) it.freeSlot(gCls);
+        }
+        lv_obj_t* hdr = header.dateLabel ? lv_obj_get_parent(header.dateLabel) : nullptr;
+        lv_obj_t* ftr = footer.qrIcon   ? lv_obj_get_parent(footer.qrIcon)   : nullptr;
+        if (fs) {
+            if (hdr) lv_obj_add_flag(hdr, LV_OBJ_FLAG_HIDDEN);
+            if (ftr) lv_obj_add_flag(ftr, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(_sizeBar, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_size(_body, 480, 480);
+            lv_obj_align(_body, LV_ALIGN_TOP_MID, 0, 0);
+            lv_obj_set_size(_gridArea, 480, 480);
+            lv_obj_align(_gridArea, LV_ALIGN_TOP_MID, 0, 0);
+            lv_obj_set_style_pad_all(_gridArea, 0, 0);   // edge-to-edge photos
+            lv_obj_set_style_pad_gap(_gridArea, 2, 0);
+        } else {
+            if (hdr) lv_obj_clear_flag(hdr, LV_OBJ_FLAG_HIDDEN);
+            if (ftr) lv_obj_clear_flag(ftr, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(_sizeBar, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_size(_body, 480, NFT_BODY_H);
+            lv_obj_align(_body, LV_ALIGN_TOP_MID, 0, 38);
+            lv_obj_set_size(_gridArea, 480, NFT_GRID_H);
+            lv_obj_align(_gridArea, LV_ALIGN_BOTTOM_MID, 0, 0);
+            lv_obj_set_style_pad_all(_gridArea, 4, 0);
+            lv_obj_set_style_pad_gap(_gridArea, 4, 0);
+        }
+        _rebuildGrid();
+    }
+
 private:
+    bool       _fullscreen     = false;
     // ── Members ───────────────────────────────────────────────────────────────
     lv_obj_t*  _body           = nullptr;
     lv_obj_t*  _sizeBar        = nullptr;
@@ -1009,7 +1059,7 @@ private:
             for (int cls = 1; cls <= 2; cls++) {
                 if (!_entitledSlot(cls, i)) continue;
                 size_t blobLen = 0;
-                uint8_t* blob = diskcache::loadAlloc("dec", _decKey(_nftCache[i].image_url, cls, _nftCache[i].bg_color).c_str(), &blobLen);
+                uint8_t* blob = diskcache::loadAlloc("dec2", _decKey(_nftCache[i].image_url, cls, _nftCache[i].bg_color).c_str(), &blobLen);
                 if (!blob) continue;
                 uint16_t w = 0, h = 0;
                 if (blobLen > 4) { memcpy(&w, blob, 2); memcpy(&h, blob + 2, 2); }
@@ -1077,8 +1127,16 @@ private:
         // carousel. Fewer collections than cells → fewer cells (no repeats).
         int n = _gridSize;                   // 1, 4, or 9
         int side = (n == 1) ? 1 : (n == 4 ? 2 : 3);
-        lv_coord_t cellW = (lv_coord_t)((480 - 4 - (side - 1) * 4) / side);
-        lv_coord_t cellH = (lv_coord_t)((NFT_GRID_H - 4 - (side - 1) * 4) / side);
+        // Fullscreen uses the WHOLE 480×480 (no header/footer/bar) with a 2 px
+        // gap; normal mode uses the shorter NFT_GRID_H under the chrome.
+        lv_coord_t cellW, cellH;
+        if (_fullscreen) {
+            cellW = (lv_coord_t)((480 - (side - 1) * 2) / side);
+            cellH = (lv_coord_t)((480 - (side - 1) * 2) / side);
+        } else {
+            cellW = (lv_coord_t)((480 - 4 - (side - 1) * 4) / side);
+            cellH = (lv_coord_t)((NFT_GRID_H - 4 - (side - 1) * 4) / side);
+        }
 
         _refreshListBufs();   // pick up manual order + hidden list from NVS
         _recomputeEntitled();
@@ -1133,8 +1191,10 @@ private:
 
         int col = pos % side;
         int row = pos / side;
-        lv_coord_t x = (lv_coord_t)(4 + col * (w + 4));
-        lv_coord_t y = (lv_coord_t)(4 + row * (h + 4));
+        int pad = _fullscreen ? 0 : 4;
+        int gap = _fullscreen ? 2 : 4;
+        lv_coord_t x = (lv_coord_t)(pad + col * (w + gap));
+        lv_coord_t y = (lv_coord_t)(pad + row * (h + gap));
 
         cw.container = lv_obj_create(_gridArea);
         cw.cellW = w;
@@ -1142,21 +1202,27 @@ private:
         lv_obj_set_size(cw.container, w, h);
         lv_obj_set_pos(cw.container, x, y);
         lv_obj_set_style_border_color(cw.container, lv_color_hex(NFT_CLR_BORDER), 0);
-        lv_obj_set_style_border_width(cw.container, 1, 0);
-        lv_obj_set_style_radius(cw.container, 6, 0);
+        lv_obj_set_style_border_width(cw.container, _fullscreen ? 0 : 1, 0);   // borderless photos in fullscreen
+        lv_obj_set_style_radius(cw.container, _fullscreen ? 0 : 6, 0);
         lv_obj_set_style_pad_all(cw.container, 4, 0);
         lv_obj_set_style_clip_corner(cw.container, true, 0);
         lv_obj_clear_flag(cw.container, LV_OBJ_FLAG_SCROLLABLE);
 
         _refreshCell(idx);
 
-        // Tap: advance carousel manually
+        // Tap: LEFT half of the cell → previous NFT, RIGHT half → next.
         lv_obj_add_flag(cw.container, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_user_data(cw.container, (void*)(intptr_t)idx);
         lv_obj_add_event_cb(cw.container, [](lv_event_t* e) {
             NftScreen* self = NftScreen::s_instance;
-            int ci = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e));
-            if (self && ci >= 0 && ci < 9) self->_advanceCell(ci);
+            lv_obj_t* cont = lv_event_get_current_target(e);
+            int ci = (int)(intptr_t)lv_obj_get_user_data(cont);
+            if (!self || ci < 0 || ci >= 9) return;
+            lv_point_t p; lv_indev_get_point(lv_indev_get_act(), &p);
+            lv_area_t a; lv_obj_get_coords(cont, &a);
+            lv_coord_t mid = (a.x1 + a.x2) / 2;
+            if (p.x < mid) self->_retreatCell(ci);
+            else           self->_advanceCell(ci);
         }, LV_EVENT_CLICKED, nullptr);
     }
 
@@ -1234,7 +1300,7 @@ private:
             lv_obj_invalidate(cw.img);   // dsc.data changed in place → force a repaint
             // Centered within the ART AREA (cell minus the caption band —
             // or the whole cell when the Data captions are toggled off).
-            lv_coord_t artH = storage.getNftShowData() ? (lv_coord_t)(cw_h - NFT_CAPTION_H) : cw_h;
+            lv_coord_t artH = (!_fullscreen && storage.getNftShowData()) ? (lv_coord_t)(cw_h - NFT_CAPTION_H) : cw_h;
             lv_coord_t yOff = (artH > (lv_coord_t)ph) ? (lv_coord_t)((artH - ph) / 2) : 0;
             lv_obj_align(cw.img, LV_ALIGN_TOP_MID, 0, yOff);
         } else {
@@ -1253,7 +1319,7 @@ private:
                     lv_obj_center(hint);
                 }
             }
-            lv_obj_set_size(cw.placeholder, cw_w, cw_h - NFT_CAPTION_H);
+            lv_obj_set_size(cw.placeholder, cw_w, (!_fullscreen && storage.getNftShowData()) ? (cw_h - NFT_CAPTION_H) : cw_h);
             lv_obj_align(cw.placeholder, LV_ALIGN_TOP_MID, 0, 0);
             lv_obj_set_style_bg_color(cw.placeholder, lv_color_hex(bgColor == NFT_CLR_GREY ? 0x2a2a2e : bgColor), 0);
         }
@@ -1285,7 +1351,7 @@ private:
             }
         }
 
-        if (!storage.getNftShowData()) {   // "Data" toggle off → no captions
+        if (_fullscreen || !storage.getNftShowData()) {   // fullscreen or "Data" off → no captions
             if (cw.nameLbl)  { lv_obj_del(cw.nameLbl);  cw.nameLbl  = nullptr; }
             if (cw.floorLbl) { lv_obj_del(cw.floorLbl); cw.floorLbl = nullptr; }
             if (cw.dotRow)   { lv_obj_del(cw.dotRow);   cw.dotRow   = nullptr; }
@@ -1426,10 +1492,13 @@ private:
         if (s_instance) s_instance->_deleteCollection((int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e)));
     }
 
-    void _advanceCell(int idx) {
+    void _advanceCell(int idx) { _stepCell(idx, +1); }
+    void _retreatCell(int idx) { _stepCell(idx, -1); }
+
+    void _stepCell(int idx, int dir) {
         CellWidgets& cw = _cells[idx];
         if (cw.nftCount <= 1) return;
-        cw.nftCurrent = (cw.nftCurrent + 1) % cw.nftCount;
+        cw.nftCurrent = (cw.nftCurrent + dir + cw.nftCount) % cw.nftCount;
         cw.dotsAt = millis();   // reveal the position dots briefly
         _imgSettled = false;    // the new carousel item may still need decoding
         _refreshCell(idx);
@@ -1659,6 +1728,14 @@ private:
     // _rebuildGrid's math, minus the container's 4 px padding).
     static void _cellInnerFor(int cls, int& wOut, int& hOut) {
         int sd = cls + 1;
+        if (_sFsDecode) {
+            // Fullscreen: edge-to-edge square cells (pad 0, gap 2, no border,
+            // no caption band) so photos fill the panel with no letterboxing.
+            int cell = (480 - (sd - 1) * 2) / sd;
+            wOut = cell;
+            hOut = cell;
+            return;
+        }
         wOut = (480 - 4 - (sd - 1) * 4) / sd - 8;
         hOut = (NFT_GRID_H - 4 - (sd - 1) * 4) / sd - 8 - NFT_CAPTION_H;   // artwork area above the caption band
     }
@@ -1875,19 +1952,20 @@ private:
                     if (q >= 0) base = base.substring(0, q);
                     bool fromDisk = diskcache::has("img", it.image_url);
                     uint16_t w = 0, h = 0;
-                    // Ordinals (ordinals.com/content/…) serve the FULL-size PNG and
-                    // ignore resize query params, so the "sized" + raw attempts just
-                    // download the big original — slow, and often over the 300 KB
-                    // fetch cap, so nothing gets cached (NodeMonke "never saved").
-                    // Go straight to the wsrv proxy for a small sized JPEG (same as
-                    // seadn.io's variants): fast AND always fits the disk cache.
-                    // The cache key stays it.image_url either way, so it persists.
+                    // Ordinals (ordinals.com/content/…) serve the RAW inscription,
+                    // which for pixel art like NodeMonkes is tiny (28x28) and ignores
+                    // resize params — nearest-scaling a 28px source to a big cell looks
+                    // blocky. Fetch a 512px render from the wsrv proxy (PNG, so no JPEG
+                    // artifacts on the flat pixel colours), and — crucially — key the
+                    // cache by the PROXY url, not it.image_url. Otherwise loadAlloc()
+                    // returns the OLD raw-28px blob cached under it.image_url and the
+                    // proxy is never fetched (why NodeMonke stayed pixelated).
                     bool isOrdinal = it.floor_btc || strstr(it.image_url, "ordinals.com") != nullptr;
-                    String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=jpg";
+                    String prox = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=png";
                     netLock();   // exclusive TLS only for THIS image's fetch+decode
                     uint8_t* px = nullptr;
                     if (isOrdinal) {
-                        px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
+                        px = imgdec::fetchRgb565(prox.c_str(), boxW, boxH, it.name, prox.c_str(), &w, &h, it.bg_color);
                         if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                     } else {
                         px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
@@ -1921,14 +1999,18 @@ private:
                         // Persist DECODED cover bitmaps (2x2/3x3 classes are
                         // small: ~20-50 KB) so a reboot paints instantly with
                         // zero decode. 1x1 (~200 KB) isn't worth the flash.
-                        if (cls >= 1 && self->_entitledSlot(cls, idx)) {
+                        // Don't persist fullscreen-sized covers: the dec2 key is
+                        // per-class only, so a fullscreen blob would overwrite the
+                        // windowed cover and paint oversized after a reboot. Keep
+                        // fullscreen decodes RAM-only.
+                        if (cls >= 1 && !_sFsDecode && self->_entitledSlot(cls, idx)) {
                             size_t blobLen = 4 + (size_t)w * h * 2;
                             uint8_t* blob = (uint8_t*)heap_caps_malloc(blobLen, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                             if (blob) {
                                 memcpy(blob, &w, 2);
                                 memcpy(blob + 2, &h, 2);
                                 memcpy(blob + 4, px, (size_t)w * h * 2);
-                                diskcache::save("dec", _decKey(it.image_url, cls, it.bg_color).c_str(), blob, blobLen);
+                                diskcache::save("dec2", _decKey(it.image_url, cls, it.bg_color).c_str(), blob, blobLen);
                                 free(blob);
                             }
                         }
@@ -2216,4 +2298,5 @@ private:
 
 // Static member definitions (allocated in BSS / PSRAM)
 NftScreen* NftScreen::s_instance = nullptr;
+bool NftScreen::_sFsDecode = false;
 NftPendingResult NftScreen::_pendingResult;

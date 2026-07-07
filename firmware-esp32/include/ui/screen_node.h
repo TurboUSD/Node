@@ -584,8 +584,12 @@ private:
         char rewardBuf[16]; snprintf(rewardBuf, sizeof(rewardBuf), "\xE2\x82\xB8%d", (int)reward);
         lv_label_set_text(w.rewardLabel, rewardBuf);
         lv_label_set_text(w.minerNameLabel, minerName.length() ? minerName.c_str() : "--");
-        if (w.minerCountryLabel)
-            lv_label_set_text(w.minerCountryLabel, country.length() ? country.c_str() : "");
+        if (w.minerCountryLabel) {
+            // Trailing * = anonymized location (never the real one; ~300 km /
+            // country level, owner-configurable). Explained on the web.
+            String cc = country.length() ? (country + "*") : String("");
+            lv_label_set_text(w.minerCountryLabel, cc.c_str());
+        }
         lv_obj_clear_flag(w.container, LV_OBJ_FLAG_HIDDEN);
 
         if (!isNewBlock) return; // periodic refresh of the same block's data, no slide needed

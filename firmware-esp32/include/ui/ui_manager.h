@@ -214,8 +214,49 @@ public:
         if (_otaBadge) { lv_obj_del(_otaBadge); _otaBadge = nullptr; }
     }
 
+    // Set by the config popup's "Check for updates" button; the main loop polls
+    // it, runs the OTA check on the network thread, and then either shows the
+    // install badge (update found) or a transient "up to date" bar.
+    volatile bool otaCheckRequested = false;
+
+    // Transient bottom bar for a one-off OTA message (auto-dismisses ~4 s). Not
+    // shown if an install badge is already up.
+    void showOtaInfo(const char* msg) {
+        if (_otaBadge) return;
+        lv_obj_t* bar = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(bar, LV_PCT(100), 40);
+        lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(0x141414), 0);
+        lv_obj_set_style_border_color(bar, lv_color_hex(0x3a3a3a), 0);
+        lv_obj_set_style_border_width(bar, 1, 0);
+        lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, 0);
+        lv_obj_t* l = lv_label_create(bar);
+        lv_label_set_text(l, msg);
+        lv_obj_set_style_text_color(l, lv_color_hex(0xd8d8dc), 0);
+        lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+        lv_obj_center(l);
+        lv_timer_t* t = lv_timer_create([](lv_timer_t* tm) {
+            lv_obj_t* b = (lv_obj_t*)tm->user_data;
+            if (b) lv_obj_del(b);
+            lv_timer_del(tm);
+        }, 4000, bar);
+        lv_timer_set_repeat_count(t, 1);
+    }
+
     // Set this before begin(). Called when user confirms "Install".
     std::function<void()> onOtaInstallConfirmed;
+
+    // ── NFT fullscreen ("digital photo frame") ────────────────────────────────
+    // A double-press of the top button toggles it — but only while the NFT
+    // screen is showing (or to exit once you're in it). main.cpp only routes a
+    // double-press to us when nftDoublePressActive() is true.
+    bool _nftFullscreen = false;
+    bool nftDoublePressActive() const { return currentScreen == ScreenId::NFT || _nftFullscreen; }
+    void toggleNftFullscreen() {
+        if (currentScreen != ScreenId::NFT && !_nftFullscreen) return;
+        _nftFullscreen = !_nftFullscreen;
+        nftScreen.setFullscreen(_nftFullscreen);
+    }
 
     bool miningFeedNeedsRefresh() {
         uint32_t now = millis();
@@ -1598,7 +1639,8 @@ private:
         // Button reference (informational) — bottom of the preferences card.
         lv_obj_t* btnInfo = lv_label_create(card);
         lv_label_set_text(btnInfo,
-            "Top button: tap to toggle the screen, or to silence a ringing alarm.");
+            "Top button: tap to toggle the screen, or to silence a ringing alarm. "
+            "On the NFT gallery, double-tap for fullscreen (double-tap again to exit).");
         lv_obj_set_style_text_color(btnInfo, lv_color_hex(0x6e7280), 0);
         lv_obj_set_style_text_font(btnInfo, &lv_font_montserrat_10, 0);
 
@@ -1638,6 +1680,17 @@ private:
         lv_label_set_long_mode(verInfo, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(verInfo, LV_PCT(100));
         lv_obj_set_style_text_align(verInfo, LV_TEXT_ALIGN_CENTER, 0);
+
+        // "Check for updates" → requests an OTA check on the network thread; the
+        // main loop shows the install badge if a newer ESP32 image exists, or an
+        // "up to date" bar otherwise. The install itself is the existing badge flow.
+        lv_obj_t* otaBtn = addModalButton(card, "CHECK FOR UPDATES", false);
+        static lv_obj_t* sOtaCard; sOtaCard = card;
+        lv_obj_add_event_cb(otaBtn, [](lv_event_t* e) {
+            UiManager* self = (UiManager*)lv_event_get_user_data(e);
+            if (self) { self->otaCheckRequested = true; self->showOtaInfo("Checking for updates\xE2\x80\xA6"); }
+            closeModal(sOtaCard);
+        }, LV_EVENT_CLICKED, this);
 
         lv_obj_t* closeBtn = addModalButton(card, "CLOSE", false);
         static lv_obj_t* sCard; sCard = card;
@@ -1855,6 +1908,9 @@ private:
 
     void showScreen(ScreenId id, bool animate = true,
                     lv_scr_load_anim_t anim = LV_SCR_LOAD_ANIM_MOVE_LEFT) {
+        // Leaving the NFT screen always drops fullscreen (safety — normally you
+        // can't navigate away while it's on, since swipe is locked).
+        if (_nftFullscreen && id != ScreenId::NFT) { _nftFullscreen = false; nftScreen.setFullscreen(false); }
         currentScreen = id;
         // Update swipe position to stay in sync with direct navigation (e.g. logo tap → home)
         for (int i = 0; i < _swipeCount; i++) {
@@ -1903,6 +1959,7 @@ private:
             lv_obj_t* target = lv_event_get_current_target(e);
             UiManager* self = (UiManager*)lv_obj_get_user_data(target);
             if (!self) return;
+            if (self->_nftFullscreen) return;   // fullscreen photo-frame locks swipe navigation
             lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
             int count = self->_swipeCount;   // hidden screens are out of rotation
             // Swipe LEFT → next screen (slides in from the right);

@@ -41,9 +41,10 @@ The device has two buttons, on opposite edges:
 
 - **Top button** (the regular push button), handled by this firmware:
   - **Short press**: turn the screen off / wake it up (and, while the alarm is ringing, STOP it). The node keeps running and mining in the background while the screen is off.
+  - **Double press** (two taps): on the NFT Gallery screen, toggle **fullscreen "photo frame" mode**, which hides the header, footer, grid bar and all captions and fills the whole panel with your artwork. The grid size (1x1 / 2x2 / 3x3), the carousel setting and the left/right tap to change the shown NFT are all preserved; only the chrome disappears. Swipe navigation is locked while it is on, so double press again to exit.
   - **Long press (3 s)**: sleep ("power off"): the screen turns off and the device enters light sleep; press the button again to wake.
   - There is intentionally **no factory-reset shortcut** on the button, so the firmware can't be wiped by accident. (Stock Seeed firmware reset the device on a 10 s hold, we deliberately dropped that.)
-- **Bottom pinhole button** (next to the USB-C port, press with a paperclip/needle), this is the **RP2040 BOOTSEL** button, used only when flashing the RP2040: hold it while plugging in USB to expose the `RPI-RP2` drive.
+- **Bottom pinhole button** (next to the USB-C port, press with a paperclip/needle), this is the **RP2040 BOOTSEL** button, used only when flashing the RP2040: hold it while plugging in USB. A drive called `RPI-RP2` then appears **on your computer's desktop, exactly like plugging in a USB stick or external hard drive** (macOS and Windows both mount it). Drag the `.uf2` firmware onto that drive; it ejects itself and the device reboots, which means it worked.
 
 <p align="center">
   <img src="docs/flash-uf2-reference.png" width="70%" alt="Flashing the RP2040: hold the bottom pinhole button while connecting USB, then drag the .uf2 onto the RPI-RP2 drive" />
@@ -124,7 +125,7 @@ The backend is a single Supabase project. It provides:
 
 - **PostgreSQL database**: nodes, heartbeats, reward balances, mining blocks, firmware releases, OHLCV history, US debt history, node ticker configs.
 - **Edge Functions** (TypeScript / Deno):
-  - `register-node` (creates a new node record on first boot; auto-detects country/lat/lng from the device's public IP (city is NEVER auto-filled) it's a manual profile field; the public map blurs location to ~300 km and shows country only)
+  - `register-node` (creates a new node record on first boot; derives an approximate country/lat/lng from the device's public IP. See the privacy note below: the precise location is NEVER stored)
   - `heartbeat`: receives periodic pings, marks nodes online/offline, returns the full config payload so devices sync any web-changed settings on every check-in. Sync is **bidirectional**: the device pushes up settings changed on-screen (alarm, NFT collection order/hidden/Data) plus its detected NFT collections list (which powers the web collections board)
   - `get-node-setup`: loads a node's full settings for the owner-only setup page (requires the per-device setup token from the QR code)
   - `mine-block`: hourly cron: selects the winner, issues reward, creates the next block
@@ -138,6 +139,12 @@ The backend is a single Supabase project. It provides:
   - `rewards-payout` / `confirm-payout`, batch reward disbursement
 - **Scheduled cron jobs**: `mine-block` every hour, data syncs daily, and a `mining-watchdog` every 5 minutes. The watchdog is a small always-on safety net: if a pending block's 1-hour window elapses with no node online to mine it, the watchdog restarts that block's countdown so the on-device and web timers can never freeze at 00:00 (see `backend/sql/mining-watchdog.sql`, also included in `schema.sql`). It only touches the block's timestamp, never rewards or winners, so it is safe to leave running permanently.
 - **Public views**: `public_node_directory`, `public_mining_feed`, `node_ticker_config` expose read-only data using the anon key. Wallet addresses and sensitive fields are only accessible via the service role key.
+
+### Location privacy
+
+We never store a node's real location. On first registration `register-node` derives an approximate lat/lng from the device's public IP, but it **snaps those coordinates to a 3-degree grid (about 300 km, country level) before they are written to the database**, so the precise position is discarded at the door and only a coarse dot ever exists. You can verify this in `backend/functions/register-node/index.ts` (`Math.round(geo.lat / 3) * 3`) and the same rounding is re-applied in the `public_node_directory` view. The city field is never auto-filled; it is a manual profile field.
+
+Because the stored location is only ever this coarse, best-effort value, every place a node's country or map dot appears is marked with an asterisk (`*`). Tapping or hovering the asterisk opens a short explanation: the location is anonymized to roughly country level, the network never holds the real one, and the owner can override country and city at any time from the setup page. Owners who want a different public location can simply set one manually.
 
 ### Firmware (ESP32-S3)
 

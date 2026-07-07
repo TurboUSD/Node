@@ -123,6 +123,12 @@ void handleUserButton() {
     static bool     prevDown   = false;
     static uint32_t pressStart = 0;
     static bool     longFired  = false;
+    // Double-press detection (NFT photo-frame toggle). Only armed while the NFT
+    // screen is showing, so single presses stay INSTANT everywhere else.
+    static uint32_t lastShortReleaseAt = 0;
+    static bool     pendingSingle      = false;
+    static uint32_t pendingSingleAt    = 0;
+    const  uint32_t DOUBLE_MS = 350;
 
     bool     down = (digitalRead(BTN_USER_GPIO) == LOW);
     uint32_t now  = millis();
@@ -130,6 +136,7 @@ void handleUserButton() {
     if (down && !prevDown) { pressStart = now; longFired = false; }   // press begins
     if (down && !longFired && (now - pressStart >= 3000)) {           // long press
         longFired = true;
+        pendingSingle = false;                     // don't also fire a deferred toggle
         uiManager.enterSleep();   // returns here once the button wakes it
     }
     if (!down && prevDown) {                                          // released
@@ -137,13 +144,31 @@ void handleUserButton() {
         if (!longFired && held >= 40 && held < 3000) {                // short press
             // While the alarm is ringing, the top button STOPS it (same as
             // tapping the on-screen STOP) — much more natural half-asleep
-            // than aiming at a touch target. Otherwise: normal screen toggle.
+            // than aiming at a touch target.
             if (uiManager.isAlarmOverlayActive()) {
                 uiManager.stopRingingAlarm();      // stops the buzzer + closes overlay
+            } else if (uiManager.nftDoublePressActive()) {
+                // On the NFT screen (or already fullscreen): a SECOND short press
+                // within DOUBLE_MS toggles fullscreen; otherwise defer the normal
+                // screen toggle so the second press has time to arrive.
+                if (now - lastShortReleaseAt < DOUBLE_MS) {
+                    lastShortReleaseAt = 0;
+                    pendingSingle = false;
+                    uiManager.toggleNftFullscreen();
+                } else {
+                    lastShortReleaseAt = now;
+                    pendingSingle = true;
+                    pendingSingleAt = now;
+                }
             } else {
-                uiManager.toggleScreen();
+                uiManager.toggleScreen();           // instant everywhere else
             }
         }
+    }
+    // Fire a deferred single press once the double-press window has passed.
+    if (pendingSingle && now - pendingSingleAt >= DOUBLE_MS) {
+        pendingSingle = false;
+        uiManager.toggleScreen();
     }
     prevDown = down;
 }
@@ -459,6 +484,22 @@ void loop() {
             pendingOtaSha256  = sha;
             // Show a persistent badge on all screens; user can dismiss or install.
             uiManager.showOtaBadge(ver.c_str());
+        }
+    }
+
+    // Manual "Check for updates" from the device settings popup. Runs on demand,
+    // any time (not just the overnight window). Shows the install badge if a
+    // newer image exists, or an "up to date" bar otherwise.
+    if (uiManager.otaCheckRequested) {
+        uiManager.otaCheckRequested = false;
+        String ver, url, sha;
+        if (otaUpdater.checkNewVersion(ver, url, sha)) {
+            pendingOtaVersion = ver;
+            pendingOtaUrl     = url;
+            pendingOtaSha256  = sha;
+            uiManager.showOtaBadge(ver.c_str());
+        } else {
+            uiManager.showOtaInfo("Firmware is up to date");
         }
     }
 
