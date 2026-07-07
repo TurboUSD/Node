@@ -1188,7 +1188,18 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
       const res = await callFunction<{ results: { name?: string; image_url?: string; collection_name?: string; floor_price_eth?: number; error?: string }[] }>('resolve-nft', { items: [id] })
       const result = res?.results?.[0]
       if (!result || result.error) {
-        setError(result?.error ?? 'Could not fetch NFT metadata from OpenSea.')
+        // The DEVICE resolves manual picks with its own OpenSea key, so a failed
+        // PREVIEW lookup here (e.g. the resolve-nft function has no OPENSEA_API_KEY
+        // set in Supabase → 401) must NOT block adding the pin. Add it with a
+        // fallback name; the device fills in the real name/image/floor.
+        onChange([...items, {
+          chain:    parsed.chain,
+          contract: parsed.contract,
+          tokenId:  parsed.tokenId,
+          name:     `#${parsed.tokenId}`,
+        }])
+        setUrl('')
+        setError('Added. Preview metadata could not be fetched here, but the device will still resolve and display it.')
         return
       }
       onChange([...items, {

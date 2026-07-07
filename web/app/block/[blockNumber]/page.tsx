@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import NodeOverlay from '@/components/NodeOverlay'
+import { VerifiedBadge, UnverifiedBadge, GenesisBadge } from '@/components/NodeBadges'
 
 const C = {
   green:   '#43e397',
@@ -127,7 +128,8 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
               {tipNum != null && (
                 <Row label="Depth"      value={tipNum - block.block_number === 0
                                                  ? 'Chain tip (0 blocks deep)'
-                                                 : `${tipNum - block.block_number} block${tipNum - block.block_number !== 1 ? 's' : ''} deep`} />
+                                                 : `${tipNum - block.block_number} block${tipNum - block.block_number !== 1 ? 's' : ''} deep`}
+                                        hint="How many blocks have been mined after this one. The newest block (the chain tip) is 0 deep." />
               )}
               <Row label="Timestamp"    value={formatTs(block.mined_at)} />
               <Row label="Reward"       value={`${block.reward_tusd} ₸USD`} color={C.green} />
@@ -136,15 +138,19 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
                 label="Winner"
                 value={
                   block.winner_node_code ? (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       {/* Tap the name (or the id when there's no name) → node card overlay */}
                       <button onClick={() => setOverlayCode(block.winner_node_code)} style={s.nameBtn}>
                         {block.winner_display_name
                           ? <>{block.winner_display_name} <span style={{ color: C.muted, fontWeight: 400 }}>({block.winner_node_code})</span></>
                           : block.winner_node_code}
                       </button>
-                      {block.winner_is_verified && <span style={s.verBadge}>✓ verified</span>}
-                      {block.winner_is_genesis   && <span style={s.genBadge}>⚡ genesis</span>}
+                      {/* Same badges as the network cards: verified/unverified check
+                          (tap → explanation) and, for founders, just the ⚡ (tap →
+                          genesis popup). The old "✓ verified" / "⚡ genesis" text wrapped
+                          onto a second line. */}
+                      {block.winner_is_verified ? <VerifiedBadge size={16} /> : <UnverifiedBadge size={14} />}
+                      {block.winner_is_genesis && <GenesisBadge size={16} />}
                     </span>
                   ) : '—'
                 }
@@ -257,13 +263,16 @@ const s: Record<string, React.CSSProperties> = {
   link:     { color: C.green, textDecoration: 'none', fontWeight: 600 },
   nameBtn:  { background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: C.green, fontWeight: 600, fontSize: 14, fontFamily: 'inherit' },
   hashLink: { color: C.blue, textDecoration: 'none', fontFamily: 'monospace', fontSize: 13 },
-  code:     { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '2px 5px', fontFamily: 'monospace', fontSize: 12 },
+  // break-all + a max width so the 66-char Base hash wraps instead of forcing
+  // the whole page wider (it used to overflow to the right and let you zoom out).
+  code:     { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '2px 5px', fontFamily: 'monospace', fontSize: 12,
+              wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%' },
 
   dim: { color: C.muted, fontSize: 14 },
   btn: { display: 'inline-block', padding: '10px 20px', border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, textDecoration: 'none', fontSize: 14, marginTop: 16 },
 
   navRow:         { display: 'flex', justifyContent: 'space-between', gap: 12 },
-  // Clearer, in the blue tone of the "how the winner was chosen" box.
-  navBtn:         { padding: '11px 20px', background: `${C.blue}22`, border: `1px solid ${C.blue}66`, borderRadius: 8, color: '#dbe7ff', textDecoration: 'none', fontSize: 14, fontWeight: 700, display: 'inline-block', cursor: 'pointer' },
-  navBtnDisabled: { padding: '11px 20px', background: `${C.blue}08`, border: `1px solid ${C.blue}20`, borderRadius: 8, color: C.muted, fontSize: 14, fontWeight: 700, opacity: 0.5, display: 'inline-block' },
+  // Solid, clearly-visible buttons (the translucent blue was almost invisible on black).
+  navBtn:         { padding: '11px 20px', background: '#18233b', border: '1px solid #4a6aa8', borderRadius: 8, color: '#dbe7ff', textDecoration: 'none', fontSize: 14, fontWeight: 700, display: 'inline-block', cursor: 'pointer' },
+  navBtnDisabled: { padding: '11px 20px', background: '#131316', border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 14, fontWeight: 700, opacity: 0.6, display: 'inline-block' },
 }

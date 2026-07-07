@@ -124,40 +124,6 @@ function fmtCountdown(ms: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-// ── Drag-to-scroll for the mined-blocks lane ──────────────────────────────────
-// Mouse users grab the lane and drag it sideways (touch scrolls natively).
-// The pending block sits OUTSIDE the lane, so it never moves. A real drag
-// (>5 px) marks the lane so the click that fires on release doesn't open the
-// block link under the cursor.
-function laneDragStart(e: React.MouseEvent<HTMLDivElement>) {
-  const el = e.currentTarget
-  const startX = e.clientX
-  const startScroll = el.scrollLeft
-  el.dataset.dragged = ''
-  const move = (ev: MouseEvent) => {
-    const dx = ev.clientX - startX
-    if (Math.abs(dx) > 5) el.dataset.dragged = '1'
-    el.scrollLeft = startScroll - dx
-    ev.preventDefault()
-  }
-  const up = () => {
-    window.removeEventListener('mousemove', move)
-    window.removeEventListener('mouseup', up)
-  }
-  window.addEventListener('mousemove', move)
-  window.addEventListener('mouseup', up)
-  e.preventDefault()
-}
-
-function laneSuppressClickAfterDrag(e: React.MouseEvent<HTMLDivElement>) {
-  const el = e.currentTarget
-  if (el.dataset.dragged === '1') {
-    el.dataset.dragged = ''
-    e.preventDefault()
-    e.stopPropagation()
-  }
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 export default function NetworkPage() {
   const [nodes,        setNodes]        = useState<NodeRow[]>([])
@@ -171,6 +137,37 @@ export default function NetworkPage() {
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
   }, [])
+
+  // ── Mined-blocks lane: same ref-based drag as the device page (the old
+  // mousedown+suppress-click hack made a block "disappear"/navigate when you
+  // tried to drag). A real drag (>6 px) sets `moved`, which suppresses the
+  // click-to-open-block navigation so dragging never opens a block page.
+  const blockLaneRef = useRef<HTMLDivElement>(null)
+  const blockDrag    = useRef({ on: false, startX: 0, startScroll: 0, moved: false })
+  function onBlockLaneDown(e: React.MouseEvent<HTMLDivElement>) {
+    const el = blockLaneRef.current
+    if (!el) return
+    blockDrag.current = { on: true, startX: e.clientX, startScroll: el.scrollLeft, moved: false }
+    const move = (ev: MouseEvent) => {
+      if (!blockDrag.current.on || !blockLaneRef.current) return
+      const dx = ev.clientX - blockDrag.current.startX
+      if (Math.abs(dx) > 6) blockDrag.current.moved = true
+      blockLaneRef.current.scrollLeft = blockDrag.current.startScroll - dx
+      ev.preventDefault()
+    }
+    const up = () => {
+      blockDrag.current.on = false
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    e.preventDefault()
+  }
+  function onBlockClick(e: React.MouseEvent, blockNumber: number) {
+    if (blockDrag.current.moved) { e.preventDefault(); return }  // it was a drag, not a click
+    window.location.href = `/block/${blockNumber}`
+  }
 
   // Install-to-home-screen state
   const [deferredPrompt, setDeferredPrompt] = useState<Event | null>(null)
@@ -318,16 +315,22 @@ export default function NetworkPage() {
       {/* Hidden-scrollbar rule for the drag-scrollable mined lane (WebKit
           needs a real stylesheet — no inline ::-webkit-scrollbar). */}
       <style>{`.tusd-lane::-webkit-scrollbar{display:none}`}</style>
-      <div style={s.tickerWrap} aria-hidden="true">
+      <div style={s.tickerWrap}>
         <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}>
           <div style={s.tickerMinedLane} className="tusd-lane"
-            onMouseDown={laneDragStart}
-            onClickCapture={laneSuppressClickAfterDrag}
-            ref={el => { if (el && el.dataset.autoscrolled !== String(minedOldestFirst.length)) { el.scrollLeft = el.scrollWidth; el.dataset.autoscrolled = String(minedOldestFirst.length) } }}>
+            onMouseDown={onBlockLaneDown}
+            ref={el => {
+              blockLaneRef.current = el
+              if (el && el.dataset.autoscrolled !== String(minedOldestFirst.length)) {
+                el.scrollLeft = el.scrollWidth   // newest parks next to the divider
+                el.dataset.autoscrolled = String(minedOldestFirst.length)
+              }
+            }}>
             {minedOldestFirst.length === 0
               ? <span style={{ alignSelf: 'center', color: C.muted, fontSize: 11, whiteSpace: 'nowrap' }}>No blocks mined yet, first one below ↓</span>
               : minedOldestFirst.map(b => (
-                  <div key={b.block_number} style={{ animation: 'blockIn .6s ease', flexShrink: 0 }}>
+                  <div key={b.block_number} style={{ animation: 'blockIn .6s ease', flexShrink: 0, cursor: 'pointer' }}
+                    onClick={e => onBlockClick(e, b.block_number)}>
                     <BlockTile block={b} circlePct={circlePct} minsLeft={minsLeft} />
                   </div>
                 ))}
@@ -386,7 +389,7 @@ export default function NetworkPage() {
               ? /* Desktop: two side-by-side tables */
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                   <LeaderColumn
-                    title="₸ Rewards"
+                    title="Total Rewards"
                     nodes={[...nodes].sort((a, b) => b.total_tusd_earned - a.total_tusd_earned)}
                     right={(node: NodeRow) => (
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -567,9 +570,9 @@ function BlockTile({ block, circlePct, minsLeft }: {
     </div>
   )
 
-  return mined
-    ? <a href={`/block/${block.block_number}`} style={{ textDecoration: 'none' }}>{tile}</a>
-    : <>{tile}</>
+  // Navigation to /block/N is handled by the lane wrapper (with a drag guard),
+  // so this just returns the tile — no <a> that would fire mid-drag.
+  return tile
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -765,7 +768,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         const memberStr = memberSince === 0 ? 'today' : memberSince < 30 ? `${memberSince}d` : `${Math.floor(memberSince / 30)}mo`
 
         const popupHtml = `
-          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:200px;background:#111;border:1px solid #222;border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px #000a">
+          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:244px;background:#111;border:1px solid #222;border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px #000a">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
               <span style="width:8px;height:8px;border-radius:50%;background:${online ? '#43e397' : '#555'};flex-shrink:0"></span>
               <span style="font-weight:700;font-size:14px;color:#e8e8e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${node.display_name || node.node_code}</span>
@@ -779,7 +782,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
               </div>
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
                 <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Uptime</div>
-                <div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-top:2px">${fmtUptimeSecs(totalUptime(node))}</div>
+                <div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-top:2px;white-space:nowrap">${fmtUptimeSecs(totalUptime(node))}</div>
               </div>
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
                 <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Member</div>
@@ -792,7 +795,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         marker.bindPopup(popupHtml, {
           className:   'turbousd-popup',
           closeButton: false,
-          maxWidth:    260,
+          maxWidth:    300,
           offset:      [0, -2],
         })
         marker.addTo(mapRef.current)
@@ -875,7 +878,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
       `}</style>
       <div
         ref={containerRef}
-        style={{ height: 380, borderRadius: 12, overflow: 'hidden', border: `1px solid ${C.border}` }}
+        style={{ height: 'clamp(240px, 42vw, 320px)', borderRadius: 12, overflow: 'hidden', border: `1px solid ${C.border}` }}
       />
       <p style={{ fontSize: 11, color: C.muted, marginTop: 8, opacity: 0.7 }}>
         Location is auto-detected from each device&apos;s IP and blurred to country level. Markers are intentionally NOT exact.
@@ -924,16 +927,20 @@ function NetworkGrowthSparkline({ data, totalNodes }: {
 
 function OnlineNodeCard({ node, onClick, wide }: { node: NodeRow; onClick: () => void; wide?: boolean }) {
   const firstOnline = new Date(node.created_at).toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'short', year: 'numeric',
+    day: 'numeric', month: 'short', year: '2-digit',
   })
-  // On desktop (`wide`) the stat chips move to the RIGHT of the name — the
-  // card has plenty of free width there. On mobile they stay stacked below.
+  // FIXED-WIDTH grid so the four stats line up in the SAME columns on every
+  // card (they used to shift around because flex chips are content-sized). On
+  // desktop the grid sits to the RIGHT of the name; on mobile it drops below,
+  // still tabulated. Same template both ways → everything reads down a column.
   const stats = (
     <div style={{
-      display: 'flex', gap: wide ? 20 : 14,
+      display: 'grid',
+      gridTemplateColumns: '84px 66px 46px 78px',
+      columnGap: 8,
       ...(wide
-        ? { marginLeft: 'auto', flexShrink: 0, alignItems: 'center', flexWrap: 'nowrap' as const }
-        : { marginTop: 5, flexWrap: 'wrap' as const }),
+        ? { marginLeft: 'auto', flexShrink: 0, alignItems: 'center' }
+        : { marginTop: 8, width: '100%' }),
     }}>
       <StatChip label="Since" value={firstOnline} />
       <StatChip label="Uptime" value={totalUptime(node) > 0 ? fmtUptimeSecs(totalUptime(node)) : '—'} />
@@ -972,9 +979,10 @@ function OnlineNodeCard({ node, onClick, wide }: { node: NodeRow; onClick: () =>
 
 function StatChip({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 1 }}>
+    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 1, minWidth: 0 }}>
       <span style={{ fontSize: 10, color: '#9a9aa2', textTransform: 'uppercase' as const, letterSpacing: 0.6 }}>{label}</span>
-      <span style={{ fontSize: 13, fontWeight: 600, color: color ?? C.text }}>{value}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: color ?? C.text,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
     </div>
   )
 }
@@ -1222,7 +1230,7 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex', gap: 14, padding: '12px 8px 16px', overflowX: 'auto' as const, overflowY: 'hidden' as const,
     minWidth: 0, maxWidth: 'calc(100% - 180px)',
     // Scrollbar hidden — the lane drag-scrolls with the mouse (see
-    // laneDragStart) and swipes natively on touch.
+    // onBlockLaneDown) and swipes natively on touch.
     scrollbarWidth: 'none' as const, msOverflowStyle: 'none' as const,
     cursor: 'grab', userSelect: 'none' as const,
   },
