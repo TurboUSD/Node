@@ -1,11 +1,11 @@
 // include/screenshot_server.h — pixel-perfect screenshots over WiFi.
 //
-// The Arduino core's IDF predates esp_lcd_rgb_panel_get_frame_buffer(), so
-// we can't read the panel's own PSRAM framebuffer. Instead the display
-// flush_cb mirrors every blitted region into a SHADOW framebuffer owned
-// here (460 KB PSRAM, allocated at display init) — at any moment it holds
-// the exact composited frame on the glass. This tiny HTTP server streams it
-// as a 16-bit BMP:
+// The display runs double-buffered (two PSRAM framebuffers, full-refresh), so
+// flush_cb hands us a pointer to the whole live frame each refresh via
+// setLiveFrame(). On capture we snapshot that framebuffer ONCE into a stable
+// SHADOW buffer (460 KB PSRAM) so the slow ~150 ms WiFi stream can't tear when
+// LVGL swaps framebuffers mid-transfer. This tiny HTTP server streams it as a
+// 16-bit BMP:
 //
 //   http://<device-ip>/          — preview page with a Save button
 //   http://<device-ip>/shot.bmp  — the raw 480×480 screenshot
@@ -28,7 +28,8 @@
 namespace screenshot {
 
 static WebServer* s_srv    = nullptr;
-static uint16_t*  s_shadow = nullptr;   // 480×480 RGB565 mirror of the panel
+static uint16_t*  s_shadow = nullptr;   // 480×480 RGB565 stable snapshot buffer
+static const uint16_t* s_live = nullptr; // last full frame LVGL handed to the panel
 
 inline bool started() { return s_srv != nullptr; }
 
@@ -40,21 +41,23 @@ inline void ensureShadow() {
     if (!s_shadow) Log.println("Screenshot: shadow fb alloc FAILED (no captures)");
 }
 
-// Called from the LVGL flush_cb with every region blitted to the panel.
-inline void mirror(const lv_area_t* area, const lv_color_t* px) {
-    if (!s_shadow) return;
-    int w = area->x2 - area->x1 + 1;
-    for (int y = area->y1; y <= area->y2; y++)
-        memcpy(&s_shadow[(size_t)y * LCD_H_RES + area->x1],
-               (const uint16_t*)px + (size_t)(y - area->y1) * w,
-               (size_t)w * 2);
-}
+// Called from the LVGL flush_cb with the framebuffer just handed to the panel.
+// Double-buffering + full_refresh means every flush is a whole frame, so we just
+// remember which PSRAM framebuffer is live; _sendBmp snapshots it on demand (no
+// per-frame copy). Cheap pointer store — safe to call on every flush.
+inline void setLiveFrame(const void* fb) { s_live = (const uint16_t*)fb; }
 
 inline void _u16(uint8_t* p, uint16_t v)  { p[0] = v & 0xFF; p[1] = v >> 8; }
 inline void _u32(uint8_t* p, uint32_t v)  { p[0] = v & 0xFF; p[1] = (v >> 8) & 0xFF; p[2] = (v >> 16) & 0xFF; p[3] = v >> 24; }
 
 inline void _sendBmp() {
-    const void* fb = s_shadow;
+    // Snapshot the live framebuffer into the stable shadow buffer ONCE (a ~2 ms
+    // 460 KB PSRAM copy) so the slow WiFi stream below isn't torn by LVGL
+    // swapping framebuffers mid-transfer. Fall back to the raw live FB if the
+    // shadow alloc failed.
+    if (s_live && s_shadow)
+        memcpy(s_shadow, s_live, (size_t)LCD_H_RES * LCD_V_RES * 2);
+    const void* fb = s_shadow ? (const void*)s_shadow : (const void*)s_live;
     if (!fb) {
         s_srv->send(500, "text/plain", "framebuffer unavailable");
         return;

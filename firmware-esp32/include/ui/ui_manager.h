@@ -26,6 +26,9 @@
 #include <lvgl.h>
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_panel_ops.h"
+#include "freertos/FreeRTOS.h"   // VSYNC handshake semaphores (tear-free double-buffer)
+#include "freertos/semphr.h"
+#include "esp_attr.h"            // IRAM_ATTR for the VSYNC ISR callback
 #include "driver/gpio.h"
 #include "esp_sleep.h"          // light sleep for the user-button "power off"
 #include "board_pins.h"
@@ -55,6 +58,31 @@ enum class ScreenId : uint8_t {
     TICKERS = 6,  // last — settings-like screener
     COUNT = 7
 };
+
+// ── Tear-free double-buffer VSYNC handshake (esp_lcd RGB + LVGL full_refresh) ──
+// With num_fbs=2 the driver keeps two PSRAM framebuffers and swaps them on the
+// panel's VSYNC. LVGL renders a whole frame into the back buffer; flush_cb blocks
+// until the PREVIOUS frame's VSYNC before pushing the new one, so LVGL is
+// throttled to one frame per refresh and never draws into the buffer the panel
+// is still scanning out (the cause of tearing). Two binary semaphores implement
+// the canonical Espressif handshake.
+static SemaphoreHandle_t s_rgbVsyncSem = nullptr;   // given by the VSYNC ISR
+static SemaphoreHandle_t s_rgbGuiReady = nullptr;   // given by flush before it waits
+
+// Runs inside the RGB panel's VSYNC interrupt. custom_sdkconfig sets
+// CONFIG_LCD_RGB_ISR_IRAM_SAFE=y, so this handler (and everything it calls) is
+// IRAM-resident and touches only ISR-safe APIs — it can fire while the flash
+// cache is disabled during a LittleFS write.
+static IRAM_ATTR bool rgbOnVsync(esp_lcd_panel_handle_t,
+                                 const esp_lcd_rgb_panel_event_data_t*,
+                                 void*) {
+    BaseType_t hp = pdFALSE;
+    if (s_rgbGuiReady && s_rgbVsyncSem &&
+        xSemaphoreTakeFromISR(s_rgbGuiReady, &hp) == pdTRUE) {
+        xSemaphoreGiveFromISR(s_rgbVsyncSem, &hp);
+    }
+    return hp == pdTRUE;
+}
 
 class UiManager {
 public:
@@ -865,9 +893,11 @@ private:
         esp_lcd_rgb_panel_config_t panelCfg = {};
         panelCfg.clk_src                    = LCD_CLK_SRC_XTAL;  // DEFAULT renamed in IDF 5.1+
         panelCfg.data_width                 = 16;
-        // bits_per_pixel left 0 → defaults to data_width (16bpp RGB565) in IDF 5.1.
-        // (num_fbs IS still a struct field in IDF 5.1.4 and is set to 1 below.)
-        panelCfg.psram_trans_align          = 64;
+        // bits_per_pixel left 0 → defaults to data_width (16bpp RGB565).
+        // IDF 5.3+ renamed psram_trans_align → dma_burst_size (bytes, power of 2,
+        // in a union with the deprecated name). 64 was the old alignment and is a
+        // valid burst size.
+        panelCfg.dma_burst_size             = 64;
         panelCfg.hsync_gpio_num             = LCD_PIN_HSYNC;
         panelCfg.vsync_gpio_num             = LCD_PIN_VSYNC;
         panelCfg.de_gpio_num                = LCD_PIN_DE;
@@ -901,51 +931,84 @@ private:
         panelCfg.timings.flags.pclk_active_neg = 0;  // matches Seeed's verified Arduino
                                                      // reference (Arduino_GFX uses the
                                                      // default 0 for this panel).
-        panelCfg.num_fbs           = 1;    // single framebuffer in PSRAM
+        // DOUBLE FRAMEBUFFER (tear-free): two full-screen framebuffers in PSRAM
+        // (2×450 KB). LVGL renders a whole frame into the back buffer; the driver
+        // swaps front/back on VSYNC (see the flush handshake below), so the panel
+        // never scans a half-drawn frame → no tearing on swipes / NFT loads /
+        // chart redraws. (The old ~460 KB screenshot shadow fb is dropped now that
+        // the screenshot reads the live FB, so net PSRAM is ~unchanged.)
+        panelCfg.num_fbs           = 2;
         panelCfg.flags.fb_in_psram = 1;
-        // Bounce-buffer mode: the ~450 KB frame buffer stays in PSRAM, but the
-        // panel is fed from a small internal-SRAM bounce buffer that the driver
-        // refills by DMA. This DECOUPLES scanout from PSRAM bandwidth, which is
-        // the root cause of the random horizontal/vertical desync — with a bare
-        // PSRAM framebuffer the panel FIFO underruns whenever PSRAM is contended
-        // (image decode / LVGL blits / WiFi) and latches a random offset.
-        // 10 lines (480*10*2 = ~9.4 KB SRAM) is plenty of slack at 12 MHz PCLK.
-        // This is only rock-steady because platformio.ini's custom_sdkconfig
-        // rebuilds esp_lcd with LCD_RGB_ISR_IRAM_SAFE + LCD_RGB_RESTART_IN_VSYNC
-        // + GDMA_*_IRAM + PSRAM XIP. ISR_IRAM_SAFE keeps the refill ISR running
-        // during LittleFS flash writes; RESTART_IN_VSYNC re-aligns the GDMA every
-        // VBlank so any momentary underrun can't latch into a PERMANENT shift
-        // (that latched shift was the horizontal/vertical mis-position bug).
-        // Without those flags the bounce buffer "rolls" — that was the old bug.
+        // Bounce buffer (on TOP of double-fb): the panel is fed from a small
+        // internal-SRAM bounce buffer the driver DMA-refills from PSRAM, decoupling
+        // scanout from PSRAM bandwidth spikes (image decode / WiFi). It is only
+        // rock-steady because platformio.ini's custom_sdkconfig recompiles esp_lcd
+        // from source (Hybrid Compile) with LCD_RGB_ISR_IRAM_SAFE +
+        // LCD_RGB_RESTART_IN_VSYNC + PSRAM XIP: ISR_IRAM_SAFE keeps the refill ISR
+        // alive during LittleFS flash writes; RESTART_IN_VSYNC re-aligns the GDMA
+        // every VBlank so a momentary underrun can't latch a PERMANENT shift.
         panelCfg.bounce_buffer_size_px = LCD_H_RES * 10;
 
-        ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
+        // Create the panel. bounce-buffer + double-fb is the ideal combo, but if a
+        // given IDF rejects it, gracefully retry WITHOUT the bounce buffer
+        // (double-fb + XIP + RESTART_IN_VSYNC still gives a tear-free,
+        // flash-write-immune display) rather than aborting into a boot loop.
+        esp_err_t lcdErr = esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel);
+        if (lcdErr != ESP_OK && panelCfg.bounce_buffer_size_px != 0) {
+            Log.printf("Display: RGB create failed w/ bounce+double_fb (%s) — retry no-bounce\n",
+                       esp_err_to_name(lcdErr));
+            panelCfg.bounce_buffer_size_px = 0;
+            lcdErr = esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel);
+        }
+        ESP_ERROR_CHECK(lcdErr);
         ESP_ERROR_CHECK(esp_lcd_panel_reset(_lcdPanel));
         ESP_ERROR_CHECK(esp_lcd_panel_init(_lcdPanel));
-        // Distinctive marker so /logs unambiguously shows you're on the
-        // bounce-buffer build (look for "bounce=" right after boot).
-        Log.printf("Display: RGB panel up, bounce=%d px, IRAM-safe scanout\n",
-                   LCD_H_RES * 10);
 
-        // 9. Register LVGL display driver.
-        //    Draw buffer: 480×20 lines in internal SRAM (fast partial rendering).
-        //    LVGL calls flush_cb for each dirty region; we blit it to the RGB
-        //    framebuffer via esp_lcd_panel_draw_bitmap().
+        // VSYNC callback drives the tear-free handshake consumed by flush_cb.
+        s_rgbVsyncSem = xSemaphoreCreateBinary();
+        s_rgbGuiReady = xSemaphoreCreateBinary();
+        esp_lcd_rgb_panel_event_callbacks_t rgbCbs = {};
+        rgbCbs.on_vsync = rgbOnVsync;
+        esp_lcd_rgb_panel_register_event_callbacks(_lcdPanel, &rgbCbs, nullptr);
+
+        // Distinctive marker in /logs: "2 FBs" confirms the double-buffer build,
+        // "bounce=10" that the bounce buffer survived (0 = graceful fallback).
+        Log.printf("Display: RGB panel up — 2 FBs (double-buffer), bounce=%d lines, IRAM-safe scanout\n",
+                   (int)(panelCfg.bounce_buffer_size_px / LCD_H_RES));
+
+        // 9. Register LVGL display driver in DIRECT / full-refresh mode.
+        //    LVGL's two draw buffers ARE the panel's two PSRAM framebuffers, so
+        //    LVGL renders straight into the buffer that will be shown next. With
+        //    full_refresh=1 it redraws the whole 480×480 frame each pass (required
+        //    when the draw buffers are the panel FBs — partial updates would leave
+        //    the two buffers out of sync). This also frees the old ~19 KB internal
+        //    SRAM draw buffer, easing the SRAM pressure from mbedtls + bounce buf.
+        void* fb0 = nullptr; void* fb1 = nullptr;
+        ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(_lcdPanel, 2, &fb0, &fb1));
         static lv_disp_draw_buf_t drawBuf;
-        static lv_color_t         lvBuf[LCD_H_RES * 20];
-        lv_disp_draw_buf_init(&drawBuf, lvBuf, nullptr, LCD_H_RES * 20);
+        lv_disp_draw_buf_init(&drawBuf, fb0, fb1, LCD_H_RES * LCD_V_RES);
 
         static lv_disp_drv_t dispDrv;
         lv_disp_drv_init(&dispDrv);
-        dispDrv.hor_res   = LCD_H_RES;
-        dispDrv.ver_res   = LCD_V_RES;
-        dispDrv.draw_buf  = &drawBuf;
-        dispDrv.user_data = _lcdPanel;
+        dispDrv.hor_res      = LCD_H_RES;
+        dispDrv.ver_res      = LCD_V_RES;
+        dispDrv.draw_buf     = &drawBuf;
+        dispDrv.user_data    = _lcdPanel;
+        dispDrv.full_refresh = 1;   // whole-frame redraw into alternating FBs
         dispDrv.flush_cb  = [](lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* colorP) {
             esp_lcd_panel_handle_t panel = static_cast<esp_lcd_panel_handle_t>(drv->user_data);
+            // Tear-free handshake: wait for the PREVIOUS frame's VSYNC before
+            // pushing this one, so LVGL never reuses a buffer the panel is still
+            // scanning. A timeout (not portMAX_DELAY) means a stalled VSYNC can
+            // never hard-freeze the UI into a task-watchdog reboot — worst case a
+            // single frame tears.
+            if (s_rgbGuiReady && s_rgbVsyncSem) {
+                xSemaphoreGive(s_rgbGuiReady);
+                xSemaphoreTake(s_rgbVsyncSem, pdMS_TO_TICKS(60));
+            }
             esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1,
                                       area->x2 + 1, area->y2 + 1, colorP);
-            screenshot::mirror(area, colorP);   // shadow fb for http://<ip>/shot.bmp
+            screenshot::setLiveFrame(colorP);   // /shot.bmp snapshots this live FB
             lv_disp_flush_ready(drv);
         };
         lv_disp_drv_register(&dispDrv);
