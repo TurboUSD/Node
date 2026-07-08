@@ -266,7 +266,7 @@ public:
         lv_obj_t* awLbl = lv_label_create(_addWalletBtn);
         lv_label_set_text(awLbl, "Wallet");
         lv_obj_set_style_text_font(awLbl, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(awLbl, lv_color_hex(NFT_CLR_ACTIVE), 0);
+        lv_obj_set_style_text_color(awLbl, lv_color_hex(NFT_CLR_MUTED), 0);   // same grey as the gear icon on the right
         lv_obj_center(awLbl);
         lv_obj_add_event_cb(_addWalletBtn, [](lv_event_t* e) {
             NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
@@ -436,6 +436,7 @@ private:
         uint32_t dotsAt = 0;             // when the carousel dots were last revealed (tap)
         const uint8_t* shownPx = nullptr; // bitmap currently displayed (repaint only on change)
         lv_coord_t cellW = 0, cellH = 0;  // set at build — lv_obj_get_width() reads 0 pre-layout
+        lv_obj_t* capBand   = nullptr;   // opaque caption strip; PARENT of nameLbl/floorLbl
         lv_obj_t* nameLbl   = nullptr;
         lv_obj_t* floorLbl  = nullptr;
         lv_obj_t* dotRow    = nullptr;   // carousel position dots
@@ -822,7 +823,12 @@ private:
 
     static double _floorUsd(const NftItem& it) {
         double rate = it.floor_btc ? s_btcUsd : s_ethUsd;
-        if (rate <= 0) return (double)it.floor_price_eth;   // no rate → raw fallback
+        // If the BTC rate fetch failed, DON'T fall back to the raw BTC floor: a
+        // NodeMonke at 0.039 BTC would then be compared as "0.039" against ETH
+        // collections' USD floors and sink to the bottom. Estimate from the ETH
+        // rate instead (BTC ≈ 22× ETH) so BTC ordinals still rank sensibly.
+        if (rate <= 0 && it.floor_btc && s_ethUsd > 0) rate = s_ethUsd * 22.0;
+        if (rate <= 0) return (double)it.floor_price_eth;   // no rate at all → raw fallback
         return (double)it.floor_price_eth * rate;
     }
 
@@ -1443,16 +1449,39 @@ private:
         }
 
         if (_fullscreen || !storage.getNftShowData()) {   // fullscreen or "Data" off → no captions
-            if (cw.nameLbl)  { lv_obj_del(cw.nameLbl);  cw.nameLbl  = nullptr; }
-            if (cw.floorLbl) { lv_obj_del(cw.floorLbl); cw.floorLbl = nullptr; }
-            if (cw.dotRow)   { lv_obj_del(cw.dotRow);   cw.dotRow   = nullptr; }
+            // nameLbl/floorLbl are CHILDREN of capBand — deleting the band deletes them.
+            if (cw.capBand) { lv_obj_del(cw.capBand); cw.capBand = nullptr;
+                              cw.nameLbl = nullptr;   cw.floorLbl = nullptr; }
+            if (cw.dotRow)  { lv_obj_del(cw.dotRow);  cw.dotRow   = nullptr; }
             return;
         }
 
-        // ── Caption band (dedicated dark strip UNDER the artwork): name on
-        // the left, floor on the right, SAME baseline row — readable always,
-        // never overlaid on the art.
-        // Name: smaller face on the dense 3x3 grid. Long names stay on ONE
+        // ── Caption band: a REAL opaque object, not just container background
+        // showing below the art. That distinction is the whole bug: when a
+        // cell shows a STAND-IN bitmap decoded for a larger grid class (the
+        // px[] fallback above, while this grid's decode isn't ready), the
+        // bitmap is taller than the art area, nothing clips it to artH, and it
+        // ran under the caption row — on a WHITE artwork (Chromie Squiggle)
+        // the "band" showed white image and the name label floated as a loose
+        // dark box "inside" the picture. An opaque band kept in the FOREGROUND
+        // always gives the caption a dark home, and as the labels' PARENT it
+        // clips them, so no glyph pixel can ever escape into the artwork.
+        if (!cw.capBand) {
+            cw.capBand = lv_obj_create(cw.container);
+            lv_obj_set_size(cw.capBand, cw_w, NFT_CAPTION_H);
+            lv_obj_align(cw.capBand, LV_ALIGN_BOTTOM_MID, 0, 0);
+            lv_obj_set_style_border_width(cw.capBand, 0, 0);
+            lv_obj_set_style_radius(cw.capBand, 0, 0);
+            lv_obj_set_style_pad_all(cw.capBand, 0, 0);
+            lv_obj_clear_flag(cw.capBand, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_clear_flag(cw.capBand, LV_OBJ_FLAG_CLICKABLE);   // taps advance the carousel
+        }
+        lv_obj_set_style_bg_color(cw.capBand, lv_color_hex(bgColor), 0);   // tier can change on refresh
+        lv_obj_set_style_bg_opa(cw.capBand, LV_OPA_COVER, 0);
+        lv_obj_move_foreground(cw.capBand);   // above the image, whatever the creation order
+
+        // Name on the left, floor on the right, vertically centred in the
+        // band. Smaller face on the dense 3x3 grid. Long names stay on ONE
         // line and marquee sideways slowly (circular scroll) so the full
         // name — id included — is readable.
         const lv_font_t* nameFont = (_gridSize == 9) ? &lv_font_montserrat_8
@@ -1465,19 +1494,26 @@ private:
         // changed. Re-setting text every refresh restarted the circular marquee
         // (it jumped back to the start on every image-ready/carousel tick).
         bool nameNew = false;
-        if (!cw.nameLbl) { cw.nameLbl = lv_label_create(cw.container); nameNew = true; }
+        if (!cw.nameLbl) { cw.nameLbl = lv_label_create(cw.capBand); nameNew = true; }
         const char* curName = nameNew ? nullptr : lv_label_get_text(cw.nameLbl);
         if (nameNew || !curName || strcmp(curName, nameTxt) != 0) {
             lv_label_set_text(cw.nameLbl, nameTxt);
             lv_obj_set_width(cw.nameLbl, nameAvail);
             lv_obj_set_style_text_font(cw.nameLbl, nameFont, 0);
             lv_obj_set_style_text_color(cw.nameLbl, lv_color_hex(NFT_CLR_TEXT), 0);
-            // Opaque bg matching the caption band: the circular-scroll marquee then
+            // Opaque bg matching the band: the circular-scroll marquee then
             // repaints its OWN area each tick. A transparent label forced LVGL to
-            // re-composite the band underneath every frame, which flickered under
+            // re-composite what's underneath every frame, which flickered under
             // the direct_mode double buffer.
             lv_obj_set_style_bg_color(cw.nameLbl, lv_color_hex(bgColor), 0);
             lv_obj_set_style_bg_opa(cw.nameLbl, LV_OPA_COVER, 0);
+            // NATURAL (content) height — the label keeps the font's full line
+            // box. The old explicit 9 px height was 1 px SHORTER than
+            // montserrat_8's line box (10 px): descenders ("gg", "q") clipped,
+            // and because text height > object height LVGL's circular scroll
+            // also drew a vertical wrap-around copy of the text on every tick.
+            // Inside the 16 px band the full line box fits centred, and the
+            // band's own bg makes the tight-box hack pointless anyway.
             lv_point_t tsz;
             lv_txt_get_size(&tsz, nameTxt, nameFont, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
             if (tsz.x > nameAvail) {
@@ -1486,23 +1522,12 @@ private:
             } else {
                 lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_CLIP);
             }
-            // Make the opaque background HUG the caption instead of the font's
-            // full line box. The line box includes empty top leading, so the dark
-            // rectangle rose above the caption into the artwork — invisible on
-            // dark NFTs, but a visible dark strip on a WHITE one (Chromie
-            // Squiggle). A tight explicit height sitting flush at the bottom keeps
-            // the box down on the caption line. capH is the single number to tune
-            // if any dark still shows above the text (smaller = shorter box).
-            const lv_coord_t capH = (nameFont == &lv_font_montserrat_8) ? 9 : 12;
-            lv_obj_set_style_pad_top(cw.nameLbl, 0, 0);
-            lv_obj_set_style_pad_bottom(cw.nameLbl, 0, 0);
-            lv_obj_set_height(cw.nameLbl, capH);
-            lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -1);
+            lv_obj_align(cw.nameLbl, LV_ALIGN_LEFT_MID, 0, 0);
         }
 
         if (item.floor_price_eth > 0) {
             if (!cw.floorLbl) {
-                cw.floorLbl = lv_label_create(cw.container);
+                cw.floorLbl = lv_label_create(cw.capBand);
                 lv_obj_set_style_text_font(cw.floorLbl, ethXiFont10(), 0);
                 // Same colour as the name for EVERY cell — the old per-tier
                 // gold/blue/green colouring made the caption band look random.
@@ -1517,7 +1542,7 @@ private:
             else
                 snprintf(floorBuf, sizeof(floorBuf), "%.2f %s", item.floor_price_eth, sym);
             lv_label_set_text(cw.floorLbl, floorBuf);
-            lv_obj_align(cw.floorLbl, LV_ALIGN_BOTTOM_RIGHT, 0, -2);   // same row as the name
+            lv_obj_align(cw.floorLbl, LV_ALIGN_RIGHT_MID, 0, 0);   // same row as the name
         } else if (cw.floorLbl) {
             lv_obj_del(cw.floorLbl); cw.floorLbl = nullptr;
         }
@@ -1750,9 +1775,9 @@ private:
     void _applyBtnStyle(lv_obj_t* btn, bool active) {
         if (!btn) return;
         lv_obj_set_style_bg_color(btn, lv_color_hex(active ? 0x26262c : 0x141414), 0);
-        lv_obj_set_style_border_color(btn, lv_color_hex(active ? 0x8a8a92 : NFT_CLR_BORDER), 0);
+        lv_obj_set_style_border_color(btn, lv_color_hex(active ? 0xaeaeb6 : NFT_CLR_BORDER), 0);   // lighter active border
         lv_obj_t* lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(active ? NFT_CLR_ACTIVE : NFT_CLR_MUTED), 0);
+        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(active ? 0xededf1 : NFT_CLR_MUTED), 0);   // lighter active text
     }
 
     // ── Wallet entry dialog ───────────────────────────────────────────────────

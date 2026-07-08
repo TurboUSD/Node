@@ -215,7 +215,7 @@ public:
         lv_obj_t* addLbl = lv_label_create(_addBtn);
         lv_label_set_text(addLbl, "Add");
         lv_obj_set_style_text_font(addLbl, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(addLbl, lv_color_hex(0xd8d8dc), 0);   // matches the NFT bar's active tone
+        lv_obj_set_style_text_color(addLbl, lv_color_hex(CLR_MUTED), 0);   // same grey as the gear icon on the right
         lv_obj_center(addLbl);
 
         // 1-col / 2-col layout toggle (NFT-style pair of small buttons).

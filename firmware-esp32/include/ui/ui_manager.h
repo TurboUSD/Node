@@ -62,9 +62,10 @@ enum class ScreenId : uint8_t {
 // ── Double-buffer VSYNC handshake (esp_lcd RGB + LVGL direct_mode) ─────────────
 // num_fbs=2 keeps two PSRAM framebuffers; the panel swaps them on VSYNC so the
 // glass never shows a half-drawn frame (no tearing on NFT loads / transitions).
-// flush_cb blocks until the previous frame's VSYNC so LVGL never reuses a buffer
-// the panel is still scanning. (direct_mode — NOT full_refresh — means LVGL only
-// redraws the CHANGED area, so a static screen isn't repainted → no flicker.)
+// flush_cb queues the swap and THEN blocks until VSYNC, so by the time LVGL gets
+// control back the panel is scanning the NEW buffer and the old one is safe to
+// render into. (direct_mode — NOT full_refresh — means LVGL only redraws the
+// CHANGED area, so a static screen isn't repainted → no flicker.)
 static SemaphoreHandle_t s_rgbVsyncSem = nullptr;   // given by the VSYNC ISR
 static SemaphoreHandle_t s_rgbGuiReady = nullptr;   // given by flush before it waits
 
@@ -997,16 +998,27 @@ private:
             // In direct_mode LVGL may call flush per dirty area; only the LAST call
             // of a refresh should swap the framebuffer. colorP points at the start
             // of the just-rendered full FB, so draw the WHOLE panel to make that FB
-            // active (the swap). Wait for the previous frame's VSYNC first so LVGL
-            // never reuses a buffer the panel is still scanning (timeout, not
-            // portMAX, so a stalled VSYNC can't hard-freeze the UI).
+            // active (the swap).
+            //
+            // ORDER MATTERS (NFT marquee flicker fix): QUEUE the swap first, THEN
+            // wait for a VSYNC. With bounce buffers the FB switch queued by
+            // draw_bitmap only latches at a frame boundary, so the old order
+            // (wait → queue → return) handed control back to LVGL while the panel
+            // still scanned the OLD buffer for up to a full frame — and LVGL
+            // immediately rendered the next animation step into that same buffer.
+            // Continuously animated regions (the caption marquee on the NFT grid)
+            // were therefore modified MID-SCAN on every tick → localized shimmer,
+            // glaring on white artwork. Waiting AFTER the queue guarantees the
+            // panel has started scanning the NEW buffer before LVGL touches the
+            // old one. (Timeout, not portMAX, so a stalled VSYNC can't hard-freeze
+            // the UI; pacing is unchanged — one blocking VSYNC wait per refresh.)
             if (lv_disp_flush_is_last(drv)) {
+                esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_H_RES, LCD_V_RES, colorP);
+                screenshot::setLiveFrame(colorP);   // /shot.bmp snapshots this FB
                 if (s_rgbGuiReady && s_rgbVsyncSem) {
                     xSemaphoreGive(s_rgbGuiReady);
                     xSemaphoreTake(s_rgbVsyncSem, pdMS_TO_TICKS(60));
                 }
-                esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_H_RES, LCD_V_RES, colorP);
-                screenshot::setLiveFrame(colorP);   // /shot.bmp snapshots this FB
             }
             lv_disp_flush_ready(drv);
         };
