@@ -1418,6 +1418,7 @@ private:
         }, LV_EVENT_CLICKED, nullptr);
     }
 
+public:
     // Splash shown while the OTA image downloads (see the install button above).
     lv_obj_t* _otaSplash = nullptr;
 
@@ -1447,6 +1448,7 @@ private:
         lv_timer_handler();   // paint it immediately
     }
 
+private:
     static void onAlarmLabelTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openAlarmPicker(); }
     static void onAlarmIconTapped(lv_event_t* e)  { ((UiManager*)lv_event_get_user_data(e))->openAlarmPicker(); }
     static void onLogoTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->showScreen(ScreenId::CLOCK); }
