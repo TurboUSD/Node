@@ -65,7 +65,7 @@
 #define NFT_CLR_MUTED   0x6e7280
 #define NFT_CLR_GREEN   0x43e397
 #define NFT_CLR_ACTIVE  0xd8d8dc   // active-control tone (bright grey — green stole the show)
-#define NFT_CLR_TOGGLE_ON 0x9c9ca2 // carousel/data "on": softer than ACTIVE so the two
+#define NFT_CLR_TOGGLE_ON 0x80808a // carousel/data "on": softer than ACTIVE so the two
                                    // toggles no longer pull the eye off the artwork,
                                    // while staying clearly brighter than the muted "off"
 
@@ -1306,6 +1306,9 @@ private:
             lv_obj_t* cont = lv_event_get_current_target(e);
             int ci = (int)(intptr_t)lv_obj_get_user_data(cont);
             if (!self || ci < 0 || ci >= 9) return;
+            // A swipe that merely started on this cell shouldn't also advance the
+            // carousel / toggle fullscreen — bail if the finger travelled >slop.
+            if (g_touchWasSwipe()) return;
             lv_point_t p; lv_indev_get_point(lv_indev_get_act(), &p);
             lv_area_t a; lv_obj_get_coords(cont, &a);
             lv_coord_t mid = (a.x1 + a.x2) / 2;
@@ -2416,6 +2419,42 @@ private:
                 }
             }
             hStats.end();
+
+            // THE floor-sort fix: OpenSea's stats `total.floor_price` is
+            // frequently 0/stale for mid-size collections (it only reflects
+            // OpenSea-native listings), even when the collection clearly HAS a
+            // floor — that is exactly why mfers/opepen/vv-checks showed $0 while
+            // cryptopunks/pudgy did not, so they never floor-ranked. When stats
+            // gives 0, fall back to the best-listing endpoint: the actual
+            // cheapest live listing (price in wei), the reliable floor source.
+            if (floorPrices[si] <= 0.0f) {
+                String bestUrl = String(ENDPOINT_OPENSEA_BASE) +
+                                 "/listings/collection/" + slugList[si] + "/best?limit=1";
+                HTTPClient hBest;
+                hBest.useHTTP10(true);
+                hBest.begin(bestUrl);
+                if (strlen(OPENSEA_API_KEY) > 0) hBest.addHeader("X-API-KEY", OPENSEA_API_KEY);
+                hBest.addHeader("Accept", "application/json");
+                hBest.setTimeout(6000);
+                int bc = hBest.GET();
+                if (bc == 200) {
+                    JsonDocument bDoc;
+                    if (deserializeJson(bDoc, hBest.getStream()) == DeserializationError::Ok) {
+                        // price.current.value is wei as a STRING; decimals scales it.
+                        const char* wei = bDoc["listings"][0]["price"]["current"]["value"] | "0";
+                        int dec         = bDoc["listings"][0]["price"]["current"]["decimals"] | 18;
+                        double v = atof(wei);
+                        if (v > 0) {
+                            double div = 1.0;
+                            for (int d = 0; d < dec; d++) div *= 10.0;
+                            floorPrices[si] = (float)(v / div);
+                        }
+                    }
+                }
+                hBest.end();
+                Log.printf("NFT best[%s] HTTP %d floor=%.4f\n", slugList[si], bc, floorPrices[si]);
+                delay(NFT_RATELIMIT_DELAY_MS);
+            }
             Log.printf("NFT stats[%s] HTTP %d floor=%.4f\n", slugList[si], sc, floorPrices[si]);
 
             // Rate-limit: don't hammer OpenSea's free tier

@@ -244,7 +244,7 @@ public:
         lv_obj_t* refreshLbl = lv_label_create(_refreshBtn);
         lv_label_set_text(refreshLbl, LV_SYMBOL_REFRESH);
         lv_obj_set_style_text_font(refreshLbl, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(refreshLbl, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_style_text_color(refreshLbl, lv_color_hex(0x63646c), 0);   // dimmer grey than CLR_MUTED
         lv_obj_center(refreshLbl);
 
         // Gear button → toggles edit mode (reorder ▲▼ + delete on each card).
@@ -2064,6 +2064,9 @@ private:
         lv_obj_t* obj = lv_event_get_current_target(e);
         int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
         if (!self || idx < 0 || idx >= self->_tickerCount) return;
+        // A finger that travelled >TAP_SLOP_PX before release was a SWIPE that
+        // merely started on this card — don't also toggle the chart open/closed.
+        if (g_touchWasSwipe()) return;
         if (self->_editMode) return;   // taps don't expand while editing
 
         self->_tickers[idx].is_expanded = !self->_tickers[idx].is_expanded;
