@@ -14,14 +14,28 @@
 #pragma once
 #include <Arduino.h>
 #include <time.h>
+#include <esp_heap_caps.h>   // PSRAM ring buffer
 
 namespace weblog {
   static const size_t CAP = 16000;      // ring-buffer capacity (bytes)
-  inline char   _buf[CAP];
+  // Ring lives in PSRAM (lazy alloc on first log line — the PSRAM heap is
+  // registered before setup() runs). It used to be a 16 KB internal-BSS
+  // array: internal RAM the TLS handshakes badly needed. NOTE: never call
+  // Log from an ISR — writing PSRAM from an IRAM ISR during a
+  // flash-cache-off window would crash (no ISR logs today).
+  inline char*  _buf     = nullptr;
   inline size_t _head    = 0;           // next write position
   inline bool   _wrapped = false;       // has the ring overwritten older data?
 
+  inline bool _ensureBuf() {
+    if (_buf) return true;
+    _buf = (char*)heap_caps_malloc(CAP, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!_buf) _buf = (char*)malloc(CAP);   // fallback: internal (same as the old BSS)
+    return _buf != nullptr;
+  }
+
   inline void append(const uint8_t* data, size_t n) {
+    if (!_ensureBuf()) return;            // OOM → serial-only logging
     for (size_t i = 0; i < n; i++) {
       _buf[_head++] = (char)data[i];
       if (_head >= CAP) { _head = 0; _wrapped = true; }
@@ -30,6 +44,7 @@ namespace weblog {
 
   // Copy the buffer in chronological order into `out`; returns bytes written.
   inline size_t snapshot(char* out, size_t outCap) {
+    if (!_buf) return 0;
     size_t n = _wrapped ? CAP : _head;
     if (n > outCap) n = outCap;
     size_t start = _wrapped ? _head : 0;

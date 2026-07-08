@@ -33,6 +33,7 @@
 #pragma once
 #include <lvgl.h>
 #include <HTTPClient.h>
+#include <new>   // placement-new for the PSRAM-resident _pendingResult
 #include <ArduinoJson.h>
 #include <vector>
 #include <algorithm>
@@ -564,7 +565,12 @@ private:
     int                   _decodedForGrid = 0;  // grid size the cached pixels were decoded for
     volatile uint16_t     _imgGen = 0;          // bumped when pixels are invalidated → stale workers abort
     String                _lastGridSig;         // group/size fingerprint → skip redundant full rebuilds (flicker)
-    static NftPendingResult _pendingResult;
+    // ~25 KB — lives in PSRAM. Declared as a static REFERENCE so all existing
+    // `.` call sites stay untouched; allocated once at static-init (the PSRAM
+    // heap is registered before C++ constructors run on ESP32), internal-heap
+    // fallback if PSRAM were ever unavailable. This was the single biggest
+    // internal-BSS block in the app — RAM the TLS handshakes badly needed.
+    static NftPendingResult& _pendingResult;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -668,7 +674,15 @@ private:
             char bg[10]       = {};   // ordinals only: optional 4th field "#rrggbb"
         };
 
-        static PinEntry entries[NFT_MAX_ITEMS];
+        // PSRAM (was a 6 KB internal function-static). Zeroed per parse — the
+        // old static was only zeroed once at boot, so a pin REMOVED from the
+        // middle of the list could leave a stale bg colour behind on a re-parse.
+        static PinEntry* entries = nullptr;
+        if (!entries) entries = (PinEntry*)heap_caps_malloc(sizeof(PinEntry) * NFT_MAX_ITEMS,
+                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!entries) entries = (PinEntry*)malloc(sizeof(PinEntry) * NFT_MAX_ITEMS);
+        if (!entries) return;
+        memset(entries, 0, sizeof(PinEntry) * NFT_MAX_ITEMS);
         int entryCount = 0;
 
         String item;
@@ -2441,12 +2455,35 @@ private:
             char slug[64]       = {};
             char image_url[256] = {};
         };
-        static RawNft rawNfts[NFT_MAX_ITEMS];
-        static char slugList[NFT_MAX_COLLECTIONS][64];
-        static uint8_t perSlug[NFT_MAX_COLLECTIONS];
+        // ~29 KB of scan scratch — PSRAM, allocated once and reused every scan.
+        // These used to be function-statics burning INTERNAL BSS permanently
+        // (rawNfts alone was 19 KB) — internal RAM the TLS handshakes needed.
+        struct ScanScratch {
+            RawNft  rawNfts[NFT_MAX_ITEMS];
+            char    slugList[NFT_MAX_COLLECTIONS][64];
+            uint8_t perSlug[NFT_MAX_COLLECTIONS];
+            float   floorPrices[NFT_MAX_COLLECTIONS];
+            char    collectionNames[NFT_MAX_COLLECTIONS][64];
+        };
+        static ScanScratch* s_scan = nullptr;
+        if (!s_scan) s_scan = (ScanScratch*)heap_caps_malloc(sizeof(ScanScratch),
+                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_scan) s_scan = (ScanScratch*)malloc(sizeof(ScanScratch));
+        if (!s_scan) {
+            snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "Out of memory (scan scratch).");
+            _pendingResult.error = true;
+            _pendingResult.ready = true;
+            netUnlock();
+            if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+            vTaskDelete(nullptr);
+            return;
+        }
+        RawNft*  rawNfts  = s_scan->rawNfts;
+        auto&    slugList = s_scan->slugList;
+        uint8_t* perSlug  = s_scan->perSlug;
         int rawCount  = 0;
         int slugCount = 0;
-        memset(perSlug, 0, sizeof(perSlug));
+        memset(perSlug, 0, sizeof(s_scan->perSlug));
         const int MAX_PER_COLLECTION = 6;   // grid carousels don't need more
         const int MAX_PAGES          = 5;   // up to ~250 NFTs scanned
 
@@ -2593,10 +2630,10 @@ private:
         }
 
         // ── Step 2: Fetch floor price for each unique slug ───────────────────
-        static float floorPrices[NFT_MAX_COLLECTIONS];
-        static char  collectionNames[NFT_MAX_COLLECTIONS][64];
-        memset(floorPrices, 0, sizeof(floorPrices));
-        memset(collectionNames, 0, sizeof(collectionNames));
+        float* floorPrices     = s_scan->floorPrices;        // PSRAM scratch (see above)
+        auto&  collectionNames = s_scan->collectionNames;
+        memset(floorPrices, 0, sizeof(s_scan->floorPrices));
+        memset(collectionNames, 0, sizeof(s_scan->collectionNames));
 
         for (int si = 0; si < slugCount; si++) {
             String statsUrl = String(ENDPOINT_OPENSEA_BASE) +
@@ -2735,4 +2772,9 @@ private:
 // Static member definitions (allocated in BSS / PSRAM)
 NftScreen* NftScreen::s_instance = nullptr;
 bool NftScreen::_sFsDecode = false;
-NftPendingResult NftScreen::_pendingResult;
+static NftPendingResult& _allocNftPendingResult() {
+    void* p = heap_caps_malloc(sizeof(NftPendingResult), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = malloc(sizeof(NftPendingResult));   // last resort: internal (same as the old BSS)
+    return *(new (p) NftPendingResult());
+}
+NftPendingResult& NftScreen::_pendingResult = _allocNftPendingResult();

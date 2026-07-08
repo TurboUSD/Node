@@ -117,6 +117,14 @@ inline SharedHeaderRefs buildSharedHeader(lv_obj_t* parent,
     lv_obj_set_style_text_color(refs.timeLabel, lv_color_white(), 0);
     lv_obj_set_style_text_font(refs.timeLabel, &lv_font_montserrat_12, 0);
     lv_obj_align(refs.timeLabel, LV_ALIGN_RIGHT_MID, -4, 0);
+    if (onAlarmTapped) {
+        // The TIME also opens the alarm picker: even with a generous halo the
+        // 12 px bell alone stayed a fiddly target, and bell+time read as one
+        // cluster anyway — tapping anywhere on it now works.
+        lv_obj_add_flag(refs.timeLabel, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(refs.timeLabel, 14);
+        lv_obj_add_event_cb(refs.timeLabel, onAlarmTapped, LV_EVENT_CLICKED, userData);
+    }
 
     // Alarm bell icon — tap opens alarm picker. Yellow = active today, dim = off.
     refs.alarmIcon = lv_label_create(bar);

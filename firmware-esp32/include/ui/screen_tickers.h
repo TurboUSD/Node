@@ -1412,9 +1412,14 @@ private:
                     // logos). Re-entering the screen used to throw all of it
                     // away and re-download ticker by ticker — slow, and with
                     // 6+ tickers the later ones often never finished.
-                    // (static: ~7 KB, too big for this task's stack; safe
-                    // because list loads are serialised on one worker.)
-                    static TickerEntry oldEntries[TICKER_MAX];
+                    // (~7 KB, too big for this task's stack; safe because list
+                    // loads are serialised on one worker. PSRAM — was an
+                    // internal-BSS function-static, RAM that TLS needed.)
+                    static TickerEntry* oldEntries = nullptr;
+                    if (!oldEntries) oldEntries = (TickerEntry*)heap_caps_malloc(
+                            sizeof(TickerEntry) * TICKER_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (!oldEntries) oldEntries = (TickerEntry*)malloc(sizeof(TickerEntry) * TICKER_MAX);
+                    if (!oldEntries) { http.end(); break; }   // OOM — keep current list, retry later
                     int oldCount = self->_tickerCount;
                     for (int i = 0; i < oldCount; i++) oldEntries[i] = self->_tickers[i];
 
