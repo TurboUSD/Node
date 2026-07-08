@@ -1186,12 +1186,38 @@ private:
         }
     }
 
-    // Wire the alarm bell icon on a non-clock header after build().
+    // Wire the alarm picker on a non-clock header after build().
+    // NOTE: THIS is the wiring that actually runs — every screen calls
+    // buildSharedHeader() WITHOUT its optional onAlarmTapped argument, so the
+    // equivalent block inside shared_components.h is dead code. (That's why
+    // earlier "make the time clickable / widen the bell halo" changes made
+    // there never showed up on the device.)
     void _wireAlarmIcon(SharedHeaderRefs& hdr) {
         if (!hdr.alarmIcon) return;
         lv_obj_add_flag(hdr.alarmIcon, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(hdr.alarmIcon, 6);
+        lv_obj_set_ext_click_area(hdr.alarmIcon, 14);   // was 6 — took several tries to hit
         lv_obj_add_event_cb(hdr.alarmIcon, onAlarmIconTapped, LV_EVENT_CLICKED, this);
+        // The TIME opens the picker too — bell + time read as one cluster.
+        if (hdr.timeLabel) {
+            lv_obj_add_flag(hdr.timeLabel, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_ext_click_area(hdr.timeLabel, 14);
+            lv_obj_add_event_cb(hdr.timeLabel, onAlarmIconTapped, LV_EVENT_CLICKED, this);
+        }
+        // And ONE seamless tap target across the whole cluster (time + bell +
+        // the gap between them): an invisible overlay created LAST, so it sits
+        // on top and wins the hit-test — no dead spot in the middle.
+        lv_obj_t* bar = lv_obj_get_parent(hdr.alarmIcon);
+        if (bar) {
+            lv_obj_t* touch = lv_obj_create(bar);
+            lv_obj_set_size(touch, 78, 22);              // bar content height; ext pads the rest
+            lv_obj_align(touch, LV_ALIGN_RIGHT_MID, 0, 0);
+            lv_obj_set_style_bg_opa(touch, LV_OPA_0, 0);
+            lv_obj_set_style_border_width(touch, 0, 0);
+            lv_obj_clear_flag(touch, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_flag(touch, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_ext_click_area(touch, 12);        // reach the bar's padding edges
+            lv_obj_add_event_cb(touch, onAlarmIconTapped, LV_EVENT_CLICKED, this);
+        }
     }
 
     lv_obj_t* buildClockScreen() {

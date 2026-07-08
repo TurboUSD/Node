@@ -1927,51 +1927,39 @@ private:
         if (_slideshowCount > 0) { _slideshowCount--; return; }
         _slideshowCount = slideSecs;
 
-        // Advance ONE cell per interval, round-robin, and only to an item
-        // whose artwork is ALREADY decoded. The old "advance all 9 cells at
-        // once, placeholders included" produced a burst of full-cell repaints
-        // plus placeholder→art double repaints — the 3×3 flicker.
-        //
-        // PLUS a decode PREFETCH for the first still-missing sibling: beyond
-        // the eager-fetch cap, siblings were only downloaded "when the
-        // carousel reaches them" — but this loop never advances to undecoded
-        // items, so it never reached them: a DEADLOCK where only collections
-        // whose 2 covers fit the eager cap (punks/pudgies) ever rotated, and
-        // mfers/vibetown/monkes sat frozen until a manual tap forced the
-        // fetch. Queuing one missing sibling per tick grows the rotation set
-        // until every cell cycles its whole collection.
-        static uint8_t rr = 0;
+        // GLOBAL advance: every cell with more than one item steps TOGETHER on
+        // the tick. (The old one-cell-per-interval round-robin was anti-flicker
+        // insurance from before the flush swap-then-wait fix; on the fixed
+        // pipeline a 9-cell repaint costs the same as one slide-anim frame —
+        // and cell-by-cell rotation just read as "taking turns" on the 3×3.)
+        // Each cell still only advances to an ALREADY-decoded item (no
+        // placeholder flashes), and each cell queues its first still-missing
+        // sibling for decode — the 0.2.6 deadlock fix, now per cell — so the
+        // rotation set keeps growing until every collection cycles fully.
         int gCls = _gridClass();
-        int wantDecode = -1;   // first undecoded sibling seen this tick
-        for (int scan = 0; scan < _cellCount; scan++) {
-            int i = (rr + scan) % _cellCount;
+        bool queuedDecode = false;
+        for (int i = 0; i < _cellCount; i++) {
             CellWidgets& cw = _cells[i];
             if (!cw.container || cw.nftCount <= 1) continue;
+            int wantDecode = -1;
             for (int step = 1; step < cw.nftCount; step++) {
                 int cand = _cellNftIdx(cw, cw.nftCurrent + step);
                 if (cand < 0 || cand >= (int)_nftCache.size()) continue;
                 if (_nftCache[cand].px[gCls]) {
                     cw.nftCurrent = (cw.nftCurrent + step) % cw.nftCount;
                     _refreshCell(i);
-                    rr = (uint8_t)((i + 1) % _cellCount);
-                    // Still kick the decode of a sibling we had to skip, so
-                    // the rotation keeps growing towards the full collection.
-                    if (wantDecode >= 0) {
-                        _nftCache[wantDecode].tried[gCls] = false;
-                        _imgSettled = false;
-                        _startImageFetch();
-                    }
-                    return;   // one repaint per tick — calm screen
+                    break;
                 }
                 if (wantDecode < 0) wantDecode = cand;   // remember the gap
             }
+            if (wantDecode >= 0) {
+                _nftCache[wantDecode].tried[gCls] = false;   // queue the missing sibling
+                queuedDecode = true;
+            }
         }
-        if (_cellCount > 0) rr = (uint8_t)((rr + 1) % _cellCount);
-        // Nothing advanceable this tick — queue the first missing sibling so
-        // the NEXT ticks can rotate (one fetch per interval, worker-throttled
-        // and spawn-gated, so this can't burst the network).
-        if (wantDecode >= 0) {
-            _nftCache[wantDecode].tried[gCls] = false;
+        // One worker pass fetches everything queued above (serialised, rate-
+        // limited, spawn-gated — a full 9-cell queue can't burst the network).
+        if (queuedDecode) {
             _imgSettled = false;
             _startImageFetch();
         }
