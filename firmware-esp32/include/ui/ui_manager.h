@@ -978,6 +978,10 @@ private:
         //    FB and shown atomically on the swap → NO tearing. Best of both.
         void* fb0 = nullptr; void* fb1 = nullptr;
         ESP_ERROR_CHECK(esp_lcd_rgb_panel_get_frame_buffer(_lcdPanel, 2, &fb0, &fb1));
+        // Clear both framebuffers to black — uninitialized PSRAM (often 0xFF = white)
+        // would otherwise flash during the first big redraw or a screen swipe.
+        memset(fb0, 0, (size_t)LCD_H_RES * LCD_V_RES * 2);
+        memset(fb1, 0, (size_t)LCD_H_RES * LCD_V_RES * 2);
         static lv_disp_draw_buf_t drawBuf;
         lv_disp_draw_buf_init(&drawBuf, fb0, fb1, LCD_H_RES * LCD_V_RES);
 
@@ -1007,6 +1011,9 @@ private:
             lv_disp_flush_ready(drv);
         };
         lv_disp_drv_register(&dispDrv);
+        // Paint the display background (behind all screens) black — LVGL defaults it
+        // to white, which flashed through during the slide screen-swap animation.
+        lv_disp_set_bg_color(lv_disp_get_default(), lv_color_black());
         screenshot::ensureShadow();
 
         // 10. Register LVGL touch input driver (FT6336U, polled — no INT pin).

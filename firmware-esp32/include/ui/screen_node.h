@@ -331,6 +331,9 @@ public:
         lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
         lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(title, 250);
+        lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);   // else short names
+                                                                      // sat left of the box
+
 
         if (country && country[0]) {
             lv_obj_t* loc = lv_label_create(card);
@@ -361,7 +364,9 @@ public:
     // identifies WHICH node (leaderboard slot index / mined-block index).
     static void _onOwnNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
-        s->_showNodeInfo(s->_ownName, "", s->_ownVerified, s->_ownEarned, s->_ownUptime);
+        // Always show stats (an unverified node still has ₸0 rewards + real uptime);
+        // gating on _ownVerified is what made this popup show only the name.
+        s->_showNodeInfo(s->_ownName, "", true, s->_ownEarned, s->_ownUptime);
     }
     static void _onLbNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
@@ -369,7 +374,7 @@ public:
         if (idx < 0 || idx >= 2 * LB_ROWS || !s->_slotEntry[idx].name[0]) return;
         LeaderboardEntry& en = s->_slotEntry[idx];
         char up[24]; _fmtUptimeShort(up, sizeof(up), en.totalUptimeSecs);
-        s->_showNodeInfo(en.name, "", true, en.earned, up);
+        s->_showNodeInfo(en.name, en.country, true, en.earned, up);
     }
     static void _onBlockNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);

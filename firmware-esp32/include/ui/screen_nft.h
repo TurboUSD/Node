@@ -1466,6 +1466,12 @@ private:
             lv_obj_set_width(cw.nameLbl, nameAvail);
             lv_obj_set_style_text_font(cw.nameLbl, nameFont, 0);
             lv_obj_set_style_text_color(cw.nameLbl, lv_color_hex(NFT_CLR_TEXT), 0);
+            // Opaque bg matching the caption band: the circular-scroll marquee then
+            // repaints its OWN area each tick. A transparent label forced LVGL to
+            // re-composite the band underneath every frame, which flickered under
+            // the direct_mode double buffer.
+            lv_obj_set_style_bg_color(cw.nameLbl, lv_color_hex(bgColor), 0);
+            lv_obj_set_style_bg_opa(cw.nameLbl, LV_OPA_COVER, 0);
             lv_point_t tsz;
             lv_txt_get_size(&tsz, nameTxt, nameFont, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
             if (tsz.x > nameAvail) {
