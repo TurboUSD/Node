@@ -58,6 +58,8 @@ create table if not exists nodes (
   screen_brightness    smallint default 5,
   screen_always_on     boolean  default true,
   screen_timeout_mins  smallint default 10,
+  screen_carousel      boolean  default false,
+  screen_carousel_secs smallint default 10,
   -- alarm
   alarm_hour           smallint default 8,
   alarm_minute         smallint default 0,
@@ -79,6 +81,11 @@ create table if not exists nodes (
   screen_hidden        text,                          -- comma-joined hidden screen ids
   ticker_cols          smallint default 1             -- 1 or 2
 );
+
+-- Forward migrations for EXISTING databases (create-table-if-not-exists above
+-- won't add columns to a table that already exists). Idempotent — safe to re-run.
+alter table nodes add column if not exists screen_carousel      boolean  default false;
+alter table nodes add column if not exists screen_carousel_secs smallint default 10;
 
 -- Running reward + activity totals per node (upserted by mine-block).
 create table if not exists node_reward_balances (

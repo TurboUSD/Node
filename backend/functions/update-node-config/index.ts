@@ -91,6 +91,9 @@ async function handle(req: Request): Promise<Response> {
     screen_brightness?:      number   // 1–5, default 5
     screen_always_on?:       boolean  // default true
     screen_timeout_mins?:    number   // 1 | 5 | 10 | 30, default 10
+    // Auto screen carousel: cycle through every screen on a timer. Default off.
+    screen_carousel?:        boolean
+    screen_carousel_secs?:   number   // seconds per screen, default 10 (5–120)
     // NFT Gallery settings
     nft_wallet_address?:     string
     nft_grid_size?:          1 | 4 | 9
@@ -172,6 +175,15 @@ async function handle(req: Request): Promise<Response> {
     if (![1, 5, 10, 30].includes(body.screen_timeout_mins))
       return new Response(JSON.stringify({ error: 'screen_timeout_mins must be 1, 5, 10, or 30' }), { status: 400 })
     updates.screen_timeout_mins = body.screen_timeout_mins
+  }
+  if (body.screen_carousel !== undefined) {
+    updates.screen_carousel = !!body.screen_carousel
+  }
+  if (body.screen_carousel_secs !== undefined) {
+    const s = Math.round(Number(body.screen_carousel_secs))
+    if (!Number.isFinite(s) || s < 5 || s > 120)
+      return new Response(JSON.stringify({ error: 'screen_carousel_secs must be 5-120' }), { status: 400 })
+    updates.screen_carousel_secs = s
   }
 
   // NFT Gallery fields
@@ -275,7 +287,7 @@ async function handle(req: Request): Promise<Response> {
     .from('nodes')
     .update(updates)
     .eq('node_code', body.node_code.toUpperCase())
-    .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume, screen_brightness, screen_always_on, screen_timeout_mins, nft_wallet_address, nft_grid_size, nft_carousel_enabled, nft_slideshow_secs, nft_pinlist, screen_order, screen_hidden, nft_show_data, nft_coll_order, nft_coll_hidden, nft_collections, ticker_cols')
+    .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume, screen_brightness, screen_always_on, screen_timeout_mins, nft_wallet_address, nft_grid_size, nft_carousel_enabled, nft_slideshow_secs, nft_pinlist, screen_order, screen_hidden, nft_show_data, nft_coll_order, nft_coll_hidden, nft_collections, ticker_cols, screen_carousel, screen_carousel_secs')
     .single()
 
   if (error) {

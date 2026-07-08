@@ -114,10 +114,31 @@ serve(async (req) => {
       if (ins) {
         num      = typeof ins.num === 'number' ? ins.num : null
         collName = ins?.collection?.name ?? null
-        name     = prettyName(ins?.meta?.name ?? null, collName)
+        let slug: string | null = ins?.collection?.slug ?? null
         bg       = bgFromAttrs(ins?.meta?.attributes)
 
-        const slug = ins?.collection?.slug
+        // Ordinals Wallet buckets LOW-inscription-number items into number-based
+        // meta-collections ("Sub 100k", "Sub 10k", …) instead of their REAL
+        // collection. e.g. NodeMonke #382 (inscription 83968) comes back as
+        // collection "Sub 100k" (slug "sub-100k") with the cheapest-sub-100k
+        // floor — so it showed the wrong name + a tiny floor and sorted apart
+        // from the other NodeMonkes (which then split them into two grid cells).
+        // Detect a number-bucket slug and re-derive the real collection from the
+        // item's OWN name ("nodemonke 382" → collection "NodeMonkes").
+        if (slug && /^sub[-\s]?\d+\s*k?$/i.test(slug) && ins?.meta?.name) {
+          const base = String(ins.meta.name).replace(/[\s#]+\d+\s*$/, '').trim()  // "nodemonke"
+          const tried = new Set<string>()
+          for (const cand of [base, `${base}s`, base.replace(/\s+/g, '-'), `${base.replace(/\s+/g, '-')}s`]) {
+            const c = cand.toLowerCase()
+            if (!c || tried.has(c)) continue
+            tried.add(c)
+            const col = await getJson(`${OW}/collection/${encodeURIComponent(c)}`, 'ow-real-coll', id)
+            if (col?.name && col?.slug) { collName = col.name; slug = col.slug; break }
+          }
+        }
+
+        name = prettyName(ins?.meta?.name ?? null, collName)
+
         if (slug) {
           if (!floorCache.has(slug)) {
             const st = await getJson(`${OW}/collection/${slug}/stats`, 'ow-stats', id)

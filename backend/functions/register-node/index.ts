@@ -155,13 +155,16 @@ Deno.serve(async (req: Request) => {
       mac_address:      macAddress,
       node_code:        nodeCode,
       firmware_version: body.firmware_version ?? 'unknown',
-      // Geolocation — only set if detected; user can override from setup page
+      // PRIVACY: we NEVER store a node's real location. The IP-derived lat/lng
+      // are snapped to a 3-degree grid (~300 km, country level) BEFORE they
+      // touch the database, so the precise position is discarded here and only
+      // the coarse dot ever exists. Country (already coarse) is kept for the
+      // card/map. City is NEVER auto-filled — it's a manual profile field. The
+      // owner can override country/city from the setup page at any time.
       ...(geo && {
-        lat:     geo.lat,
-        lng:     geo.lng,
+        lat:     Math.round(geo.lat / 3) * 3,
+        lng:     Math.round(geo.lng / 3) * 3,
         country: geo.country,
-        // city intentionally NOT auto-filled: it's a manual, payout-related
-        // profile field — geo-IP guesses kept polluting node bios.
       }),
     })
     .select('id, node_code, display_name, is_verified, created_at')

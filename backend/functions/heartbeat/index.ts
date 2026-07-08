@@ -79,7 +79,8 @@ Deno.serve(async (req: Request) => {
       screen_brightness, screen_always_on, screen_timeout_mins,
       nft_wallet_address, nft_grid_size, nft_carousel_enabled, nft_slideshow_secs,
       nft_pinlist, screen_order, screen_hidden,
-      nft_show_data, nft_coll_order, nft_coll_hidden, ticker_cols
+      nft_show_data, nft_coll_order, nft_coll_hidden, ticker_cols,
+      screen_carousel, screen_carousel_secs
     `)
     .eq('mac_address', macAddress)
     .maybeSingle()
@@ -120,6 +121,17 @@ Deno.serve(async (req: Request) => {
     if (Object.keys(nftUpd).length > 0) {
       await supabase.from('nodes').update(nftUpd).eq('id', node.id)
       Object.assign(node as Record<string, unknown>, nftUpd)
+    }
+  }
+
+  // Device-pushed auto screen carousel (toggled in the device config popup).
+  {
+    const carUpd: Record<string, unknown> = {}
+    if (body.screen_carousel      !== undefined) carUpd.screen_carousel      = body.screen_carousel
+    if (body.screen_carousel_secs !== undefined) carUpd.screen_carousel_secs = body.screen_carousel_secs
+    if (Object.keys(carUpd).length > 0) {
+      await supabase.from('nodes').update(carUpd).eq('id', node.id)
+      Object.assign(node as Record<string, unknown>, carUpd)
     }
   }
 
@@ -232,6 +244,8 @@ Deno.serve(async (req: Request) => {
     nft_slideshow_secs:    node.nft_slideshow_secs    ?? null,
     nft_pinlist:           node.nft_pinlist           ?? null,
     screen_order:          node.screen_order          ?? null,
+    screen_carousel:       node.screen_carousel       ?? null,
+    screen_carousel_secs:  node.screen_carousel_secs  ?? null,
   }
 
   return new Response(JSON.stringify({ ok: true, config }), {
