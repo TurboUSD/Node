@@ -105,6 +105,10 @@ public:
         lv_obj_set_style_text_font(nodeNameLabel, &lv_font_montserrat_20, 0);
         lv_label_set_long_mode(nodeNameLabel, LV_LABEL_LONG_DOT);
         lv_obj_set_style_max_width(nodeNameLabel, 250, 0);
+        // Tap the big headline name → this node's info modal.
+        lv_obj_add_flag(nodeNameLabel, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(nodeNameLabel, 6);
+        lv_obj_add_event_cb(nodeNameLabel, _onOwnNameTapped, LV_EVENT_CLICKED, this);
 
         verifyBadge = lv_label_create(nameRow);
         lv_label_set_text(verifyBadge, "");
@@ -204,6 +208,13 @@ public:
             lv_coord_t slotX = (lv_coord_t)((NODE_MINED_BLOCKS_SHOWN - 1 - i) * NODE_BLOCK_SLOT_WIDTH);
             minedBlocks[i].restingX = slotX;   // remember home X for the slide anim
             lv_obj_set_pos(minedBlocks[i].container, slotX, 16);
+            // Tap the winner name → node info modal (user_data = this block's index).
+            if (minedBlocks[i].minerNameLabel) {
+                lv_obj_add_flag(minedBlocks[i].minerNameLabel, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_set_ext_click_area(minedBlocks[i].minerNameLabel, 6);
+                lv_obj_set_user_data(minedBlocks[i].minerNameLabel, (void*)(intptr_t)i);
+                lv_obj_add_event_cb(minedBlocks[i].minerNameLabel, _onBlockNameTapped, LV_EVENT_CLICKED, this);
+            }
         }
         pendingBlock = buildBlockWidget(miningTrack, false);
         // Pending block sits just right of the divider line. Offset +20 (not +18)
@@ -245,8 +256,8 @@ public:
         lv_obj_set_flex_align(lbRow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
         lv_obj_clear_flag(lbRow, LV_OBJ_FLAG_SCROLLABLE);
 
-        _buildLeaderColumn(lbRow, "\xE2\x82\xB8 REWARDS", lbRewardNames, lbRewardValues);
-        _buildLeaderColumn(lbRow, "UPTIME",    lbUptimeNames, lbUptimeValues);
+        _buildLeaderColumn(lbRow, "\xE2\x82\xB8 REWARDS", 0,       lbRewardNames, lbRewardValues);
+        _buildLeaderColumn(lbRow, "UPTIME",              LB_ROWS, lbUptimeNames, lbUptimeValues);
 
         // Soft pulse on the "LIVE MINING" label so there's a heartbeat even before
         // any blocks have been mined into the track.
@@ -265,7 +276,10 @@ public:
         return body;
     }
 
-    void setNodeName(const String& name) { lv_label_set_text(nodeNameLabel, name.c_str()); }
+    void setNodeName(const String& name) {
+        lv_label_set_text(nodeNameLabel, name.c_str());
+        strncpy(_ownName, name.c_str(), sizeof(_ownName) - 1);   // for the info modal
+    }
 
     void setVerified(bool verified) {
         // Same CHECK glyph both ways: blue when verified, grey + diagonal
@@ -283,9 +297,14 @@ public:
         }
     }
 
-    void setUptime(const String& text) { lv_label_set_text(uptimeValueLabel, text.c_str()); }
+    void setUptime(const String& text) {
+        lv_label_set_text(uptimeValueLabel, text.c_str());
+        strncpy(_ownUptime, text.c_str(), sizeof(_ownUptime) - 1);   // for the info modal
+    }
 
     void setRewards(bool verified, double tusdEarned) {
+        _ownVerified = verified;   // for the info modal
+        _ownEarned   = tusdEarned;
         if (verified) {
             char buf[40];
             snprintf(buf, sizeof(buf), "Rewards: \xE2\x82\xB8%.3f", tusdEarned);
@@ -295,6 +314,78 @@ public:
             lv_label_set_text(rewardsLabel, "Get verified to start earning");
             lv_obj_set_style_text_color(rewardsLabel, lv_color_hex(0x6a6a6e), 0);
         }
+    }
+
+    // ── Node info modal ─────────────────────────────────────────────────────────
+    // Tap a node name (the big headline name, a leaderboard row, or a mined-block
+    // winner) → a green-bordered popup with that node's basic info, same modal
+    // style as the verification tooltip. Genesis ⚡ and bio are omitted on device
+    // (no lightning glyph in the built-in fonts; bio wouldn't fit).
+    void _showNodeInfo(const char* name, const char* country, bool hasStats,
+                       double earned, const char* uptimeStr) {
+        lv_obj_t* card = openModal(lv_scr_act());
+
+        lv_obj_t* title = lv_label_create(card);
+        lv_label_set_text(title, (name && name[0]) ? name : "Node");
+        lv_obj_set_style_text_color(title, lv_color_hex(0xe8b339), 0);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+        lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(title, 250);
+
+        if (country && country[0]) {
+            lv_obj_t* loc = lv_label_create(card);
+            lv_label_set_text(loc, country);
+            lv_obj_set_style_text_color(loc, lv_color_hex(0x9a9a9e), 0);
+            lv_obj_set_style_text_font(loc, &lv_font_montserrat_12, 0);
+        }
+
+        if (hasStats) {
+            char buf[48];
+            lv_obj_t* r = lv_label_create(card);
+            snprintf(buf, sizeof(buf), "Rewards   \xE2\x82\xB8%.3f", earned);
+            lv_label_set_text(r, buf);
+            lv_obj_set_style_text_color(r, lv_color_hex(0x3aff7a), 0);
+            lv_obj_set_style_text_font(r, tengeFont12(), 0);
+
+            if (uptimeStr && uptimeStr[0]) {
+                lv_obj_t* u = lv_label_create(card);
+                snprintf(buf, sizeof(buf), "Uptime   %s", uptimeStr);
+                lv_label_set_text(u, buf);
+                lv_obj_set_style_text_color(u, lv_color_hex(0xe8e8e8), 0);
+                lv_obj_set_style_text_font(u, &lv_font_montserrat_12, 0);
+            }
+        }
+    }
+
+    // Tap handlers — `this` comes via the event user_data; per-object user_data
+    // identifies WHICH node (leaderboard slot index / mined-block index).
+    static void _onOwnNameTapped(lv_event_t* e) {
+        NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
+        s->_showNodeInfo(s->_ownName, "", s->_ownVerified, s->_ownEarned, s->_ownUptime);
+    }
+    static void _onLbNameTapped(lv_event_t* e) {
+        NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
+        int idx = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+        if (idx < 0 || idx >= 2 * LB_ROWS || !s->_slotEntry[idx].name[0]) return;
+        LeaderboardEntry& en = s->_slotEntry[idx];
+        char up[24]; _fmtUptimeShort(up, sizeof(up), en.totalUptimeSecs);
+        s->_showNodeInfo(en.name, "", true, en.earned, up);
+    }
+    static void _onBlockNameTapped(lv_event_t* e) {
+        NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
+        int bi = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+        if (bi < 0 || bi >= NODE_MINED_BLOCKS_SHOWN || !s->minedBlocks[bi].winnerName[0]) return;
+        const char* wn = s->minedBlocks[bi].winnerName;
+        const char* wc = s->minedBlocks[bi].winnerCountry;
+        // Best-effort: match the winner to a leaderboard row for rewards/uptime.
+        for (int i = 0; i < 2 * LB_ROWS; i++) {
+            if (s->_slotEntry[i].name[0] && strcmp(s->_slotEntry[i].name, wn) == 0) {
+                char up[24]; _fmtUptimeShort(up, sizeof(up), s->_slotEntry[i].totalUptimeSecs);
+                s->_showNodeInfo(wn, wc, true, s->_slotEntry[i].earned, up);
+                return;
+            }
+        }
+        s->_showNodeInfo(wn, wc, false, 0, "");
     }
 
     void updateMiningFeed(MiningFeedEntry* entries, int count) {
@@ -338,6 +429,7 @@ public:
                 if (tmp[j].earned > tmp[i].earned) { LeaderboardEntry t = tmp[i]; tmp[i] = tmp[j]; tmp[j] = t; }
         char buf[20];
         for (int i = 0; i < LB_ROWS; i++) {
+            _slotEntry[i] = (i < n) ? tmp[i] : LeaderboardEntry{};   // for the info modal
             if (i < n) {
                 lv_label_set_text(lbRewardNames[i], tmp[i].name);
                 snprintf(buf, sizeof(buf), "\xE2\x82\xB8%.2f", tmp[i].earned);
@@ -352,6 +444,7 @@ public:
             for (int j = i + 1; j < n; j++)
                 if (tmp[j].totalUptimeSecs > tmp[i].totalUptimeSecs) { LeaderboardEntry t = tmp[i]; tmp[i] = tmp[j]; tmp[j] = t; }
         for (int i = 0; i < LB_ROWS; i++) {
+            _slotEntry[LB_ROWS + i] = (i < n) ? tmp[i] : LeaderboardEntry{};   // for the info modal
             if (i < n) {
                 lv_label_set_text(lbUptimeNames[i], tmp[i].name);
                 _fmtUptimeShort(buf, sizeof(buf), tmp[i].totalUptimeSecs);
@@ -415,8 +508,15 @@ private:
     lv_obj_t* lbUptimeNames [LB_ROWS] = { nullptr };
     lv_obj_t* lbUptimeValues[LB_ROWS] = { nullptr };
 
+    // Stored node data for the tap-to-open info modal (see _showNodeInfo).
+    char   _ownName[24]   = {};
+    double _ownEarned     = 0;
+    bool   _ownVerified   = false;
+    char   _ownUptime[24] = {};
+    LeaderboardEntry _slotEntry[2 * LB_ROWS] = {};   // reward rows 0..2, uptime rows 3..5
+
     // One leaderboard column: muted title + LB_ROWS rows of "name .... value".
-    void _buildLeaderColumn(lv_obj_t* parent, const char* title,
+    void _buildLeaderColumn(lv_obj_t* parent, const char* title, int colBase,
                             lv_obj_t** nameSlots, lv_obj_t** valueSlots) {
         lv_obj_t* col = lv_obj_create(parent);
         lv_obj_set_height(col, LV_SIZE_CONTENT);
@@ -451,6 +551,11 @@ private:
             lv_obj_set_style_text_color(nameSlots[i], lv_color_hex(0xe8e8e8), 0);
             lv_label_set_long_mode(nameSlots[i], LV_LABEL_LONG_DOT);
             lv_obj_set_style_max_width(nameSlots[i], 130, 0);
+            // Tap a leaderboard name → node info modal (user_data = slot index).
+            lv_obj_add_flag(nameSlots[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_ext_click_area(nameSlots[i], 6);
+            lv_obj_set_user_data(nameSlots[i], (void*)(intptr_t)(colBase + i));
+            lv_obj_add_event_cb(nameSlots[i], _onLbNameTapped, LV_EVENT_CLICKED, this);
 
             valueSlots[i] = lv_label_create(row);
             lv_label_set_text(valueSlots[i], "");
@@ -477,6 +582,8 @@ private:
                                     // slide when the slot's content actually
                                     // changes (a new block shifted in),
                                     // not on every periodic data refresh.
+        char winnerName[24]    = {};   // stored for the tap-to-info modal
+        char winnerCountry[40] = {};
     };
 
     BlockWidget minedBlocks[NODE_MINED_BLOCKS_SHOWN];
@@ -518,14 +625,16 @@ private:
             lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_10, 0);
             lv_obj_set_style_text_color(w.minerNameLabel, lv_color_hex(0xd8ffe6), 0);
             lv_obj_set_style_text_align(w.minerNameLabel, LV_TEXT_ALIGN_CENTER, 0);
-            lv_obj_align(w.minerNameLabel, LV_ALIGN_BOTTOM_MID, 0, -17);
-
-            // Country under the name — dim green, one line, ellipsised.
+            lv_obj_align(w.minerNameLabel, LV_ALIGN_BOTTOM_MID, 0, -20);   // nudged up to
+                                                                          // make room for the
+                                                                          // bigger country line
+            // Country under the name — dim green, one line, ellipsised. Bumped
+            // 8→10 px (montserrat_9 isn't compiled in) so it's actually readable.
             w.minerCountryLabel = lv_label_create(w.container);
             lv_label_set_text(w.minerCountryLabel, "");
             lv_obj_set_width(w.minerCountryLabel, NODE_BLOCK_W - 14);
             lv_label_set_long_mode(w.minerCountryLabel, LV_LABEL_LONG_DOT);
-            lv_obj_set_style_text_font(w.minerCountryLabel, &lv_font_montserrat_8, 0);
+            lv_obj_set_style_text_font(w.minerCountryLabel, &lv_font_montserrat_10, 0);
             lv_obj_set_style_text_color(w.minerCountryLabel, lv_color_hex(0x89b39a), 0);
             lv_obj_set_style_text_align(w.minerCountryLabel, LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_align(w.minerCountryLabel, LV_ALIGN_BOTTOM_MID, 0, -4);
@@ -578,6 +687,9 @@ private:
                          const String& country = String("")) {
         bool isNewBlock = (w.lastBlockNumber != blockNumber);
         w.lastBlockNumber = blockNumber;
+        // Remember the winner for the tap-to-open info modal.
+        strncpy(w.winnerName,    minerName.c_str(), sizeof(w.winnerName) - 1);
+        strncpy(w.winnerCountry, country.c_str(),   sizeof(w.winnerCountry) - 1);
 
         char numBuf[12]; snprintf(numBuf, sizeof(numBuf), "#%ld", blockNumber);
         lv_label_set_text(w.numberLabel, numBuf);

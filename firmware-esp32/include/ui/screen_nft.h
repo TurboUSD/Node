@@ -419,6 +419,11 @@ private:
     // these from core 0 — plain char buffers, no String tearing).
     char _ordBuf[384] = {};
     char _hidBuf[384] = {};
+    // Signature of the order+hidden lists last APPLIED to the grid. A web reorder
+    // or hide/show arrives via heartbeat → NVS but doesn't touch the NFT data, so
+    // the update loop compares NVS against this to rebuild the grid LIVE (before,
+    // a web reorder only showed after a device restart — order applied "sometimes").
+    String _appliedListSig;
 
     // Cells (max 9 for 3×3 grid)
     struct CellWidgets {
@@ -906,6 +911,13 @@ private:
                 _imgSettled = false;
                 if (storage.hasNftWallet()) _startFetch();
                 else if (storage.hasNftPinlist()) _startPinlistFetch();
+            } else if (!_fetching && !_imgTask &&
+                       (storage.getNftCollOrder() + "|" + storage.getNftHidden()) != _appliedListSig) {
+                // A web reorder or hide/show (synced via heartbeat → NVS) changes the
+                // collection order/hidden list but NOT the NFT data. Rebuild the grid
+                // so it applies LIVE — before, a web reorder only showed after a
+                // restart (boot re-read NVS), which is why order "sometimes" applied.
+                _rebuildReq = true;
             } else if (!_fetching && !_imgTask && !_imgSettled) {
                 _startImageFetch();
             }
@@ -921,8 +933,16 @@ private:
         lv_obj_add_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
 
         if (_pendingResult.error) {
-            lv_label_set_text(_loadingLabel, _pendingResult.error_msg);
-            lv_obj_clear_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
+            // Only surface the error on-screen when there is nothing else to show.
+            // A BACKGROUND refresh that errors (e.g. an OpenSea HTTP 500) while the
+            // gallery is already populated must NOT flash the message into the
+            // centered loading label — it peeks out through the gaps around the
+            // middle cell (this is the "stray text behind the grid" regression).
+            // Keep the current gallery on screen instead.
+            if (_nftCache.empty()) {
+                lv_label_set_text(_loadingLabel, _pendingResult.error_msg);
+                lv_obj_clear_flag(_loadingLabel, LV_OBJ_FLAG_HIDDEN);
+            }
             return;
         }
 
@@ -1948,6 +1968,7 @@ private:
         String h = storage.getNftHidden();
         strncpy(_ordBuf, o.c_str(), sizeof(_ordBuf) - 1);
         strncpy(_hidBuf, h.c_str(), sizeof(_hidBuf) - 1);
+        _appliedListSig = o + "|" + h;   // remember what's applied → detect web edits
     }
 
     // Whether item `idx` is entitled to keep/get a decoded slot for class

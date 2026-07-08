@@ -1,11 +1,10 @@
 // include/screenshot_server.h — pixel-perfect screenshots over WiFi.
 //
-// The display runs double-buffered (two PSRAM framebuffers, full-refresh), so
-// flush_cb hands us a pointer to the whole live frame each refresh via
-// setLiveFrame(). On capture we snapshot that framebuffer ONCE into a stable
-// SHADOW buffer (460 KB PSRAM) so the slow ~150 ms WiFi stream can't tear when
-// LVGL swaps framebuffers mid-transfer. This tiny HTTP server streams it as a
-// 16-bit BMP:
+// The display runs double-buffered (direct_mode), so flush_cb hands us a pointer
+// to the whole live frame via setLiveFrame(). On capture we snapshot that FB once
+// into a stable SHADOW buffer (460 KB PSRAM) so the slow ~150 ms WiFi stream can't
+// tear when LVGL swaps framebuffers mid-transfer. This tiny HTTP server streams it
+// as a 16-bit BMP:
 //
 //   http://<device-ip>/          — preview page with a Save button
 //   http://<device-ip>/shot.bmp  — the raw 480×480 screenshot
@@ -41,20 +40,17 @@ inline void ensureShadow() {
     if (!s_shadow) Log.println("Screenshot: shadow fb alloc FAILED (no captures)");
 }
 
-// Called from the LVGL flush_cb with the framebuffer just handed to the panel.
-// Double-buffering + full_refresh means every flush is a whole frame, so we just
-// remember which PSRAM framebuffer is live; _sendBmp snapshots it on demand (no
-// per-frame copy). Cheap pointer store — safe to call on every flush.
+// Called from the LVGL flush_cb with the framebuffer just made active. With
+// direct_mode + double buffering every swap hands us the full live frame, so we
+// just remember which PSRAM framebuffer is live; _sendBmp snapshots it on demand.
 inline void setLiveFrame(const void* fb) { s_live = (const uint16_t*)fb; }
 
 inline void _u16(uint8_t* p, uint16_t v)  { p[0] = v & 0xFF; p[1] = v >> 8; }
 inline void _u32(uint8_t* p, uint32_t v)  { p[0] = v & 0xFF; p[1] = (v >> 8) & 0xFF; p[2] = (v >> 16) & 0xFF; p[3] = v >> 24; }
 
 inline void _sendBmp() {
-    // Snapshot the live framebuffer into the stable shadow buffer ONCE (a ~2 ms
-    // 460 KB PSRAM copy) so the slow WiFi stream below isn't torn by LVGL
-    // swapping framebuffers mid-transfer. Fall back to the raw live FB if the
-    // shadow alloc failed.
+    // Snapshot the live framebuffer into the stable shadow buffer ONCE so the slow
+    // WiFi stream below isn't torn by LVGL swapping framebuffers mid-transfer.
     if (s_live && s_shadow)
         memcpy(s_shadow, s_live, (size_t)LCD_H_RES * LCD_V_RES * 2);
     const void* fb = s_shadow ? (const void*)s_shadow : (const void*)s_live;
