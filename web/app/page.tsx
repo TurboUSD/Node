@@ -5,7 +5,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import SiteHeader from '@/components/SiteHeader'
-import { LocationNote, InfoModal, LOCATION_HELP } from '@/components/NodeBadges'
+import { LocationNote, LOCATION_HELP } from '@/components/NodeBadges'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
 const C = {
