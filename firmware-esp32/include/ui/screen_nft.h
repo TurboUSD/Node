@@ -916,16 +916,32 @@ private:
             // so a newly-added pin (e.g. an Ordinal) appears WITHOUT leaving the
             // NFT screen. This was the "NodeMonke never shows" bug: the pinlist
             // arrived after the fetch and nothing re-fetched while on-screen.
-            if (!_fetching && !_imgTask && storage.getNftPinlist() != _fetchedPinlistSig) {
-                _imgSettled = false;
-                if (storage.hasNftWallet()) _startFetch();
-                else if (storage.hasNftPinlist()) _startPinlistFetch();
-            } else if (!_fetching && !_imgTask &&
+            if (!_fetching && storage.getNftPinlist() != _fetchedPinlistSig) {
+                // Pinlist changed (web edit synced via heartbeat) — reconcile NOW.
+                // Do NOT wait for the image worker to finish: with a big gallery
+                // it churns for a long time, and a newly-added pin (e.g. a 2nd
+                // NodeMonke) never appeared ("no llega al device"). If the worker
+                // is mid-decode, abort it; the fetch starts next tick once it has
+                // released the net lock.
+                if (_imgTask) {
+                    _imgGen++;   // signal the image worker to abort
+                    Log.println("NFT: pinlist changed — aborting img worker to refetch");
+                } else {
+                    Log.printf("NFT: pinlist changed — refetching ('%s')\n",
+                                  storage.getNftPinlist().c_str());
+                    _imgSettled = false;
+                    if (storage.hasNftWallet()) _startFetch();
+                    else if (storage.hasNftPinlist()) _startPinlistFetch();
+                }
+            } else if (!_fetching &&
                        (storage.getNftCollOrder() + "|" + storage.getNftHidden()) != _appliedListSig) {
                 // A web reorder or hide/show (synced via heartbeat → NVS) changes the
                 // collection order/hidden list but NOT the NFT data. Rebuild the grid
-                // so it applies LIVE — before, a web reorder only showed after a
-                // restart (boot re-read NVS), which is why order "sometimes" applied.
+                // so it applies LIVE. NOT gated on the image worker: this only
+                // rebuilds the grid (no network), and the rebuild bumps _imgGen
+                // which aborts any in-flight decode — so a reorder/hide applied
+                // while the gallery was still decoding used to stay "frozen".
+                Log.println("NFT: order/hidden changed — rebuilding grid");
                 _rebuildReq = true;
             } else if (!_fetching && !_imgTask && !_imgSettled) {
                 _startImageFetch();
@@ -1775,9 +1791,9 @@ private:
     void _applyBtnStyle(lv_obj_t* btn, bool active) {
         if (!btn) return;
         lv_obj_set_style_bg_color(btn, lv_color_hex(active ? 0x26262c : 0x141414), 0);
-        lv_obj_set_style_border_color(btn, lv_color_hex(active ? 0xaeaeb6 : NFT_CLR_BORDER), 0);   // lighter active border
+        lv_obj_set_style_border_color(btn, lv_color_hex(active ? 0x4e4e58 : NFT_CLR_BORDER), 0);   // active: clearly darker than white, still visible
         lv_obj_t* lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(active ? 0xededf1 : NFT_CLR_MUTED), 0);   // lighter active text
+        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(active ? 0xa8a8b0 : NFT_CLR_MUTED), 0);   // active: brighter than muted but not white
     }
 
     // ── Wallet entry dialog ───────────────────────────────────────────────────
