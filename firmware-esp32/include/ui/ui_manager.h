@@ -865,7 +865,8 @@ private:
         esp_lcd_rgb_panel_config_t panelCfg = {};
         panelCfg.clk_src                    = LCD_CLK_SRC_XTAL;  // DEFAULT renamed in IDF 5.1+
         panelCfg.data_width                 = 16;
-        // bits_per_pixel and num_fbs removed from struct in newer IDF — data_width suffices
+        // bits_per_pixel left 0 → defaults to data_width (16bpp RGB565) in IDF 5.1.
+        // (num_fbs IS still a struct field in IDF 5.1.4 and is set to 1 below.)
         panelCfg.psram_trans_align          = 64;
         panelCfg.hsync_gpio_num             = LCD_PIN_HSYNC;
         panelCfg.vsync_gpio_num             = LCD_PIN_VSYNC;
@@ -910,9 +911,12 @@ private:
         // (image decode / LVGL blits / WiFi) and latches a random offset.
         // 10 lines (480*10*2 = ~9.4 KB SRAM) is plenty of slack at 12 MHz PCLK.
         // This is only rock-steady because platformio.ini's custom_sdkconfig
-        // rebuilds esp_lcd with LCD_RGB_ISR_IRAM_SAFE + GDMA_*_IRAM + PSRAM XIP,
-        // so the refill ISR keeps running even during LittleFS flash writes
-        // (without those flags the bounce buffer "rolls" — that was the old bug).
+        // rebuilds esp_lcd with LCD_RGB_ISR_IRAM_SAFE + LCD_RGB_RESTART_IN_VSYNC
+        // + GDMA_*_IRAM + PSRAM XIP. ISR_IRAM_SAFE keeps the refill ISR running
+        // during LittleFS flash writes; RESTART_IN_VSYNC re-aligns the GDMA every
+        // VBlank so any momentary underrun can't latch into a PERMANENT shift
+        // (that latched shift was the horizontal/vertical mis-position bug).
+        // Without those flags the bounce buffer "rolls" — that was the old bug.
         panelCfg.bounce_buffer_size_px = LCD_H_RES * 10;
 
         ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&panelCfg, &_lcdPanel));
