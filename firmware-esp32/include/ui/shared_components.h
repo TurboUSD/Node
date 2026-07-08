@@ -31,33 +31,39 @@ struct SharedFooterRefs {
     lv_obj_t* nodeNameLabel = nullptr;
     lv_obj_t* nodeCountLabel = nullptr;
     lv_obj_t* qrIcon = nullptr;
+    lv_obj_t* controls = nullptr;       // screen's control row; sits just RIGHT of the "|" separator
+    lv_coord_t controlsGap = 12;        // gap between the separator and the controls
     lv_coord_t nameMaxW = 0;            // >0: cap the node name to this width and marquee if longer
-                                        // (set by screens that host right-side controls). 0 = unconstrained.
+                                        // (set by screens that host controls). 0 = unconstrained.
 };
 
-// Replace only the "Network: N nodes" count (and the config gear) with a
-// screen's own controls, which sit to the RIGHT of the separator. The live dot,
-// node name and "|" separator STAY (used on tickers / NFT).
+// Replace ONLY the "Network: N nodes" count with a screen's own controls (which
+// sit just to the RIGHT of the "|" separator). The live dot, node name, "|"
+// separator AND the settings gear (far right) all STAY (used on tickers / NFT).
 inline void hideFooterNetworkText(SharedFooterRefs& f) {
     if (f.nodeCountLabel) lv_obj_add_flag(f.nodeCountLabel, LV_OBJ_FLAG_HIDDEN);
-    if (f.qrIcon)         lv_obj_add_flag(f.qrIcon,         LV_OBJ_FLAG_HIDDEN);
 }
 
-// Cap the node-name width so it can't collide with a right-side control group.
-// `rightGroup` is the screen's control container (floated to the footer's right
-// edge); `gap` is the guaranteed empty space to leave between the name/"|" and
-// the controls. The cap is derived from the control group's actual left edge, so
-// it auto-adapts to how wide the controls are. Names that fit stay static; longer
-// ones marquee (handled in refreshSharedFooter). Call AFTER the controls are built.
-inline void constrainFooterName(SharedFooterRefs& f, lv_obj_t* rightGroup, lv_coord_t gap) {
-    if (!f.bar || !rightGroup || !f.nodeNameLabel) return;
+// Host a screen's control row in the footer: left-aligned right after the "|"
+// separator, with the device settings gear left in place at the far right. Caps
+// the node name so name + separator + controls always fit left of the gear; names
+// that fit stay static, longer ones marquee (handled in refreshSharedFooter).
+// Call AFTER the controls container is built and populated.
+inline void layoutFooterControls(SharedFooterRefs& f, lv_obj_t* controls, lv_coord_t gap) {
+    if (!f.bar || !controls || !f.nodeNameLabel) return;
+    f.controls    = controls;
+    f.controlsGap = gap;
     lv_obj_update_layout(f.bar);                         // finalise sizes/positions
-    lv_coord_t groupLeft = lv_obj_get_x(rightGroup);     // left edge of the controls within the bar
-    lv_coord_t nameLeft  = lv_obj_get_x(f.nodeNameLabel);
-    const lv_coord_t sepReserve = 16;                    // room the "|" occupies just after the name
-    lv_coord_t maxW = groupLeft - gap - sepReserve - nameLeft;
+    lv_coord_t nameLeft = lv_obj_get_x(f.nodeNameLabel);
+    lv_coord_t ctrlW    = lv_obj_get_width(controls);
+    lv_coord_t gearLeft = f.qrIcon ? lv_obj_get_x(f.qrIcon) : lv_obj_get_width(f.bar);
+    const lv_coord_t sepReserve = 14;                    // 8px gap + ~6px "|"
+    const lv_coord_t endGap     = 14;                    // clear space before the settings gear
+    lv_coord_t maxW = gearLeft - endGap - ctrlW - gap - sepReserve - nameLeft;
     if (maxW < 40) maxW = 40;                            // never collapse to nothing
     f.nameMaxW = maxW;
+    if (f.nodeSepLabel)                                  // initial placement (refined on name update)
+        lv_obj_align_to(controls, f.nodeSepLabel, LV_ALIGN_OUT_RIGHT_MID, gap, 0);
 }
 
 // Builds the top bar used on every screen except Clock (which has its own
@@ -299,5 +305,11 @@ inline void refreshSharedFooter(SharedFooterRefs& refs, const String& nodeName, 
             lv_obj_update_layout(refs.nodeSepLabel);
             lv_obj_align_to(refs.nodeCountLabel, refs.nodeSepLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
         }
+    }
+    // Keep a screen's control row pinned right after the (re-aligned) "|" separator,
+    // so it follows the node name as it grows/shrinks instead of overlapping it.
+    if (refs.controls && refs.nodeSepLabel) {
+        lv_obj_update_layout(refs.nodeSepLabel);
+        lv_obj_align_to(refs.controls, refs.nodeSepLabel, LV_ALIGN_OUT_RIGHT_MID, refs.controlsGap, 0);
     }
 }

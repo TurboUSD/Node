@@ -191,45 +191,48 @@ public:
         // ── Controls live in the FOOTER now (used to be a top title row). This
         // frees ~28 px at the top so the 1-column view fits all 6 cards. The
         // "Network: N nodes" text is hidden; order is Add · Edit · [1|2] · Refresh.
-        hideFooterNetworkText(footer);   // keeps the dot + node name + "|" separator
+        hideFooterNetworkText(footer);   // hides only the count; dot/name/"|"/gear stay
         lv_obj_t* fctl = lv_obj_create(footer.bar);
-        // NO IGNORE_LAYOUT: the bar has no layout of its own, so the flag doesn't
-        // help positioning — but it made the layout pass skip fctl's subtree, so its
-        // flex children never got placed and collapsed onto the origin (only the last
-        // one, refresh, showed). Plain align keeps it hard-right; flex then lays the
-        // row out. FIXED width (not SIZE_CONTENT) so the main size always resolves.
-        lv_obj_set_size(fctl, 170, LV_PCT(100));
-        lv_obj_align(fctl, LV_ALIGN_RIGHT_MID, 0, 0);
+        // SIZE_CONTENT so the row hugs its controls (placed right after the "|" by
+        // layoutFooterControls). FULL bar height + ext_click_area so a tap anywhere
+        // in the footer band reaches the buttons — the old short strip left the
+        // bottom padding untappable, which is why taps sometimes did nothing.
+        lv_obj_set_size(fctl, LV_SIZE_CONTENT, 38);
         lv_obj_set_style_bg_opa(fctl, LV_OPA_0, 0);
         lv_obj_set_style_border_width(fctl, 0, 0);
-        lv_obj_set_style_pad_all(fctl, 0, 0);
+        lv_obj_set_style_pad_ver(fctl, 0, 0);
+        lv_obj_set_style_pad_hor(fctl, 2, 0);
         lv_obj_set_flex_flow(fctl, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(fctl, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(fctl, 18, 0);
+        lv_obj_set_flex_align(fctl, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(fctl, 14, 0);
+        lv_obj_set_ext_click_area(fctl, 8);
         lv_obj_clear_flag(fctl, LV_OBJ_FLAG_SCROLLABLE);
 
         // Add (bare word)
         _addBtn = lv_btn_create(fctl);
-        lv_obj_set_size(_addBtn, LV_SIZE_CONTENT, 24);
+        lv_obj_set_size(_addBtn, LV_SIZE_CONTENT, 30);
         lv_obj_set_style_bg_opa(_addBtn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(_addBtn, 0, 0);
         lv_obj_set_style_shadow_width(_addBtn, 0, 0);
-        lv_obj_set_style_pad_hor(_addBtn, 2, 0);
+        lv_obj_set_style_pad_hor(_addBtn, 4, 0);
+        lv_obj_set_ext_click_area(_addBtn, 10);
         lv_obj_add_event_cb(_addBtn, _onAddBtnTapped, LV_EVENT_CLICKED, this);
         { lv_obj_t* l = lv_label_create(_addBtn); lv_label_set_text(l, "Add");
           lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
           lv_obj_set_style_text_color(l, lv_color_hex(CLR_MUTED), 0); lv_obj_center(l); }
 
-        // Edit (gear = edit mode: reorder + delete)
+        // Edit — TEXT word (like Add), toggles reorder/delete mode. Does NOT change
+        // colour on toggle (per request); edit mode is shown by the cell arrows/delete.
         _editBtn = lv_btn_create(fctl);
-        lv_obj_set_size(_editBtn, LV_SIZE_CONTENT, 24);
+        lv_obj_set_size(_editBtn, LV_SIZE_CONTENT, 30);
         lv_obj_set_style_bg_opa(_editBtn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(_editBtn, 0, 0);
         lv_obj_set_style_shadow_width(_editBtn, 0, 0);
-        lv_obj_set_style_pad_hor(_editBtn, 2, 0);
+        lv_obj_set_style_pad_hor(_editBtn, 4, 0);
+        lv_obj_set_ext_click_area(_editBtn, 10);
         lv_obj_add_event_cb(_editBtn, _onEditBtnTapped, LV_EVENT_CLICKED, this);
         _editBtnLabel = lv_label_create(_editBtn);
-        lv_label_set_text(_editBtnLabel, LV_SYMBOL_SETTINGS);
+        lv_label_set_text(_editBtnLabel, "Edit");
         lv_obj_set_style_text_font(_editBtnLabel, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(_editBtnLabel, lv_color_hex(CLR_MUTED), 0);
         lv_obj_center(_editBtnLabel);
@@ -238,10 +241,11 @@ public:
         // (saves the width of two separate buttons + the gap between them).
         _cols = storage.getTickerCols();
         _colsBtn = lv_btn_create(fctl);
-        lv_obj_set_size(_colsBtn, 26, 20);
+        lv_obj_set_size(_colsBtn, 28, 22);
         lv_obj_set_style_radius(_colsBtn, 6, 0);
         lv_obj_set_style_border_width(_colsBtn, 1, 0);
         lv_obj_set_style_pad_all(_colsBtn, 2, 0);
+        lv_obj_set_ext_click_area(_colsBtn, 10);
         lv_obj_add_event_cb(_colsBtn, [](lv_event_t* e) {
             auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
             if (!self) return;
@@ -257,11 +261,12 @@ public:
 
         // Refresh (bare arrows)
         lv_obj_t* tRefresh = lv_btn_create(fctl);
-        lv_obj_set_size(tRefresh, LV_SIZE_CONTENT, 24);
+        lv_obj_set_size(tRefresh, LV_SIZE_CONTENT, 30);
         lv_obj_set_style_bg_opa(tRefresh, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(tRefresh, 0, 0);
         lv_obj_set_style_shadow_width(tRefresh, 0, 0);
-        lv_obj_set_style_pad_hor(tRefresh, 2, 0);
+        lv_obj_set_style_pad_hor(tRefresh, 4, 0);
+        lv_obj_set_ext_click_area(tRefresh, 10);
         lv_obj_add_event_cb(tRefresh, [](lv_event_t* e) {
             auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
             if (self) self->_manualRefresh();
@@ -270,8 +275,8 @@ public:
           lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
           lv_obj_set_style_text_color(l, lv_color_hex(0x63646c), 0); lv_obj_center(l); }
 
-        // Cap the node name so it can't run into these controls; marquee if longer.
-        constrainFooterName(footer, fctl, 28);
+        // Left-align the row after the "|", cap the name (marquee if long), keep the gear.
+        layoutFooterControls(footer, fctl, 12);
 
         // Placeholder shown when no tickers are loaded yet
         _emptyLabel = lv_label_create(_body);
@@ -2093,10 +2098,7 @@ private:
     static void _onEditBtnTapped(lv_event_t* e) {
         auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
         if (!self) return;
-        self->_editMode = !self->_editMode;
-        if (self->_editBtnLabel)
-            lv_obj_set_style_text_color(self->_editBtnLabel,
-                lv_color_hex(self->_editMode ? CLR_GREEN : CLR_MUTED), 0);
+        self->_editMode = !self->_editMode;   // no colour change — cells show the mode
         // Collapse everything when entering edit mode — reordering wants the
         // uniform compact rows.
         if (self->_editMode) {
