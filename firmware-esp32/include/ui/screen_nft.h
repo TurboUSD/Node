@@ -1483,18 +1483,18 @@ private:
             } else {
                 lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_CLIP);
             }
-            // Trim the font's TOP leading from the opaque background box. The box
-            // height is the full line height, which includes a few px of empty
-            // space above the glyphs — so the dark box rose above the caption
-            // line into the artwork. That's invisible on dark NFTs but shows as a
-            // dark strip on a WHITE one (Chromie Squiggle). Shrinking the box by
-            // `lead` and pulling the text up the same amount (negative top pad)
-            // keeps the glyphs exactly where they were while the opaque box now
-            // hugs the caption line. (Only the empty leading gets clipped.)
-            const lv_coord_t lead = 2;
-            lv_obj_set_style_pad_top(cw.nameLbl, -lead, 0);
-            lv_obj_set_height(cw.nameLbl, tsz.y - lead);
-            lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -2);
+            // Make the opaque background HUG the caption instead of the font's
+            // full line box. The line box includes empty top leading, so the dark
+            // rectangle rose above the caption into the artwork — invisible on
+            // dark NFTs, but a visible dark strip on a WHITE one (Chromie
+            // Squiggle). A tight explicit height sitting flush at the bottom keeps
+            // the box down on the caption line. capH is the single number to tune
+            // if any dark still shows above the text (smaller = shorter box).
+            const lv_coord_t capH = (nameFont == &lv_font_montserrat_8) ? 9 : 12;
+            lv_obj_set_style_pad_top(cw.nameLbl, 0, 0);
+            lv_obj_set_style_pad_bottom(cw.nameLbl, 0, 0);
+            lv_obj_set_height(cw.nameLbl, capH);
+            lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -1);
         }
 
         if (item.floor_price_eth > 0) {
@@ -1989,12 +1989,6 @@ private:
         strncpy(_ordBuf, o.c_str(), sizeof(_ordBuf) - 1);
         strncpy(_hidBuf, h.c_str(), sizeof(_hidBuf) - 1);
         _appliedListSig = o + "|" + h;   // remember what's applied → detect web edits
-        // Diagnostic for "grid not floor-sorting": a NON-empty coll_order below
-        // is a manual/legacy order that OVERRIDES the USD floor sort in
-        // _buildGroups(). If floor order looks wrong, this line says whether a
-        // stale order is the cause (vs. collections simply tied at $0 floor).
-        Log.printf("NFT order: healed=%d coll_order='%s' hidden='%s'\n",
-                      storage.getNftOrderHealed(), o.c_str(), h.c_str());
     }
 
     // Whether item `idx` is entitled to keep/get a decoded slot for class

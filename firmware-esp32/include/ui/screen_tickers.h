@@ -231,10 +231,10 @@ public:
         // loading (the first ticker occasionally lagged behind the rest).
         _refreshBtn = lv_btn_create(_titleRow);
         lv_obj_set_size(_refreshBtn, 24, 22);
-        lv_obj_set_style_bg_color(_refreshBtn, lv_color_hex(CLR_SURFACE), 0);
-        lv_obj_set_style_border_color(_refreshBtn, lv_color_hex(CLR_BORDER), 0);
-        lv_obj_set_style_border_width(_refreshBtn, 1, 0);
-        lv_obj_set_style_radius(_refreshBtn, 6, 0);
+        // Just the refresh arrows — no border, no fill (keeps the 24×22 tap area).
+        lv_obj_set_style_bg_opa(_refreshBtn, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(_refreshBtn, 0, 0);
+        lv_obj_set_style_shadow_width(_refreshBtn, 0, 0);
         lv_obj_set_style_pad_all(_refreshBtn, 2, 0);
         lv_obj_align(_refreshBtn, LV_ALIGN_RIGHT_MID, -148, 0);
         lv_obj_add_event_cb(_refreshBtn, [](lv_event_t* e) {
@@ -333,7 +333,11 @@ private:
     // lost one of several open charts across a screen swipe. This set is the
     // single source of truth: updated on every user toggle, re-applied to the
     // freshly parsed entries after every list load.
-    char             _expPools[TICKER_MAX][44] = {};
+    // MUST match pool_address[68]: a 44-byte buffer truncated longer pool
+    // addresses (Solana/base58 ~44 chars), so _isExpandedPool() could never
+    // match them again — the safety net that restores an open chart after the
+    // reload onShow() triggers failed, and that chart collapsed on swipe-back.
+    char             _expPools[TICKER_MAX][68] = {};
     bool _isExpandedPool(const char* pool) const {
         if (!pool || !pool[0]) return false;
         for (int i = 0; i < TICKER_MAX; i++)
