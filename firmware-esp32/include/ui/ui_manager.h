@@ -2103,14 +2103,15 @@ private:
         // crash/corruption source (two screens animating, one gets unloaded
         // mid-anim). If the user swipes again before the animation finished,
         // load the next screen instantly instead of animating.
-        // Navigation transition. The lateral MOVE slide showed a subtle per-frame
-        // flicker on the RGB panel: with direct_mode the whole screen is repainted
-        // on every frame of the 300 ms slide, and the two framebuffers don't stay
-        // perfectly in sync during a full-screen move (a fade would repaint the
-        // same way, so it wouldn't help). David preferred no flicker over the
-        // motion, so screens now load INSTANTLY. Flip kNavSlideAnim back to true
-        // to restore the slide once a flicker-free animation path is found.
-        constexpr bool kNavSlideAnim = false;
+        // Navigation transition. The lateral MOVE slide used to show a subtle
+        // per-frame flicker on the RGB panel and was disabled. Root cause turned
+        // out to be the flush_cb ordering (wait-for-VSYNC BEFORE queueing the FB
+        // swap → every anim frame was rendered into the buffer the panel was
+        // still scanning). That was fixed in flush_cb (swap first, THEN wait),
+        // which is the "flicker-free animation path" this flag was waiting for —
+        // re-enabled. If any flicker returns, flipping this back to false is the
+        // only change needed.
+        constexpr bool kNavSlideAnim = true;
         static uint32_t lastAnimStartAt = 0;
         if (animate && millis() - lastAnimStartAt < 350) animate = false;
         if (kNavSlideAnim && animate) {
