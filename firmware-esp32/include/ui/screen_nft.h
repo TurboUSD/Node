@@ -97,6 +97,9 @@ struct NftItem {
 struct NftPendingResult {
     bool ready     = false;
     bool error     = false;
+    bool wallet_scan_failed = false;   // scan down → items are pins/cache only; do
+                                       // NOT overwrite the collections report (it
+                                       // would wipe the web board's wallet list)
     char error_msg[128] = {};
     int  count     = 0;
     NftItem items[NFT_MAX_ITEMS];
@@ -209,7 +212,11 @@ public:
         lv_obj_set_style_bg_opa(_addWalletBtn, LV_OPA_0, 0);
         lv_obj_set_style_border_width(_addWalletBtn, 0, 0);
         lv_obj_set_style_shadow_width(_addWalletBtn, 0, 0);
-        lv_obj_set_style_pad_hor(_addWalletBtn, 4, 0);
+        // NO internal hor padding on any footer control: the visible gap between
+        // neighbours is then pad_column alone, so spacing reads uniform. (The old
+        // mixed paddings/fixed widths made Wallet·Edit·grid gaps ~2× the
+        // carousel·data·refresh ones.) Touch area comes from ext_click_area.
+        lv_obj_set_style_pad_hor(_addWalletBtn, 0, 0);
         lv_obj_set_ext_click_area(_addWalletBtn, 10);
         {
             lv_obj_t* awLbl = lv_label_create(_addWalletBtn);
@@ -231,7 +238,7 @@ public:
         lv_obj_set_style_bg_opa(_editBtn, LV_OPA_0, 0);
         lv_obj_set_style_border_width(_editBtn, 0, 0);
         lv_obj_set_style_shadow_width(_editBtn, 0, 0);
-        lv_obj_set_style_pad_hor(_editBtn, 4, 0);
+        lv_obj_set_style_pad_hor(_editBtn, 0, 0);   // uniform gaps — see Wallet above
         lv_obj_set_ext_click_area(_editBtn, 10);
         {
             lv_obj_t* edLbl = lv_label_create(_editBtn);
@@ -243,14 +250,22 @@ public:
         lv_obj_add_event_cb(_editBtn, [](lv_event_t* e) {
             NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
             self->_editMode = !self->_editMode;      // no colour change — cells show the mode
-            self->_rebuildReq = true;   // cells gain/lose their edit overlays
+            // Refresh the cells IN PLACE (same pattern as the Data toggle below).
+            // The old deferred _rebuildReq path went through _rebuildGrid(), whose
+            // signature short-circuit ("nothing structural changed") swallowed the
+            // rebuild — the ◀✕▶ overlays didn't appear on tap, only whenever some
+            // LATER change happened to force a real rebuild ("random" timing).
+            // _refreshCell creates/deletes the overlays directly, no rebuild needed.
+            for (int i = 0; i < self->_cellCount; i++) self->_refreshCell(i);
         }, LV_EVENT_CLICKED, this);
 
         // Grid-size cycle — single button, taps through 1x1 → 2x2 → 3x3 → 1x1.
         // Same muted colour as Wallet, no active highlight (it always reads the
         // current value). Deferred rebuild since we're inside the button event.
         _gridCycleBtn = lv_btn_create(fctl);
-        lv_obj_set_size(_gridCycleBtn, 34, 30);
+        lv_obj_set_size(_gridCycleBtn, LV_SIZE_CONTENT, 30);   // hug "3x3" — a fixed 34 px
+                                                               // added ~6 px of phantom gap
+                                                               // on each side
         lv_obj_set_style_bg_opa(_gridCycleBtn, LV_OPA_0, 0);
         lv_obj_set_style_border_width(_gridCycleBtn, 0, 0);
         lv_obj_set_style_shadow_width(_gridCycleBtn, 0, 0);
@@ -306,7 +321,7 @@ public:
         // for when auto-sync hasn't picked up a web change yet.
         {
             lv_obj_t* nftRefresh = lv_btn_create(fctl);
-            lv_obj_set_size(nftRefresh, 26, 30);
+            lv_obj_set_size(nftRefresh, LV_SIZE_CONTENT, 30);   // hug the glyph (uniform gaps)
             lv_obj_set_style_bg_opa(nftRefresh, LV_OPA_TRANSP, 0);
             lv_obj_set_style_border_width(nftRefresh, 0, 0);
             lv_obj_set_style_shadow_width(nftRefresh, 0, 0);
@@ -324,7 +339,9 @@ public:
         }
 
         // Left-align the row after the "|", cap the name (marquee if long), keep the gear.
-        layoutFooterControls(footer, fctl, 12);
+        // Gap 6 + fctl pad 2 + Wallet pad 0 = 8 px between the "|" and "Wallet" —
+        // the SAME 8 px the node name keeps to the "|" (width freed goes to the name).
+        layoutFooterControls(footer, fctl, 6);
 
         // ── Grid area ─────────────────────────────────────────────────────────
         _gridArea = lv_obj_create(_body);
@@ -566,6 +583,7 @@ private:
         _imgSettled = false;
         _pendingResult.ready = false;
         _pendingResult.error = false;
+        _pendingResult.wallet_scan_failed = false;
         _pendingResult.count = 0;
 
         // Only blank the screen when there's nothing to show — with a disk
@@ -580,6 +598,35 @@ private:
 
         if (_bgTask) { _fetching = false; return; }   // never vTaskDelete — see _startFetch
         xTaskCreatePinnedToCore(_bgPinlistFetchFn, "nft_pin", 16384, nullptr, 1, (TaskHandle_t*)&_bgTask, 0);
+    }
+
+    // ── TLS RAM guard ─────────────────────────────────────────────────────────
+    // Every HTTPS handshake needs ~45 KB of INTERNAL RAM (see net_lock.h). The
+    // NFT worker runs right after the boot burst (heartbeat+treasury+debt+OTA
+    // back-to-back), which leaves internal heap low/fragmented for a while —
+    // and then EVERY call in this worker failed with -1 in a row (OpenSea,
+    // resolve-ordinal, DexScreener), which is exactly the "only 1 pin shows"
+    // boot state. Waiting for headroom before each connect turns that into
+    // "wait a few seconds, then succeed". On timeout we proceed anyway — the
+    // callers' own retry/fallback paths still run, so this can't get stuck.
+    static bool _waitForTlsRam(uint32_t maxWaitMs = 20000) {
+        const size_t NEED_FREE = 64 * 1024;   // total internal free
+        const size_t NEED_BLK  = 24 * 1024;   // largest contiguous block
+        size_t freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        size_t blk     = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (freeInt >= NEED_FREE && blk >= NEED_BLK) return true;
+        Log.printf("NFT: waiting for TLS RAM (free=%u maxblk=%u)\n",
+                   (unsigned)freeInt, (unsigned)blk);
+        uint32_t t0 = millis();
+        while (millis() - t0 < maxWaitMs) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            blk     = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (freeInt >= NEED_FREE && blk >= NEED_BLK) return true;
+        }
+        Log.printf("NFT: TLS RAM wait timed out (free=%u maxblk=%u) — trying anyway\n",
+                   (unsigned)freeInt, (unsigned)blk);
+        return false;
     }
 
     // Parses the stored pinlist and APPENDS each pick to _pendingResult
@@ -665,6 +712,7 @@ private:
                 // Best-effort real name ("NodeMonke #9401") + BTC floor via
                 // our resolve-ordinal edge function (Magic Eden underneath).
                 {
+                    _waitForTlsRam();
                     HTTPClient ho;
                     ho.useHTTP10(true);
                     ho.begin(String(SUPABASE_FUNCTIONS_BASE_URL) + "/resolve-ordinal");
@@ -706,6 +754,7 @@ private:
                        + "/contract/" + e.contract
                        + "/nfts/" + e.tokenId;
 
+            _waitForTlsRam();
             HTTPClient http;
             http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
             http.begin(url);
@@ -828,6 +877,7 @@ private:
     static inline uint32_t s_ratesAt = 0;
 
     static double _dexPriceUsd(const char* tokenAddr) {
+        _waitForTlsRam();
         HTTPClient http;
         http.useHTTP10(true);   // DexScreener replies chunked on HTTP/1.1
         http.begin(String(ENDPOINT_DEXSCREENER_TOKENS) + tokenAddr);
@@ -919,6 +969,7 @@ private:
         _imgSettled = false;
         _pendingResult.ready = false;
         _pendingResult.error = false;
+        _pendingResult.wallet_scan_failed = false;
         _pendingResult.count = 0;
 
         // Spinner + blank grid only when there's nothing on screen yet —
@@ -1086,7 +1137,13 @@ private:
 
         // Report the detected collections (ALL of them, hidden included) so
         // the web setup page can render the collections board.
-        {
+        // NEVER report after a FAILED wallet scan: the cache then holds only the
+        // pins (plus whatever survived), and pushing that up overwrote the
+        // nodes.nft_collections list — the web board collapsed to just
+        // "Ordinals" until a scan succeeded again. Keep the last good report.
+        if (_pendingResult.wallet_scan_failed) {
+            Log.println("NFT: wallet scan failed — keeping previous collections report");
+        } else {
             String rep = "[";
             int total = (int)_nftCache.size();
             bool first = true;
@@ -2358,6 +2415,7 @@ private:
                     Log.printf("NFT fetch retry %d (prev code %d)\n", attempt, code);
                     vTaskDelay(pdMS_TO_TICKS(2500));
                 }
+                _waitForTlsRam();   // don't burn an attempt while internal RAM is too low for TLS
                 http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
                 http.begin(nftsUrl);
                 if (strlen(OPENSEA_API_KEY) > 0)
@@ -2381,6 +2439,7 @@ private:
                 if (storage.hasNftPinlist()) {
                     Log.printf("NFT wallet scan HTTP %d — keeping cached wallet items, refreshing pins\n", code);
                     walletScanFailed = true;   // copy them AFTER the assemble reset below (which would wipe it here)
+                    _pendingResult.wallet_scan_failed = true;   // absorb step: don't overwrite the collections report
                     http.end();
                     break;
                 }

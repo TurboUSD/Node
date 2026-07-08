@@ -85,6 +85,11 @@ struct TickerEntry {
     bool  chart_loaded     = false;
     volatile bool chart_dirty = false;  // bg task → UI: fresh chart data to draw
     volatile bool live_dirty  = false;  // bg task → UI: fresh price/mcap/change
+    volatile bool chart_want  = false;  // UI → dispatcher: this chart NEEDS a fetch.
+                                        // Retried in pollPending until chart_loaded —
+                                        // a direct dispatch was silently DROPPED when
+                                        // the worker was busy (expand/TF-change showed
+                                        // an empty chart that never filled in).
     uint32_t live_at       = 0;         // millis() of last live refresh (cache TTL)
     uint32_t chart_at      = 0;         // millis() of last chart refresh (cache TTL)
     bool  is_expanded      = false;
@@ -237,15 +242,19 @@ public:
         lv_obj_set_style_text_color(_editBtnLabel, lv_color_hex(CLR_MUTED), 0);
         lv_obj_center(_editBtnLabel);
 
-        // Single 1|2 column toggle — shows the current value and cycles on tap
-        // (saves the width of two separate buttons + the gap between them).
+        // Columns toggle — FLAT icon, no button chrome, same muted colour as the
+        // Add/Edit words. Drawn from primitive bars so it reads as "columns":
+        // one wide bar in 1-column mode, two narrow bars side-by-side in
+        // 2-column mode (i.e. it always shows the CURRENT layout). Tap cycles.
         _cols = storage.getTickerCols();
-        _colsBtn = lv_btn_create(fctl);
-        lv_obj_set_size(_colsBtn, 28, 22);
-        lv_obj_set_style_radius(_colsBtn, 6, 0);
-        lv_obj_set_style_border_width(_colsBtn, 1, 0);
-        lv_obj_set_style_pad_all(_colsBtn, 2, 0);
-        lv_obj_set_ext_click_area(_colsBtn, 10);
+        _colsBtn = lv_obj_create(fctl);
+        lv_obj_set_size(_colsBtn, 20, 13);
+        lv_obj_set_style_bg_opa(_colsBtn, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(_colsBtn, 0, 0);
+        lv_obj_set_style_pad_all(_colsBtn, 0, 0);
+        lv_obj_add_flag(_colsBtn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(_colsBtn, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_ext_click_area(_colsBtn, 12);
         lv_obj_add_event_cb(_colsBtn, [](lv_event_t* e) {
             auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
             if (!self) return;
@@ -254,9 +263,14 @@ public:
             self->_refreshColsBtns();
             self->_rebuildRequested = true;
         }, LV_EVENT_CLICKED, this);
-        _colsLbl = lv_label_create(_colsBtn);
-        lv_obj_set_style_text_font(_colsLbl, &lv_font_montserrat_10, 0);
-        lv_obj_center(_colsLbl);
+        for (int b = 0; b < 2; b++) {
+            _colsBars[b] = lv_obj_create(_colsBtn);
+            lv_obj_set_style_radius(_colsBars[b], 2, 0);
+            lv_obj_set_style_border_width(_colsBars[b], 0, 0);
+            lv_obj_set_style_bg_color(_colsBars[b], lv_color_hex(CLR_MUTED), 0);
+            lv_obj_clear_flag(_colsBars[b], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_clear_flag(_colsBars[b], LV_OBJ_FLAG_SCROLLABLE);
+        }
         _refreshColsBtns();
 
         // Refresh (bare arrows)
@@ -276,7 +290,10 @@ public:
           lv_obj_set_style_text_color(l, lv_color_hex(0x63646c), 0); lv_obj_center(l); }
 
         // Left-align the row after the "|", cap the name (marquee if long), keep the gear.
-        layoutFooterControls(footer, fctl, 12);
+        // Gap 2 + fctl pad 2 + Add's own pad 4 = 8 px of visible space between the
+        // "|" and "Add" — the SAME 8 px the node name keeps to the "|". The old 12
+        // read as a hole and wasted width the name could use.
+        layoutFooterControls(footer, fctl, 2);
 
         // Placeholder shown when no tickers are loaded yet
         _emptyLabel = lv_label_create(_body);
@@ -331,8 +348,8 @@ private:
     lv_obj_t*        _editBtn     = nullptr;
     lv_obj_t*        _editBtnLabel= nullptr;
     lv_obj_t*        _emptyLabel  = nullptr;
-    lv_obj_t*        _colsBtn     = nullptr;  // single 1|2 column toggle (footer)
-    lv_obj_t*        _colsLbl     = nullptr;
+    lv_obj_t*        _colsBtn     = nullptr;  // flat 1|2 column toggle icon (footer)
+    lv_obj_t*        _colsBars[2] = { nullptr, nullptr };   // the icon's "column" bars
     int              _cols        = 1;       // 1 or 2 card columns (persisted)
     lv_coord_t       _savedScrollY = 0;      // view position restored across rebuilds/visits
     lv_obj_t*        _spinner     = nullptr;
@@ -377,12 +394,17 @@ private:
     // list (use-after-free → later crash). Callbacks set these flags instead;
     // pollPending (an lv_timer, safe context) performs the work.
     volatile bool    _rebuildRequested = false;
-    volatile int     _chartLoadRequestIdx = -1;
 
     // Chart timeframe (applies to every card): 0 = 1D (24 daily candles),
     // 1 = 1W (24 weekly), 2 = 1M (12 monthly). GT's OHLCV endpoint only does
     // day/hour/minute, so 1W/1M are aggregated client-side from daily bars.
     uint8_t _chartTf = 0;
+    // TF GENERATION: bumped on every timeframe change. _fetchChart captures it
+    // on entry and discards its result if it changed mid-fetch — an in-flight
+    // list reload used to keep writing OLD-timeframe candles after the switch
+    // and re-marked them chart_loaded, so the follow-up reload skipped them
+    // (old-TF data under new-TF X labels). Same pattern as the NFT _imgGen.
+    volatile uint16_t _tfGen = 0;
     int _tfGroup() const { return _chartTf == 0 ? 1 : (_chartTf == 1 ? 7 : 30); }
     int _tfBars()  const { return _chartTf == 2 ? 12 : CHART_BARS; }
     volatile bool    _listReloadRequested = false;  // retried until the worker is free
@@ -453,28 +475,36 @@ private:
 
     // ── Card building ─────────────────────────────────────────────────────────
 
-    // Single 1|2 toggle: shows the current column count; the styling is a static
-    // "set" look (soft fill + border, brighter-than-muted text) since it always
-    // reflects the active value.
+    // Columns icon: reshape the two bars to mirror the ACTIVE layout —
+    // one full-width bar (1 column) or two half-width bars (2 columns).
     void _refreshColsBtns() {
-        if (!_colsBtn || !_colsLbl) return;
-        lv_label_set_text(_colsLbl, _cols >= 2 ? "2" : "1");
-        lv_obj_set_style_bg_color(_colsBtn, lv_color_hex(0x232327), 0);
-        lv_obj_set_style_border_color(_colsBtn, lv_color_hex(0x55555c), 0);
-        lv_obj_set_style_text_color(_colsLbl, lv_color_hex(0xbebec4), 0);
+        if (!_colsBtn || !_colsBars[0] || !_colsBars[1]) return;
+        if (_cols >= 2) {
+            lv_obj_set_size(_colsBars[0], 8, 13);
+            lv_obj_align(_colsBars[0], LV_ALIGN_LEFT_MID, 0, 0);
+            lv_obj_set_size(_colsBars[1], 8, 13);
+            lv_obj_align(_colsBars[1], LV_ALIGN_RIGHT_MID, 0, 0);
+            lv_obj_clear_flag(_colsBars[1], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_set_size(_colsBars[0], 20, 13);
+            lv_obj_align(_colsBars[0], LV_ALIGN_LEFT_MID, 0, 0);
+            lv_obj_add_flag(_colsBars[1], LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     // Manual force-reload triggered by the refresh button. Marks every ticker's
-    // live data stale (bypassing the 2-min TTL) and requests a full list reload;
-    // pollPending dispatches TT_LOAD_LIST when the worker is free, which re-runs
-    // the batched live fetch plus a retry for any missing logo. Any card that was
-    // stuck loading (typically the first ticker) gets picked up on this pass.
+    // live AND chart data stale (bypassing both TTLs) and requests a full list
+    // reload; pollPending dispatches TT_LOAD_LIST when the worker is free.
+    // Charts were NOT included before — the button only reset live_at, so a
+    // stuck/empty chart inside its 15-min TTL was skipped by the reload and the
+    // refresh "did nothing" for the miniatures.
     void _manualRefresh() {
         for (int i = 0; i < _tickerCount; i++) {
-            _tickers[i].live_at = 0;   // ignore the live TTL → re-fetch price/mcap/change
+            _tickers[i].live_at  = 0;   // ignore the live TTL → re-fetch price/mcap/change
+            _tickers[i].chart_at = 0;   // ignore the chart TTL → re-fetch candles too
         }
         _listReloadRequested = true;   // retried each poll until the worker is free
-        Log.println("tickers: manual refresh requested (force live + logo reload)");
+        Log.println("tickers: manual refresh requested (force live + chart + logo reload)");
     }
 
     void _rebuildTickerCards() {
@@ -525,6 +555,21 @@ private:
         } else {
             lv_obj_clear_flag(_addBtn, LV_OBJ_FLAG_HIDDEN);
         }
+
+        // Equalize the header and footer margins: with top-anchored flex, ALL the
+        // leftover space piled up between the last card and the footer (top gap 8,
+        // bottom gap 8 + slack). When the cards DON'T fill the viewport, center
+        // them so the slack splits evenly. When they overflow, stay top-anchored —
+        // flex-center clips overflowing content at BOTH ends and the first card
+        // would become unreachable.
+        lv_obj_update_layout(_body);
+        bool overflows = lv_obj_get_scroll_bottom(_body) > 0 || lv_obj_get_scroll_top(_body) > 0;
+        if (_cols == 2)   // ROW_WRAP: vertical distribution is the TRACK placement (3rd arg)
+            lv_obj_set_flex_align(_body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                                  overflows ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER);
+        else              // COLUMN: vertical distribution is the MAIN placement (1st arg)
+            lv_obj_set_flex_align(_body, overflows ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         // Restore the view position (someone parked an expanded chart mid-list
         // and expects to find the screen exactly there on return).
@@ -691,7 +736,9 @@ private:
             w.chart = lv_chart_create(w.container);
             lv_obj_set_size(w.chart, 70, 36);
             lv_chart_set_type(w.chart, LV_CHART_TYPE_LINE);
-            lv_chart_set_point_count(w.chart, CHART_BARS);
+            // Point count follows the timeframe (12 on 1M): a fixed 24 left the
+            // 12 monthly closes squashed into the left half of the sparkline.
+            lv_chart_set_point_count(w.chart, _tfBars());
             lv_obj_set_style_bg_opa(w.chart, LV_OPA_0, 0);
             lv_obj_set_style_border_width(w.chart, 0, 0);
             lv_obj_set_style_size(w.chart, 0, LV_PART_INDICATOR);
@@ -926,13 +973,18 @@ private:
         if (idx < 0 || idx >= self->_tickerCount) return;
         TickerEntry& t = self->_tickers[idx];
         CardWidgets& w = self->_cards[idx];
-        if (!t.chart_loaded || t.chart_count == 0) return;
 
         lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
+        bool hasData = t.chart_loaded && t.chart_count > 0;
 
         // Y-axis tick labels → real USD prices (values are scaled 0–1000).
+        // MUST run even when the chart has no data yet: the old early-return
+        // above this block skipped the rewrite and LVGL printed the RAW tick
+        // values (0/333/667/1000) — the "Y legends look wrong" bug, visible
+        // exactly whenever a chart failed to load. With no data → blank labels.
         if (lv_obj_draw_part_check_type(dsc, &lv_chart_class, LV_CHART_DRAW_PART_TICK_LABEL)) {
             if (dsc->text && dsc->id == LV_CHART_AXIS_PRIMARY_Y) {
+                if (!hasData) { dsc->text[0] = '\0'; return; }
                 float p = w.chartMin + ((float)dsc->value / 1000.0f) * w.chartRange;
                 // MARKET CAP ticks: mcap-per-price factor from the live data
                 // (mcap = price × supply → factor = mcap/price). Far more
@@ -951,6 +1003,7 @@ private:
             return;
         }
 
+        if (!hasData) return;
         if (dsc->part != LV_PART_ITEMS) return;
         uint32_t i = dsc->id;
         if (i >= (uint32_t)t.chart_count) return;
@@ -1405,8 +1458,16 @@ private:
                 for (int i = 0; i < self->_tickerCount; i++) {
                     if (self->_searchRequested) break;   // user is waiting — yield
                     TickerEntry& te = self->_tickers[i];
-                    if (!te.chart_loaded || millis() - te.chart_at > 15UL * 60UL * 1000UL)
+                    // chart_at == 0 → forced by the manual refresh button (the
+                    // plain age test misses it while uptime < the 15-min TTL).
+                    if (!te.chart_loaded || te.chart_at == 0 ||
+                        millis() - te.chart_at > 15UL * 60UL * 1000UL) {
                         TickerScreen::_fetchChart(self, i);
+                        // Breathe between candle fetches: GeckoTerminal's free
+                        // tier is ~30 req/min and 6+ back-to-back calls got
+                        // rate-limited (429) — silently, before the log above.
+                        vTaskDelay(pdMS_TO_TICKS(350));
+                    }
                 }
                 // If we yielded to a search, resume the remaining work after it.
                 if (self->_searchRequested) self->_listReloadRequested = true;
@@ -1619,6 +1680,11 @@ private:
     static void _fetchChart(TickerScreen* self, int idx) {
         TickerEntry& te = self->_tickers[idx];
         const char* net = chainToGT(te.chain_id);
+        // Capture the TF generation on entry: if the user switches timeframe
+        // while this fetch is in flight, the result below is DISCARDED instead
+        // of overwriting the (already invalidated) cache with old-TF candles
+        // and re-marking it loaded — which made the follow-up reload skip it.
+        uint16_t gen = self->_tfGen;
         // GT only serves day/hour/minute → 1W/1M candles are aggregated here
         // from daily bars (group = 7 or 30 days per candle).
         int g = self->_tfGroup(), bars = self->_tfBars();
@@ -1635,12 +1701,27 @@ private:
             JsonDocument doc;
             deserializeJson(doc, http.getStream());
             JsonArray ohlcv = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
+            if (gen != self->_tfGen) {   // timeframe changed mid-fetch → stale result
+                Log.printf("tickers: chart [%s] discarded (timeframe changed mid-fetch)\n", te.base_symbol);
+                http.end();
+                return;
+            }
             // ohlcv_list rows are [ts, o, h, l, c, v], NEWEST first. Group g
             // consecutive days into one candle, emit oldest-first.
             int total = min((int)ohlcv.size(), want);
             int buckets = (total + g - 1) / g;
             if (buckets > bars) buckets = bars;
             if (buckets > CHART_BARS) buckets = CHART_BARS;
+            if (buckets == 0) {
+                // A 200 with an EMPTY ohlcv_list (rate-limited/new pool) used to
+                // set chart_loaded=true with 0 candles — an empty card that the
+                // 15-min TTL then protected from every refetch, and that even
+                // the refresh button couldn't recover. Leave it NOT loaded so
+                // the chart_want queue / next list pass retries.
+                Log.printf("tickers: chart [%s] HTTP 200 but 0 candles — will retry\n", te.base_symbol);
+                http.end();
+                return;
+            }
             for (int j = 0; j < buckets; j++) {
                 int lo = j * g;                        // newest day of this group
                 int hi = min(total, (j + 1) * g) - 1;  // oldest day of this group
@@ -1664,6 +1745,10 @@ private:
             te.chart_loaded = true;
             te.chart_at     = millis();
             te.chart_dirty  = true;   // pollPending redraws on core 1
+        } else {
+            // GeckoTerminal failures were completely silent (no log, no retry
+            // path) — "the mini charts just never load". 429 = rate limit.
+            Log.printf("tickers: chart [%s] HTTP %d\n", te.base_symbol, code);
         }
         http.end();
     }
@@ -2058,7 +2143,7 @@ private:
         Log.printf("tickers: tap %s -> %s\n", self->_tickers[idx].base_symbol,
                       self->_tickers[idx].is_expanded ? "EXPAND" : "collapse");
         if (self->_tickers[idx].is_expanded && !self->_tickers[idx].chart_loaded) {
-            self->_chartLoadRequestIdx = idx;   // fetched after the rebuild
+            self->_tickers[idx].chart_want = true;   // queued — retried until it loads
         }
         self->_rebuildRequested = true;
     }
@@ -2073,9 +2158,13 @@ private:
         uint8_t sel = (uint8_t)lv_dropdown_get_selected(dd);
         if (sel == self->_chartTf) return;
         self->_chartTf = sel;
+        self->_tfGen++;   // in-flight fetches with the old timeframe discard their result
         for (int i = 0; i < self->_tickerCount; i++)
             self->_tickers[i].chart_loaded = false;
-        self->_chartLoadRequestIdx = (int)(intptr_t)lv_obj_get_user_data(dd);
+        // The card whose dropdown changed goes first (visible card, user waiting).
+        int ddIdx = (int)(intptr_t)lv_obj_get_user_data(dd);
+        if (ddIdx >= 0 && ddIdx < self->_tickerCount)
+            self->_tickers[ddIdx].chart_want = true;
         self->_rebuildRequested = true;   // pollPending rebuilds outside this callback
         // Every card's chart is now the OLD timeframe — trigger a full list
         // reload so ALL charts refetch with the new grouping, not just the one
@@ -2199,10 +2288,10 @@ public:
             for (int i = 0; i < self->_logoFreeCount; i++)
                 if (self->_logoFreeList[i]) { free(self->_logoFreeList[i]); self->_logoFreeList[i] = nullptr; }
             self->_logoFreeCount = 0;
-            int want = self->_chartLoadRequestIdx;
-            self->_chartLoadRequestIdx = -1;
-            if (want >= 0 && want < self->_tickerCount && !self->_tickers[want].chart_loaded)
-                self->_dispatchTask(TT_LOAD_CHART, want);
+            // Chart fetches are NOT dispatched here anymore: a dispatch while the
+            // worker was busy was silently dropped (the "expand → chart never
+            // loads" bug). chart_want entries are serviced by the queued-work
+            // chain below, retried until the data actually arrives.
         }
 
         // Attach any freshly downloaded token logos to their cards.
@@ -2227,6 +2316,12 @@ public:
                 self->_updateFdvLabel(i);
                 self->_updatePriceLabel(i);
                 self->_updateChangeLabel(i);
+                // The expanded chart's Y-axis ticks are derived from fdv/price
+                // (mcap-per-price factor) — repaint it so the legend tracks the
+                // fresh live data instead of showing the previous factor (or raw
+                // prices from before the first live load).
+                if (self->_tickers[i].is_expanded && self->_cards[i].chart)
+                    lv_obj_invalidate(self->_cards[i].chart);
             }
         }
 
@@ -2256,6 +2351,23 @@ public:
         else if (self->_listReloadRequested && !self->_bgTask) {
             self->_listReloadRequested = false;
             self->_dispatchTask(TT_LOAD_LIST);
+        }
+        else if (!self->_bgTask) {
+            // Individual chart loads (expand / TF change). LOWEST priority: a
+            // queued list reload refetches every chart anyway. chart_want stays
+            // set until the data really lands, so a failed fetch is retried —
+            // throttled so a persistently failing pool can't hammer
+            // GeckoTerminal (free tier ~30 req/min).
+            static uint32_t lastChartDispatchAt = 0;
+            for (int i = 0; i < self->_tickerCount; i++) {
+                TickerEntry& te = self->_tickers[i];
+                if (!te.chart_want) continue;
+                if (te.chart_loaded) { te.chart_want = false; continue; }   // satisfied
+                if (millis() - lastChartDispatchAt < 5000 && lastChartDispatchAt != 0) break;
+                lastChartDispatchAt = millis();
+                self->_dispatchTask(TT_LOAD_CHART, i);
+                break;   // one at a time — the worker is serialised anyway
+            }
         }
 
         if (self->_pending.type == PR_NONE) return;
