@@ -22,6 +22,7 @@
 #pragma once
 #include <lvgl.h>
 #include <HTTPClient.h>
+#include "psram_alloc.h"   // PSRAM-backed JsonDocument allocator
 #include <ArduinoJson.h>
 #include "config.h"
 #include "storage.h"
@@ -1426,7 +1427,7 @@ private:
                     int oldCount = self->_tickerCount;
                     for (int i = 0; i < oldCount; i++) oldEntries[i] = self->_tickers[i];
 
-                    JsonDocument doc;
+                    JsonDocument doc(psramJsonAlloc());   // PSRAM — see psram_alloc.h
                     deserializeJson(doc, http.getStream());
                     JsonArray arr = doc.as<JsonArray>();
                     int n = 0;
@@ -1724,7 +1725,9 @@ private:
         http.addHeader("Accept", "application/json");
         int code = http.GET();
         if (code == 200) {
-            JsonDocument doc;
+            // PSRAM-backed document: 360 OHLCV rows peaked ~30 KB of INTERNAL
+            // heap through ArduinoJson's default allocator (see psram_alloc.h).
+            JsonDocument doc(psramJsonAlloc());
             deserializeJson(doc, http.getStream());
             JsonArray ohlcv = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
             if (gen != self->_tfGen) {   // timeframe changed mid-fetch → stale result
@@ -1830,7 +1833,7 @@ private:
                 filter["pairs"][0]["fdv"]                  = true;
                 filter["pairs"][0]["info"]["imageUrl"]     = true;
                 filter["pairs"][0]["baseToken"]["address"] = true;
-                JsonDocument doc;
+                JsonDocument doc(psramJsonAlloc());   // PSRAM — see psram_alloc.h
                 if (deserializeJson(doc, http.getStream(),
                                     DeserializationOption::Filter(filter)) == DeserializationError::Ok) {
                     for (JsonObject pair : doc["pairs"].as<JsonArray>()) {

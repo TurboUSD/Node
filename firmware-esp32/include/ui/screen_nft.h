@@ -14,7 +14,7 @@
 //
 // Data flow:
 //   onShow() → _dispatchFetch() → FreeRTOS task on core 0:
-//     1. OpenSea GET /chain/ethereum/account/{addr}/nfts?limit=50
+//     1. OpenSea GET /chain/ethereum/account/{addr}/nfts?limit=25 (paginated)
 //     2. Group by collection slug, collect unique slugs
 //     3. For each collection: GET /collections/{slug}/stats (floor_price)
 //        Rate-limit: 250 ms delay between collection-stats calls
@@ -34,6 +34,7 @@
 #include <lvgl.h>
 #include <HTTPClient.h>
 #include <new>   // placement-new for the PSRAM-resident _pendingResult
+#include "psram_alloc.h"   // PSRAM-backed vector + JsonDocument allocators
 #include <ArduinoJson.h>
 #include <vector>
 #include <algorithm>
@@ -542,7 +543,10 @@ private:
     };
 
     // Cached NFT data (persists until expired or wallet changes)
-    std::vector<NftItem> _nftCache;
+    // PSRAM-backed: at ~490 B per item a full wallet (50 items) put ~24 KB on
+    // the INTERNAL heap — the same budget WiFi/TLS live off. Same API, the
+    // allocator falls back to internal if PSRAM is unavailable.
+    std::vector<NftItem, PsramAlloc<NftItem>> _nftCache;
     uint32_t _cacheTimestamp = 0;
     bool     _snapshotOnly   = false;   // cache came from disk → still needs a live refresh
     bool     _imgSettled     = false;   // img worker found nothing new to decode → stop the
@@ -638,6 +642,39 @@ private:
                        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         }
         return false;
+    }
+
+    // Read an HTTP response body FULLY into PSRAM (internal fallback), so the
+    // JSON can be parsed from memory: ArduinoJson's streaming parse over
+    // mbedtls 3.x bails early on large bodies ("IncompleteInput") and the TLS
+    // link can drop mid-transfer — api_client.h's _httpGetBody pattern, local
+    // copy because these requests carry the OpenSea X-API-KEY header.
+    // Caller frees the returned buffer; nullptr on OOM. `declaredOut` receives
+    // Content-Length so the caller can detect a truncated transfer and retry.
+    static uint8_t* _readBodyPsram(HTTPClient& http, size_t* outLen, int* declaredOut = nullptr) {
+        *outLen = 0;
+        int declared = http.getSize();
+        if (declaredOut) *declaredOut = declared;
+        const size_t CAPB = 192 * 1024;
+        size_t cap = (declared > 0 && (size_t)declared < CAPB) ? (size_t)declared : CAPB;
+        uint8_t* buf = (uint8_t*)heap_caps_malloc(cap + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!buf) buf = (uint8_t*)malloc(cap + 1);
+        if (!buf) return nullptr;
+        WiFiClient* s = http.getStreamPtr();
+        size_t len = 0;
+        uint32_t lastData = millis();
+        while (s && (http.connected() || s->available()) && millis() - lastData < 9000) {
+            size_t avail = s->available();
+            if (!avail) { delay(3); continue; }
+            size_t room = cap - len;
+            if (!room) break;
+            int got = s->readBytes(buf + len, avail < room ? avail : room);
+            if (got > 0) { len += got; lastData = millis(); }
+            if (declared > 0 && len >= (size_t)declared) break;
+        }
+        buf[len] = 0;
+        *outLen = len;
+        return buf;
     }
 
     // Thin logging wrapper over netTlsRamOk/netWaitTlsRam (net_lock.h). The
@@ -802,6 +839,14 @@ private:
             int code = http.GET();
             if (code != 200) { http.end(); delay(NFT_RATELIMIT_DELAY_MS); continue; }
 
+            // Buffered read → parse from memory (same IncompleteInput
+            // protection as the wallet-scan pages; single-NFT bodies with fat
+            // trait arrays can reach tens of KB too).
+            size_t pinBodyLen = 0;
+            uint8_t* pinBody = _readBodyPsram(http, &pinBodyLen);
+            http.end();
+            if (!pinBody) { delay(NFT_RATELIMIT_DELAY_MS); continue; }
+
             // Filter: the single-NFT response carries traits/rarity/owners arrays
             // we never read. Parsing only the 3 fields we use caps heap use and
             // speeds the parse (matches _dexPriceUsd / the wallet scan, already filtered).
@@ -810,10 +855,10 @@ private:
             nftFilter["nft"]["display_image_url"] = true;
             nftFilter["nft"]["image_url"] = true;
             nftFilter["nft"]["collection"] = true;
-            JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, http.getStream(),
+            JsonDocument doc(psramJsonAlloc());
+            DeserializationError err = deserializeJson(doc, (const char*)pinBody, pinBodyLen,
                                           DeserializationOption::Filter(nftFilter));
-            http.end();
+            free(pinBody);
             if (err) { delay(NFT_RATELIMIT_DELAY_MS); continue; }
 
             JsonObject nft = doc["nft"].as<JsonObject>();
@@ -1152,7 +1197,7 @@ private:
         // Absorb results into cache. Decoded artwork is EXPENSIVE — carry it
         // over to the new list (matched by image URL) instead of dropping it,
         // so a periodic list refresh doesn't blank every cell and re-decode.
-        std::vector<NftItem> oldCache;
+        std::vector<NftItem, PsramAlloc<NftItem>> oldCache;
         oldCache.swap(_nftCache);
         for (int i = 0; i < _pendingResult.count; i++) {
             NftItem it = _pendingResult.items[i];
@@ -1886,23 +1931,50 @@ private:
         // whose artwork is ALREADY decoded. The old "advance all 9 cells at
         // once, placeholders included" produced a burst of full-cell repaints
         // plus placeholder→art double repaints — the 3×3 flicker.
+        //
+        // PLUS a decode PREFETCH for the first still-missing sibling: beyond
+        // the eager-fetch cap, siblings were only downloaded "when the
+        // carousel reaches them" — but this loop never advances to undecoded
+        // items, so it never reached them: a DEADLOCK where only collections
+        // whose 2 covers fit the eager cap (punks/pudgies) ever rotated, and
+        // mfers/vibetown/monkes sat frozen until a manual tap forced the
+        // fetch. Queuing one missing sibling per tick grows the rotation set
+        // until every cell cycles its whole collection.
         static uint8_t rr = 0;
         int gCls = _gridClass();
+        int wantDecode = -1;   // first undecoded sibling seen this tick
         for (int scan = 0; scan < _cellCount; scan++) {
             int i = (rr + scan) % _cellCount;
             CellWidgets& cw = _cells[i];
             if (!cw.container || cw.nftCount <= 1) continue;
             for (int step = 1; step < cw.nftCount; step++) {
                 int cand = _cellNftIdx(cw, cw.nftCurrent + step);
-                if (cand >= 0 && cand < (int)_nftCache.size() && _nftCache[cand].px[gCls]) {
+                if (cand < 0 || cand >= (int)_nftCache.size()) continue;
+                if (_nftCache[cand].px[gCls]) {
                     cw.nftCurrent = (cw.nftCurrent + step) % cw.nftCount;
                     _refreshCell(i);
                     rr = (uint8_t)((i + 1) % _cellCount);
+                    // Still kick the decode of a sibling we had to skip, so
+                    // the rotation keeps growing towards the full collection.
+                    if (wantDecode >= 0) {
+                        _nftCache[wantDecode].tried[gCls] = false;
+                        _imgSettled = false;
+                        _startImageFetch();
+                    }
                     return;   // one repaint per tick — calm screen
                 }
+                if (wantDecode < 0) wantDecode = cand;   // remember the gap
             }
         }
         if (_cellCount > 0) rr = (uint8_t)((rr + 1) % _cellCount);
+        // Nothing advanceable this tick — queue the first missing sibling so
+        // the NEXT ticks can rotate (one fetch per interval, worker-throttled
+        // and spawn-gated, so this can't burst the network).
+        if (wantDecode >= 0) {
+            _nftCache[wantDecode].tried[gCls] = false;
+            _imgSettled = false;
+            _startImageFetch();
+        }
     }
 
     // ── Carousel setting ──────────────────────────────────────────────────────
@@ -2485,7 +2557,10 @@ private:
         int slugCount = 0;
         memset(perSlug, 0, sizeof(s_scan->perSlug));
         const int MAX_PER_COLLECTION = 6;   // grid carousels don't need more
-        const int MAX_PAGES          = 5;   // up to ~250 NFTs scanned
+        const int MAX_PAGES          = 10;  // 10 × 25 = up to ~250 NFTs scanned
+                                            // (25/page: half-size bodies are far
+                                            // less exposed to mid-transfer drops
+                                            // than the old 50/page ones)
 
         // VISIBILITY: prove in the log WHICH wallet is being scanned and whether
         // the OpenSea API key made it into this build (the CI injects the
@@ -2505,30 +2580,56 @@ private:
             String nftsUrl = String(ENDPOINT_OPENSEA_BASE) +
                              "/chain/" + NFT_OPENSEA_CHAIN +
                              "/account/" + wallet +
-                             "/nfts?limit=50";
+                             "/nfts?limit=25";
             if (nextCursor.length()) nftsUrl += "&next=" + nextCursor;
 
-            // Up to 3 attempts on the FIRST page (TLS handshakes can fail
-            // while internal RAM is momentarily fragmented); later pages are
-            // best-effort — whatever was gathered so far still renders.
+            // Up to 3 attempts on the FIRST page, 2 on later ones. An attempt
+            // only counts as GOOD when the WHOLE body arrived: a TLS drop
+            // mid-download used to hand a truncated buffer to the parser
+            // ("IncompleteInput") and abort the scan — now it's detected
+            // against Content-Length and the page is simply re-fetched.
             HTTPClient http;
             code = -1;
-            int attempts = (page == 0) ? 3 : 1;
+            uint8_t* body    = nullptr;
+            size_t   bodyLen = 0;
+            int attempts = (page == 0) ? 3 : 2;
             for (int attempt = 0; attempt < attempts; attempt++) {
                 if (attempt > 0) {
                     Log.printf("NFT fetch retry %d (prev code %d)\n", attempt, code);
                     vTaskDelay(pdMS_TO_TICKS(2500));
                 }
                 _waitForTlsRam();   // don't burn an attempt while internal RAM is too low for TLS
-                http.useHTTP10(true);   // body parsed from getStream() — avoid chunked encoding
+                http.useHTTP10(true);   // body read raw below — avoid chunked encoding
                 http.begin(nftsUrl);
                 if (strlen(OPENSEA_API_KEY) > 0)
                     http.addHeader("X-API-KEY", OPENSEA_API_KEY);
                 http.addHeader("Accept", "application/json");
                 http.setTimeout(20000);
                 code = http.GET();
-                if (code == 200) break;
+                if (code != 200) { http.end(); continue; }
+                int declared = 0;
+                body = _readBodyPsram(http, &bodyLen, &declared);
                 http.end();
+                if (!body) break;   // OOM — a retry won't create RAM
+                if (declared > 0 && bodyLen < (size_t)declared) {
+                    Log.printf("NFT scan: page %d short body (%u of %d bytes) — retrying\n",
+                               page + 1, (unsigned)bodyLen, declared);
+                    free(body); body = nullptr;
+                    code = -5;   // transfer died mid-body — same class as a connection error
+                    continue;
+                }
+                break;   // complete page in hand
+            }
+            if (code == 200 && !body) {
+                if (page > 0) break;
+                Log.println("NFT scan: ABORTED page 1 — no RAM for body buffer");
+                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "Out of memory (scan body).");
+                _pendingResult.error = true;
+                _pendingResult.ready = true;
+                netUnlock();
+                if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+                vTaskDelete(nullptr);
+                return;
             }
             if (code != 200) {
                 if (page > 0) break;   // keep earlier pages' items
@@ -2565,53 +2666,17 @@ private:
                 return;
             }
 
-            // BUFFERED READ → PSRAM → parse from memory. The account page is big
-            // (~60-150 KB for 50 NFTs) and ArduinoJson's STREAMING parse over
-            // mbedtls 3.x bails early on bodies this size — the 0.2.4 log's
-            // "IncompleteInput" right when TLS finally worked. Exactly the
-            // failure api_client.h's _httpGetBody was built for; same proven
-            // read loop here (custom because of the X-API-KEY header).
-            int declared = http.getSize();
-            const size_t BODY_CAP = 192 * 1024;
-            size_t cap = (declared > 0 && (size_t)declared < BODY_CAP) ? (size_t)declared : BODY_CAP;
-            uint8_t* body = (uint8_t*)heap_caps_malloc(cap + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            size_t bodyLen = 0;
-            if (body) {
-                WiFiClient* bs = http.getStreamPtr();
-                uint32_t lastData = millis();
-                while (bs && (http.connected() || bs->available()) && millis() - lastData < 9000) {
-                    size_t avail = bs->available();
-                    if (!avail) { delay(3); continue; }
-                    size_t room = cap - bodyLen;
-                    if (!room) break;
-                    int got = bs->readBytes(body + bodyLen, avail < room ? avail : room);
-                    if (got > 0) { bodyLen += got; lastData = millis(); }
-                    if (declared > 0 && bodyLen >= (size_t)declared) break;
-                }
-                body[bodyLen] = 0;
-            }
-            http.end();
-            if (!body) {
-                if (page > 0) break;
-                Log.println("NFT scan: ABORTED page 1 — no RAM for body buffer");
-                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "Out of memory (scan body).");
-                _pendingResult.error = true;
-                _pendingResult.ready = true;
-                netUnlock();
-                if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
-                vTaskDelete(nullptr);
-                return;
-            }
-
-            // Filtered parse: only the four fields we use + the page cursor —
-            // keeps the JsonDocument small even at limit=50.
+            // Filtered parse FROM MEMORY (body fetched above): only the four
+            // fields we use + the page cursor. The document itself lives in
+            // PSRAM too — a 25-NFT page still peaked tens of KB of internal
+            // heap through ArduinoJson's default allocator.
             JsonDocument filter;
             filter["next"] = true;
             filter["nfts"][0]["collection"]        = true;
             filter["nfts"][0]["name"]              = true;
             filter["nfts"][0]["display_image_url"] = true;
             filter["nfts"][0]["image_url"]         = true;
-            JsonDocument doc;
+            JsonDocument doc(psramJsonAlloc());
             DeserializationError err = deserializeJson(doc, (const char*)body, bodyLen,
                                                        DeserializationOption::Filter(filter));
             free(body);
