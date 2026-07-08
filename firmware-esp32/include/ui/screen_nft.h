@@ -65,6 +65,9 @@
 #define NFT_CLR_MUTED   0x6e7280
 #define NFT_CLR_GREEN   0x43e397
 #define NFT_CLR_ACTIVE  0xd8d8dc   // active-control tone (bright grey — green stole the show)
+#define NFT_CLR_TOGGLE_ON 0x9c9ca2 // carousel/data "on": softer than ACTIVE so the two
+                                   // toggles no longer pull the eye off the artwork,
+                                   // while staying clearly brighter than the muted "off"
 
 // ── Data structures ───────────────────────────────────────────────────────────
 
@@ -1480,6 +1483,17 @@ private:
             } else {
                 lv_label_set_long_mode(cw.nameLbl, LV_LABEL_LONG_CLIP);
             }
+            // Trim the font's TOP leading from the opaque background box. The box
+            // height is the full line height, which includes a few px of empty
+            // space above the glyphs — so the dark box rose above the caption
+            // line into the artwork. That's invisible on dark NFTs but shows as a
+            // dark strip on a WHITE one (Chromie Squiggle). Shrinking the box by
+            // `lead` and pulling the text up the same amount (negative top pad)
+            // keeps the glyphs exactly where they were while the opaque box now
+            // hugs the caption line. (Only the empty leading gets clipped.)
+            const lv_coord_t lead = 2;
+            lv_obj_set_style_pad_top(cw.nameLbl, -lead, 0);
+            lv_obj_set_height(cw.nameLbl, tsz.y - lead);
             lv_obj_align(cw.nameLbl, LV_ALIGN_BOTTOM_LEFT, 0, -2);
         }
 
@@ -1662,15 +1676,15 @@ private:
         if (!_carouselSwitch) return;
         bool on = storage.getNftCarousel();
         lv_obj_set_style_text_color(_carouselSwitch,
-            lv_color_hex(on ? NFT_CLR_ACTIVE : NFT_CLR_MUTED), 0);
-        lv_obj_set_style_text_opa(_carouselSwitch, on ? LV_OPA_COVER : LV_OPA_70, 0);
+            lv_color_hex(on ? NFT_CLR_TOGGLE_ON : NFT_CLR_MUTED), 0);
+        lv_obj_set_style_text_opa(_carouselSwitch, on ? LV_OPA_90 : LV_OPA_70, 0);
     }
 
     void _refreshDataLabel() {
         if (!_dataSwitch) return;
         bool on = storage.getNftShowData();
-        lv_obj_set_style_text_color(_dataSwitch, lv_color_hex(on ? NFT_CLR_ACTIVE : NFT_CLR_MUTED), 0);
-        lv_obj_set_style_text_opa(_dataSwitch, on ? LV_OPA_COVER : LV_OPA_70, 0);
+        lv_obj_set_style_text_color(_dataSwitch, lv_color_hex(on ? NFT_CLR_TOGGLE_ON : NFT_CLR_MUTED), 0);
+        lv_obj_set_style_text_opa(_dataSwitch, on ? LV_OPA_90 : LV_OPA_70, 0);
     }
 
     void _applyCarouselSetting(bool /*on*/) {
@@ -1975,6 +1989,12 @@ private:
         strncpy(_ordBuf, o.c_str(), sizeof(_ordBuf) - 1);
         strncpy(_hidBuf, h.c_str(), sizeof(_hidBuf) - 1);
         _appliedListSig = o + "|" + h;   // remember what's applied → detect web edits
+        // Diagnostic for "grid not floor-sorting": a NON-empty coll_order below
+        // is a manual/legacy order that OVERRIDES the USD floor sort in
+        // _buildGroups(). If floor order looks wrong, this line says whether a
+        // stale order is the cause (vs. collections simply tied at $0 floor).
+        Log.printf("NFT order: healed=%d coll_order='%s' hidden='%s'\n",
+                      storage.getNftOrderHealed(), o.c_str(), h.c_str());
     }
 
     // Whether item `idx` is entitled to keep/get a decoded slot for class

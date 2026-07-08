@@ -20,6 +20,15 @@
 #include "ui/ui_manager.h"
 #include "screenshot_server.h"   // http://<ip>/shot.bmp — pixel-perfect captures
 
+// The Arduino loop task defaults to an 8 KB stack, but almost every network
+// fetch (treasury, price, debt history, OHLCV, mining) runs a blocking TLS
+// handshake straight from loop() — and mbedTLS is very stack-hungry. 8 KB left
+// almost no headroom, so a fetch triggered from deep in a large handler (e.g.
+// reloading the US-debt chart from inside updateClockIfNeeded) could overflow
+// the stack and reboot the device. 16 KB gives comfortable margin for all of
+// them. (Global scope: overrides the core's weak getArduinoLoopTaskStackSize.)
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 SemaphoreHandle_t gNetLock = nullptr;   // see net_lock.h
 
 WebLog Log;   // console tee → Serial + WiFi ring buffer (http://<ip>/logs)

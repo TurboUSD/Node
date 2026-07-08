@@ -1053,12 +1053,16 @@ private:
                     if (!ui->_pressActive) {
                         ui->_pressActive   = true;
                         ui->_touchWasSwipe = false;
+                        g_touchWasSwipe()  = false;
                         ui->_pressStartX   = data->point.x;
                         ui->_pressStartY   = data->point.y;
                     } else {
                         lv_coord_t dx = data->point.x - ui->_pressStartX;
                         lv_coord_t dy = data->point.y - ui->_pressStartY;
-                        if (dx*dx + dy*dy > TAP_SLOP_PX*TAP_SLOP_PX) ui->_touchWasSwipe = true;
+                        if (dx*dx + dy*dy > TAP_SLOP_PX*TAP_SLOP_PX) {
+                            ui->_touchWasSwipe = true;
+                            g_touchWasSwipe()  = true;   // mirror for out-of-UiManager handlers
+                        }
                     }
                     // Any touch resets the inactivity timer (and wakes screen if off)
                     ui->_onTouchActivity();
@@ -1833,9 +1837,21 @@ private:
 
 
     void reloadDebtHistory(int years) {
-        DebtHistoryPoint points[80];
+        // STATIC, not on the stack: this runs on the 8 KB Arduino loop task, and
+        // fetchDebtHistory() below does a TLS handshake (mbedTLS is very
+        // stack-hungry). An 80-entry array here is ~1.3 KB of stack that used to
+        // sit live DURING the handshake — when the refetch was triggered deep
+        // inside updateClockIfNeeded() (a large function that has already eaten
+        // stack), the total blew the task stack and the device rebooted. That
+        // was the "changing the US-debt timeframe dropdown crashes" bug (the
+        // SINCE/RATE dropdowns never refetch, so they were fine; the very first
+        // 50Y load comes from the small updateDebtData() path, so it survived).
+        // Only the loop task calls this, so a static buffer is safe (no reentry).
+        static DebtHistoryPoint points[80];
         int count = apiClient.fetchDebtHistory(years, points, 80);
-        Log.printf("debtHistory: %d points (years=%d)\n", count, years);
+        Log.printf("debtHistory: %d points (years=%d) stackHWM=%u heap=%u\n",
+                      count, years, (unsigned)uxTaskGetStackHighWaterMark(NULL),
+                      (unsigned)ESP.getFreeHeap());
         if (count == 0) {
             Log.println("reloadDebtHistory: no data returned, leaving chart as-is.");
             return;
@@ -2041,14 +2057,23 @@ private:
         // crash/corruption source (two screens animating, one gets unloaded
         // mid-anim). If the user swipes again before the animation finished,
         // load the next screen instantly instead of animating.
+        // Navigation transition. The lateral MOVE slide showed a subtle per-frame
+        // flicker on the RGB panel: with direct_mode the whole screen is repainted
+        // on every frame of the 300 ms slide, and the two framebuffers don't stay
+        // perfectly in sync during a full-screen move (a fade would repaint the
+        // same way, so it wouldn't help). David preferred no flicker over the
+        // motion, so screens now load INSTANTLY. Flip kNavSlideAnim back to true
+        // to restore the slide once a flicker-free animation path is found.
+        constexpr bool kNavSlideAnim = false;
         static uint32_t lastAnimStartAt = 0;
         if (animate && millis() - lastAnimStartAt < 350) animate = false;
-        if (animate) {
+        if (kNavSlideAnim && animate) {
             lastAnimStartAt = millis();
             lv_scr_load_anim(screens[(int)id], anim, 300, 0, false);
         } else {
             lv_scr_load(screens[(int)id]);
         }
+        (void)anim;   // retained for the kNavSlideAnim path above
         // Trigger data load when ticker screen becomes visible
         if (id == ScreenId::TICKERS) {
             tickerScreen.onShow(storage.getNodeCode().c_str());

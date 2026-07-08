@@ -321,8 +321,18 @@ public:
     // winner) → a green-bordered popup with that node's basic info, same modal
     // style as the verification tooltip. Genesis ⚡ and bio are omitted on device
     // (no lightning glyph in the built-in fonts; bio wouldn't fit).
-    void _showNodeInfo(const char* name, const char* country, bool hasStats,
-                       double earned, const char* uptimeStr) {
+    // Find a leaderboard row by display name (the own node + block winners are in
+    // the directory) → lets any popup show country + twitter + real stats.
+    LeaderboardEntry* _findSlotByName(const char* name) {
+        if (!name || !name[0]) return nullptr;
+        for (int i = 0; i < 2 * LB_ROWS; i++)
+            if (_slotEntry[i].name[0] && strcmp(_slotEntry[i].name, name) == 0) return &_slotEntry[i];
+        return nullptr;
+    }
+
+    void _showNodeInfo(const char* name, const char* country, const char* twitter,
+                       bool hasStats, double earned, const char* uptimeStr) {
+        if (g_touchWasSwipe()) return;   // a swipe that merely started on the name — not a tap
         lv_obj_t* card = openModal(lv_scr_act());
 
         lv_obj_t* title = lv_label_create(card);
@@ -333,7 +343,14 @@ public:
         lv_obj_set_width(title, 250);
         lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);   // else short names
                                                                       // sat left of the box
-
+        // Twitter handle just below the name (blue), if the node set one.
+        if (twitter && twitter[0]) {
+            char tw[28]; snprintf(tw, sizeof(tw), "@%s", twitter);
+            lv_obj_t* h = lv_label_create(card);
+            lv_label_set_text(h, tw);
+            lv_obj_set_style_text_color(h, lv_color_hex(0x5b8dee), 0);
+            lv_obj_set_style_text_font(h, &lv_font_montserrat_12, 0);
+        }
 
         if (country && country[0]) {
             lv_obj_t* loc = lv_label_create(card);
@@ -364,9 +381,11 @@ public:
     // identifies WHICH node (leaderboard slot index / mined-block index).
     static void _onOwnNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
-        // Always show stats (an unverified node still has ₸0 rewards + real uptime);
-        // gating on _ownVerified is what made this popup show only the name.
-        s->_showNodeInfo(s->_ownName, "", true, s->_ownEarned, s->_ownUptime);
+        // Enrich with country + twitter from the directory (the own node is in it);
+        // always show stats (an unverified node still has ₸0 rewards + real uptime).
+        LeaderboardEntry* d = s->_findSlotByName(s->_ownName);
+        s->_showNodeInfo(s->_ownName, d ? d->country : "", d ? d->twitter : "",
+                         true, s->_ownEarned, s->_ownUptime);
     }
     static void _onLbNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
@@ -374,7 +393,7 @@ public:
         if (idx < 0 || idx >= 2 * LB_ROWS || !s->_slotEntry[idx].name[0]) return;
         LeaderboardEntry& en = s->_slotEntry[idx];
         char up[24]; _fmtUptimeShort(up, sizeof(up), en.totalUptimeSecs);
-        s->_showNodeInfo(en.name, en.country, true, en.earned, up);
+        s->_showNodeInfo(en.name, en.country, en.twitter, true, en.earned, up);
     }
     static void _onBlockNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
@@ -382,15 +401,14 @@ public:
         if (bi < 0 || bi >= NODE_MINED_BLOCKS_SHOWN || !s->minedBlocks[bi].winnerName[0]) return;
         const char* wn = s->minedBlocks[bi].winnerName;
         const char* wc = s->minedBlocks[bi].winnerCountry;
-        // Best-effort: match the winner to a leaderboard row for rewards/uptime.
-        for (int i = 0; i < 2 * LB_ROWS; i++) {
-            if (s->_slotEntry[i].name[0] && strcmp(s->_slotEntry[i].name, wn) == 0) {
-                char up[24]; _fmtUptimeShort(up, sizeof(up), s->_slotEntry[i].totalUptimeSecs);
-                s->_showNodeInfo(wn, wc, true, s->_slotEntry[i].earned, up);
-                return;
-            }
+        // Match the winner to a leaderboard row for rewards/uptime/twitter.
+        LeaderboardEntry* d = s->_findSlotByName(wn);
+        if (d) {
+            char up[24]; _fmtUptimeShort(up, sizeof(up), d->totalUptimeSecs);
+            s->_showNodeInfo(wn, wc, d->twitter, true, d->earned, up);
+        } else {
+            s->_showNodeInfo(wn, wc, "", false, 0, "");
         }
-        s->_showNodeInfo(wn, wc, false, 0, "");
     }
 
     void updateMiningFeed(MiningFeedEntry* entries, int count) {

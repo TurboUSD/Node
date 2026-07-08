@@ -226,6 +226,27 @@ public:
         lv_obj_align(_col2Btn, LV_ALIGN_RIGHT_MID, -90, 0);
         _refreshColsBtns();
 
+        // Small refresh button, sitting to the LEFT of the "1" column toggle.
+        // Forces a live-data + missing-logo reload — handy when a card is stuck
+        // loading (the first ticker occasionally lagged behind the rest).
+        _refreshBtn = lv_btn_create(_titleRow);
+        lv_obj_set_size(_refreshBtn, 24, 22);
+        lv_obj_set_style_bg_color(_refreshBtn, lv_color_hex(CLR_SURFACE), 0);
+        lv_obj_set_style_border_color(_refreshBtn, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_border_width(_refreshBtn, 1, 0);
+        lv_obj_set_style_radius(_refreshBtn, 6, 0);
+        lv_obj_set_style_pad_all(_refreshBtn, 2, 0);
+        lv_obj_align(_refreshBtn, LV_ALIGN_RIGHT_MID, -148, 0);
+        lv_obj_add_event_cb(_refreshBtn, [](lv_event_t* e) {
+            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+            if (self) self->_manualRefresh();
+        }, LV_EVENT_CLICKED, this);
+        lv_obj_t* refreshLbl = lv_label_create(_refreshBtn);
+        lv_label_set_text(refreshLbl, LV_SYMBOL_REFRESH);
+        lv_obj_set_style_text_font(refreshLbl, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(refreshLbl, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_center(refreshLbl);
+
         // Gear button → toggles edit mode (reorder ▲▼ + delete on each card).
         _editBtn = lv_btn_create(_titleRow);
         lv_obj_set_size(_editBtn, 30, 22);
@@ -298,6 +319,7 @@ private:
     lv_obj_t*        _emptyLabel  = nullptr;
     lv_obj_t*        _col1Btn     = nullptr;
     lv_obj_t*        _col2Btn     = nullptr;
+    lv_obj_t*        _refreshBtn  = nullptr;  // manual force-reload (left of "1")
     int              _cols        = 1;       // 1 or 2 card columns (persisted)
     lv_coord_t       _savedScrollY = 0;      // view position restored across rebuilds/visits
     lv_obj_t*        _spinner     = nullptr;
@@ -444,11 +466,27 @@ private:
         for (int k = 0; k < 2; k++) {
             if (!btns[k]) continue;
             bool active = (_cols == k + 1);
-            lv_obj_set_style_bg_color(btns[k], lv_color_hex(active ? 0x26262c : CLR_SURFACE), 0);
-            lv_obj_set_style_border_color(btns[k], lv_color_hex(active ? 0x8a8a92 : CLR_BORDER), 0);
+            // Active is intentionally softer than before: still clearly distinct
+            // from the unselected cell (brighter border + number + a hint of fill)
+            // but no longer loud enough to pull the eye off the ticker cards.
+            lv_obj_set_style_bg_color(btns[k], lv_color_hex(active ? 0x232327 : CLR_SURFACE), 0);
+            lv_obj_set_style_border_color(btns[k], lv_color_hex(active ? 0x55555c : CLR_BORDER), 0);
             lv_obj_t* l = lv_obj_get_child(btns[k], 0);
-            if (l) lv_obj_set_style_text_color(l, lv_color_hex(active ? 0xd8d8dc : CLR_MUTED), 0);
+            if (l) lv_obj_set_style_text_color(l, lv_color_hex(active ? 0xbebec4 : CLR_MUTED), 0);
         }
+    }
+
+    // Manual force-reload triggered by the refresh button. Marks every ticker's
+    // live data stale (bypassing the 2-min TTL) and requests a full list reload;
+    // pollPending dispatches TT_LOAD_LIST when the worker is free, which re-runs
+    // the batched live fetch plus a retry for any missing logo. Any card that was
+    // stuck loading (typically the first ticker) gets picked up on this pass.
+    void _manualRefresh() {
+        for (int i = 0; i < _tickerCount; i++) {
+            _tickers[i].live_at = 0;   // ignore the live TTL → re-fetch price/mcap/change
+        }
+        _listReloadRequested = true;   // retried each poll until the worker is free
+        Log.println("tickers: manual refresh requested (force live + logo reload)");
     }
 
     void _rebuildTickerCards() {
@@ -1349,10 +1387,13 @@ private:
                         strncpy(te.base_name,    obj["base_name"]    | "",   sizeof(te.base_name)-1);
                         strncpy(te.quote_symbol, obj["quote_symbol"] | "USD", sizeof(te.quote_symbol)-1);
                         te.logo_applied = false;   // new cards → re-attach
-                        // Expansion comes from the pool-keyed set, NOT the
-                        // index carry-over: survives reorders and the in-place
-                        // rewrite racing a rebuild on the other core.
-                        te.is_expanded = self->_isExpandedPool(pool);
+                        // Expansion = the pool-matched CARRY-OVER (line above kept
+                        // te.is_expanded from the old snapshot) OR the pool-keyed
+                        // set. Using ONLY the set overwrote a correctly-carried-over
+                        // TRUE with a stale/empty set → open charts collapsed on a
+                        // background reload (log: expanded=[..E...] → [......]).
+                        // OR-ing both keeps a chart open if EITHER source says so.
+                        te.is_expanded = te.is_expanded || self->_isExpandedPool(pool);
                         n++;
                     }
                     self->_tickerCount = n;
@@ -1734,6 +1775,20 @@ private:
                 if (!te.logo_url[0])
                     Log.printf("logo[%s] no imageUrl anywhere (token %s)\n", te.base_symbol, baseAddrs[j]);
             }
+        }
+
+        // Safety net for the first-ticker-never-loads bug: the batched pairs
+        // endpoint occasionally returns a response that OMITS one of the
+        // requested pools (in practice almost always the FIRST ticker). That
+        // left needed[j] == true, and since the outer loop had already passed
+        // index j it was never retried until the next full list reload — so the
+        // card sat blank for a long time while every other ticker loaded fine.
+        // Retry any still-unfilled ticker individually, in THIS same pass.
+        for (int j = 0; j < self->_tickerCount; j++) {
+            if (!needed[j]) continue;
+            Log.printf("tickers: batch missed [%s] — individual retry\n", self->_tickers[j].base_symbol);
+            _fetchLive(self, j);
+            self->_tickers[j].live_dirty = true;   // pollPending refreshes the labels
         }
     }
 

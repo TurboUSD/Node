@@ -9,6 +9,12 @@
 
 LV_IMG_DECLARE(turbousd_logo); // generated asset, see assets/README.md
 
+// Global "the current gesture is a swipe, not a tap" flag, mirrored from the
+// touch read_cb (UiManager). Lets tap handlers that live OUTSIDE UiManager (e.g.
+// the node-name info popups in screen_node.h) bail when a swipe merely started
+// on their widget — otherwise the popup opened on the screen you swiped to.
+inline bool& g_touchWasSwipe() { static bool v = false; return v; }
+
 struct SharedHeaderRefs {
     lv_obj_t* dateLabel    = nullptr;
     lv_obj_t* tempLabel    = nullptr;
