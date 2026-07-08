@@ -5,6 +5,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import SiteHeader from '@/components/SiteHeader'
+import { LocationNote } from '@/components/NodeBadges'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
 const C = {
@@ -1124,8 +1125,8 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
                 </a>
               )}
               {node.country && (
-                <span style={{ fontSize: 12, color: C.muted }}>
-                  {node.country}{node.city ? ` · ${node.city}` : ''}
+                <span style={{ fontSize: 12, color: C.muted, display: 'inline-flex', alignItems: 'center' }}>
+                  {node.country}{node.city ? ` · ${node.city}` : ''}<LocationNote />
                 </span>
               )}
             </div>
@@ -1161,13 +1162,21 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
           </div>
         )}
 
-        {/* Share on X */}
-        <button onClick={shareOnX} style={s.shareBtn}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.264 5.633 5.9-5.633zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-          </svg>
-          Share on X
-        </button>
+        {/* Share on X + link to the public node page */}
+        <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+          <button onClick={shareOnX} style={{ ...s.shareBtn, width: 'auto', flex: 1, minWidth: 130, marginTop: 0 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.264 5.633 5.9-5.633zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+            Share on X
+          </button>
+          <a href={`/node/${node.node_code}`} style={{
+            flex: 1, minWidth: 130, padding: '11px 0', background: 'transparent',
+            border: `1px solid ${C.green}`, borderRadius: 10, color: C.green,
+            fontWeight: 'bold', fontSize: 14, textDecoration: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>Full profile →</a>
+        </div>
 
         {node.last_seen_at && (
           <p style={{ fontSize: 11, color: C.muted, marginTop: 16 }}>

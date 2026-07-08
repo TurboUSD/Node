@@ -98,18 +98,20 @@ export default function BlocksPage() {
 
       <div style={s.content}>
         <div style={s.titleRow}>
-          <h1 style={s.h1}>Mined blocks</h1>
-          {total != null && <span style={s.count}>{total.toLocaleString()} total</span>}
-        </div>
-
-        <div style={s.sizeRow}>
-          <span style={{ fontSize: 12, color: C.muted }}>Per page</span>
-          {PAGE_SIZES.map(n => (
-            <button key={n} onClick={() => { setPageSize(n); setPage(0) }}
-              style={n === pageSize ? { ...s.sizeBtn, ...s.sizeBtnActive } : s.sizeBtn}>
-              {n}
-            </button>
-          ))}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <h1 style={s.h1}>Mined blocks</h1>
+            {total != null && <span style={s.count}>{total.toLocaleString()} total</span>}
+          </div>
+          {/* Per-page selector sits on the title line (right); wraps below on narrow screens. */}
+          <div style={s.sizeRow}>
+            <span style={{ fontSize: 12, color: C.muted }}>Per page</span>
+            {PAGE_SIZES.map(n => (
+              <button key={n} onClick={() => { setPageSize(n); setPage(0) }}
+                style={n === pageSize ? { ...s.sizeBtn, ...s.sizeBtnActive } : s.sizeBtn}>
+                {n}
+              </button>
+            ))}
+          </div>
         </div>
 
         {loading && rows.length === 0
@@ -190,12 +192,12 @@ const s: Record<string, React.CSSProperties> = {
   logo:    { fontSize: 16, fontWeight: 'bold', color: C.text },
   content: { maxWidth: 900, margin: '0 auto', padding: '24px 16px 80px' },
 
-  titleRow: { display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14 },
+  titleRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 },
   h1:       { fontSize: 22, margin: 0 },
   count:    { fontSize: 13, color: C.muted },
   dim:      { color: C.muted, fontSize: 14 },
 
-  sizeRow:       { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 },
+  sizeRow:       { display: 'flex', alignItems: 'center', gap: 6 },
   sizeBtn:       { padding: '5px 12px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, color: C.muted, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
   sizeBtnActive: { background: C.green, color: '#000', borderColor: C.green },
 
