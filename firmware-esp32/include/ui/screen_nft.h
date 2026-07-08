@@ -1091,6 +1091,25 @@ private:
             } else if (!_fetching && !_imgTask && !_imgSettled) {
                 _startImageFetch();
             }
+
+            // WALLET/PIN FETCH RETRY — the fetch used to be triggered ONLY from
+            // onShow() (screen entry), a pinlist change or the manual refresh
+            // button. If the boot-time scan failed (TLS RAM, OpenSea hiccup),
+            // NOTHING retried while you stayed on the screen: wallet NFTs
+            // "never load" and the log goes silent, as if no wallet were set.
+            // Retry once a minute while the cache is stale; a SUCCESSFUL fetch
+            // stamps the 30-min TTL and this stops firing. Separate `if` (not
+            // part of the chain above) so its throttle can't shadow the img
+            // kick, and cheap when gated: _startFetch's spawn gate logs and
+            // declines if TLS RAM is still too low.
+            if (!_fetching && !_imgTask && _cacheExpired()) {
+                static uint32_t lastRetryAt = 0;
+                if (lastRetryAt == 0 || millis() - lastRetryAt > 60000UL) {
+                    lastRetryAt = millis();
+                    if (storage.hasNftWallet())        _startFetch();
+                    else if (storage.hasNftPinlist())  _startPinlistFetch();
+                }
+            }
         }
 
         if (!_fetching) return;
