@@ -2419,6 +2419,7 @@ private:
         }
 
         if (wallet.length() < 42) {
+            Log.printf("NFT scan: no usable wallet in NVS (len=%u) — aborting\n", (unsigned)wallet.length());
             snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "No wallet configured.");
             _pendingResult.error = true;
             _pendingResult.ready = true;
@@ -2448,6 +2449,17 @@ private:
         memset(perSlug, 0, sizeof(perSlug));
         const int MAX_PER_COLLECTION = 6;   // grid carousels don't need more
         const int MAX_PAGES          = 5;   // up to ~250 NFTs scanned
+
+        // VISIBILITY: prove in the log WHICH wallet is being scanned and whether
+        // the OpenSea API key made it into this build (the CI injects the
+        // OPENSEA_API_KEY repo secret; with an EMPTY key OpenSea throttles hard
+        // or rejects). "The log says nothing about the wallet" should now be
+        // impossible: every scan prints this, every abort prints its reason.
+        Log.printf("NFT scan: wallet %.8s...%s | OpenSea key %s | up to %d pages\n",
+                   wallet.c_str(),
+                   wallet.length() >= 6 ? wallet.c_str() + wallet.length() - 6 : "",
+                   strlen(OPENSEA_API_KEY) > 0 ? "SET" : "EMPTY(!)",
+                   MAX_PAGES);
 
         String nextCursor = "";
         int    code       = -1;
@@ -2498,6 +2510,8 @@ private:
                     http.end();
                     break;
                 }
+                Log.printf("NFT scan: ABORTED page 1 — OpenSea HTTP %d%s\n", code,
+                           (code == 401 || code == 403) ? " (API key missing/invalid?)" : "");
                 if (code == 401 || code == 403) {
                     snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
                              "OpenSea requires an API key (HTTP %d).\nRebuild with OPENSEA_API_KEY set.", code);
@@ -2528,6 +2542,7 @@ private:
             http.end();
             if (err) {
                 if (page > 0) break;
+                Log.printf("NFT scan: ABORTED page 1 — JSON parse error: %s\n", err.c_str());
                 snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
                          "JSON parse error: %s", err.c_str());
                 _pendingResult.error = true;
