@@ -188,8 +188,12 @@ public:
         //   Wallet · Edit(gear) · grid-cycle(1x1/2x2/3x3) · carousel · data · refresh
         hideFooterNetworkText(footer);   // keeps the live dot + node name + "|" separator
         lv_obj_t* fctl = lv_obj_create(footer.bar);
-        lv_obj_add_flag(fctl, LV_OBJ_FLAG_IGNORE_LAYOUT);   // float hard-right, past the separator
-        lv_obj_set_size(fctl, LV_SIZE_CONTENT, LV_PCT(100));
+        // NO IGNORE_LAYOUT: the bar has no layout of its own, so the flag doesn't
+        // help positioning — but it made the layout pass skip fctl's subtree, so its
+        // flex children never got placed and collapsed onto the origin (only the last
+        // one, refresh, showed). Plain align keeps it hard-right; flex then lays the
+        // row out. FIXED width (not SIZE_CONTENT) so the main size always resolves.
+        lv_obj_set_size(fctl, 220, LV_PCT(100));
         lv_obj_align(fctl, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_obj_set_style_bg_opa(fctl, LV_OPA_0, 0);
         lv_obj_set_style_border_width(fctl, 0, 0);
@@ -310,6 +314,9 @@ public:
             lv_obj_set_style_text_color(nftRefreshLbl, lv_color_hex(0x63646c), 0);   // dim grey, same as tickers refresh
             lv_obj_center(nftRefreshLbl);
         }
+
+        // Cap the node name so it can't run into these controls; marquee if longer.
+        constrainFooterName(footer, fctl, 28);
 
         // ── Grid area ─────────────────────────────────────────────────────────
         _gridArea = lv_obj_create(_body);

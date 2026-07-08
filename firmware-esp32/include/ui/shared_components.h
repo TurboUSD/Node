@@ -31,6 +31,8 @@ struct SharedFooterRefs {
     lv_obj_t* nodeNameLabel = nullptr;
     lv_obj_t* nodeCountLabel = nullptr;
     lv_obj_t* qrIcon = nullptr;
+    lv_coord_t nameMaxW = 0;            // >0: cap the node name to this width and marquee if longer
+                                        // (set by screens that host right-side controls). 0 = unconstrained.
 };
 
 // Replace only the "Network: N nodes" count (and the config gear) with a
@@ -39,6 +41,23 @@ struct SharedFooterRefs {
 inline void hideFooterNetworkText(SharedFooterRefs& f) {
     if (f.nodeCountLabel) lv_obj_add_flag(f.nodeCountLabel, LV_OBJ_FLAG_HIDDEN);
     if (f.qrIcon)         lv_obj_add_flag(f.qrIcon,         LV_OBJ_FLAG_HIDDEN);
+}
+
+// Cap the node-name width so it can't collide with a right-side control group.
+// `rightGroup` is the screen's control container (floated to the footer's right
+// edge); `gap` is the guaranteed empty space to leave between the name/"|" and
+// the controls. The cap is derived from the control group's actual left edge, so
+// it auto-adapts to how wide the controls are. Names that fit stay static; longer
+// ones marquee (handled in refreshSharedFooter). Call AFTER the controls are built.
+inline void constrainFooterName(SharedFooterRefs& f, lv_obj_t* rightGroup, lv_coord_t gap) {
+    if (!f.bar || !rightGroup || !f.nodeNameLabel) return;
+    lv_obj_update_layout(f.bar);                         // finalise sizes/positions
+    lv_coord_t groupLeft = lv_obj_get_x(rightGroup);     // left edge of the controls within the bar
+    lv_coord_t nameLeft  = lv_obj_get_x(f.nodeNameLabel);
+    const lv_coord_t sepReserve = 16;                    // room the "|" occupies just after the name
+    lv_coord_t maxW = groupLeft - gap - sepReserve - nameLeft;
+    if (maxW < 40) maxW = 40;                            // never collapse to nothing
+    f.nameMaxW = maxW;
 }
 
 // Builds the top bar used on every screen except Clock (which has its own
@@ -250,7 +269,24 @@ inline void refreshSharedAlarmIcon(SharedHeaderRefs& refs, bool alarmEnabled, bo
 // nodeName should be the device's display name, or its node code while it has
 // no name yet. The count renders as "| N NODES", separated from the name by "|".
 inline void refreshSharedFooter(SharedFooterRefs& refs, const String& nodeName, int onlineNodeCount) {
-    if (refs.nodeNameLabel)  lv_label_set_text(refs.nodeNameLabel, nodeName.c_str());
+    if (refs.nodeNameLabel) {
+        lv_label_set_text(refs.nodeNameLabel, nodeName.c_str());
+        // On screens with right-side controls, cap the name width: if it fits it
+        // stays static (as before); if it's longer it marquees like the NFT
+        // collection captions, so it never runs into the controls.
+        if (refs.nameMaxW > 0) {
+            const lv_font_t* fnt = lv_obj_get_style_text_font(refs.nodeNameLabel, LV_PART_MAIN);
+            lv_point_t sz;
+            lv_txt_get_size(&sz, nodeName.c_str(), fnt, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (sz.x > refs.nameMaxW) {
+                lv_label_set_long_mode(refs.nodeNameLabel, LV_LABEL_LONG_SCROLL_CIRCULAR);
+                lv_obj_set_width(refs.nodeNameLabel, refs.nameMaxW);
+            } else {
+                lv_label_set_long_mode(refs.nodeNameLabel, LV_LABEL_LONG_WRAP);   // single line at content width → static
+                lv_obj_set_width(refs.nodeNameLabel, LV_SIZE_CONTENT);
+            }
+        }
+    }
     if (refs.nodeCountLabel) {
         char countBuf[24];
         snprintf(countBuf, sizeof(countBuf), "Network: %d Node%s", onlineNodeCount, onlineNodeCount == 1 ? "" : "s");

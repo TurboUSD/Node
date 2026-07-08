@@ -193,8 +193,12 @@ public:
         // "Network: N nodes" text is hidden; order is Add · Edit · [1|2] · Refresh.
         hideFooterNetworkText(footer);   // keeps the dot + node name + "|" separator
         lv_obj_t* fctl = lv_obj_create(footer.bar);
-        lv_obj_add_flag(fctl, LV_OBJ_FLAG_IGNORE_LAYOUT);   // float hard-right, past the separator
-        lv_obj_set_size(fctl, LV_SIZE_CONTENT, LV_PCT(100));
+        // NO IGNORE_LAYOUT: the bar has no layout of its own, so the flag doesn't
+        // help positioning — but it made the layout pass skip fctl's subtree, so its
+        // flex children never got placed and collapsed onto the origin (only the last
+        // one, refresh, showed). Plain align keeps it hard-right; flex then lays the
+        // row out. FIXED width (not SIZE_CONTENT) so the main size always resolves.
+        lv_obj_set_size(fctl, 170, LV_PCT(100));
         lv_obj_align(fctl, LV_ALIGN_RIGHT_MID, 0, 0);
         lv_obj_set_style_bg_opa(fctl, LV_OPA_0, 0);
         lv_obj_set_style_border_width(fctl, 0, 0);
@@ -265,6 +269,9 @@ public:
         { lv_obj_t* l = lv_label_create(tRefresh); lv_label_set_text(l, LV_SYMBOL_REFRESH);
           lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
           lv_obj_set_style_text_color(l, lv_color_hex(0x63646c), 0); lv_obj_center(l); }
+
+        // Cap the node name so it can't run into these controls; marquee if longer.
+        constrainFooterName(footer, fctl, 28);
 
         // Placeholder shown when no tickers are loaded yet
         _emptyLabel = lv_label_create(_body);
