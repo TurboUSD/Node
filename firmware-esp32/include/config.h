@@ -83,7 +83,7 @@
 #define MINING_FEED_REFRESH_MS       (15UL * 1000UL)            // every 15s while on the Node screen
 #define SENSOR_POLL_INTERVAL_MS      (10UL * 1000UL)            // poll RP2040 for temp/humidity every 10s
 #define GEO_LOCALE_SYNC_INTERVAL_MS  (12UL * 60UL * 60UL * 1000UL) // re-check geo-IP twice a day (catches travel + DST)
-#define OTA_CHECK_INTERVAL_MS        (24UL * 60UL * 60UL * 1000UL) // once a day
+#define OTA_CHECK_INTERVAL_MS        (3UL * 60UL * 60UL * 1000UL)  // every 3 hours (also checks shortly after boot)
 #define NTP_RESYNC_INTERVAL_MS       (6UL * 60UL * 60UL * 1000UL)  // every 6 hours
 
 // ---------------------------------------------------------------------

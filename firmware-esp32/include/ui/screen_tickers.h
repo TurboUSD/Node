@@ -203,10 +203,10 @@ public:
 
         _addBtn = lv_btn_create(_titleRow);
         lv_obj_set_size(_addBtn, 52, 22);
-        lv_obj_set_style_bg_color(_addBtn, lv_color_hex(CLR_SURFACE), 0);
-        lv_obj_set_style_border_color(_addBtn, lv_color_hex(CLR_BORDER), 0);
-        lv_obj_set_style_border_width(_addBtn, 1, 0);
-        lv_obj_set_style_radius(_addBtn, 6, 0);
+        // Bare word (like the NFT "Wallet" button) — no chip: no fill, no border.
+        lv_obj_set_style_bg_opa(_addBtn, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(_addBtn, 0, 0);
+        lv_obj_set_style_shadow_width(_addBtn, 0, 0);
         lv_obj_set_style_pad_all(_addBtn, 2, 0);
         // Gear sits at the far right; Add just to its left (settings to the
         // RIGHT of Add). The "+" is dropped — the label is just "Add".

@@ -273,6 +273,29 @@ public:
             if (self) self->_openWalletDialog();
         }, LV_EVENT_CLICKED, this);
 
+        // Manual refresh — bare refresh-arrows (same style as the tickers screen),
+        // to the LEFT of Wallet. Fallback to force a full re-fetch: re-resolve
+        // pins, pull items just added on the web, and re-order — for when the
+        // auto-sync hasn't picked up a web change yet.
+        lv_obj_t* nftRefresh = lv_btn_create(_sizeBar);
+        lv_obj_add_flag(nftRefresh, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_set_size(nftRefresh, 24, 20);
+        lv_obj_set_style_bg_opa(nftRefresh, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(nftRefresh, 0, 0);
+        lv_obj_set_style_shadow_width(nftRefresh, 0, 0);
+        lv_obj_set_style_pad_all(nftRefresh, 2, 0);
+        lv_obj_align(nftRefresh, LV_ALIGN_RIGHT_MID, -84, 0);   // left of Wallet
+        lv_obj_set_ext_click_area(nftRefresh, 10);
+        lv_obj_add_event_cb(nftRefresh, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (self) self->_forceRefresh();
+        }, LV_EVENT_CLICKED, this);
+        lv_obj_t* nftRefreshLbl = lv_label_create(nftRefresh);
+        lv_label_set_text(nftRefreshLbl, LV_SYMBOL_REFRESH);
+        lv_obj_set_style_text_font(nftRefreshLbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(nftRefreshLbl, lv_color_hex(0x63646c), 0);   // dim grey, same as tickers refresh
+        lv_obj_center(nftRefreshLbl);
+
         // ── Grid area ─────────────────────────────────────────────────────────
         _gridArea = lv_obj_create(_body);
         lv_obj_set_size(_gridArea, 480, NFT_GRID_H);
@@ -843,6 +866,16 @@ private:
                 if (swap) { NftItem tmp = a; a = b; b = tmp; }
             }
         }
+    }
+
+    // Manual "pull now" from the refresh button: drop the cached pinlist
+    // signature so the poll's change-detector re-fetches (re-resolves pins, pulls
+    // items just added on the web, re-orders), and abort any in-flight image
+    // decode so it happens right away instead of waiting for the worker.
+    void _forceRefresh() {
+        Log.println("NFT: manual refresh — forcing refetch");
+        _fetchedPinlistSig = "";
+        if (_imgTask) _imgGen++;
     }
 
     void _startFetch() {
@@ -2339,6 +2372,22 @@ private:
             }
             if (code != 200) {
                 if (page > 0) break;   // keep earlier pages' items
+                // THE "pins never reach the device" bug: OpenSea's account
+                // endpoint is flaky (code -1 here) or needs a key, and we USED to
+                // abort the whole fetch — dropping the manual pins too. But pins
+                // (Ordinals like NodeMonkes) are resolved INDEPENDENTLY of the
+                // wallet scan (resolve-ordinal + ordinals.com), which is why the
+                // web shows them fine. So don't abort: keep the wallet items
+                // already in the cache (we just can't refresh them now) and fall
+                // through to the pin-append below so a newly-added pin comes in.
+                if (storage.hasNftPinlist()) {
+                    Log.printf("NFT wallet scan HTTP %d — keeping cached wallet items, refreshing pins\n", code);
+                    for (auto& it : self->_nftCache)
+                        if (!it.pinned && _pendingResult.count < NFT_MAX_ITEMS)
+                            _pendingResult.items[_pendingResult.count++] = it;
+                    http.end();
+                    break;
+                }
                 if (code == 401 || code == 403) {
                     snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg),
                              "OpenSea requires an API key (HTTP %d).\nRebuild with OPENSEA_API_KEY set.", code);

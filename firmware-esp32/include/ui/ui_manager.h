@@ -1422,10 +1422,21 @@ private:
             lv_obj_set_style_bg_color(splash, lv_color_hex(0x000000), 0);
             lv_obj_center(splash);
             lv_obj_t* dlLabel = lv_label_create(splash);
-            lv_label_set_text(dlLabel, "Downloading update...\nDo not turn off.");
+            lv_label_set_text(dlLabel,
+                "Updating firmware\n\n"
+                "Downloading and installing...\n"
+                "This takes about 30 seconds.\n\n"
+                "The screen may look frozen -\n"
+                "that's normal. Do NOT turn off.\n"
+                "The device restarts when done.");
+            lv_obj_set_style_text_align(dlLabel, LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_set_style_text_color(dlLabel, lv_color_hex(0x3aff7a), 0);
             lv_obj_center(dlLabel);
-            lv_timer_handler(); // force a redraw so the splash is visible
+            // Paint the message into BOTH framebuffers (a couple of handler
+            // passes) BEFORE the blocking download begins — otherwise the panel
+            // could still show the old frame when the UI freezes, and the user
+            // sees a "frozen" screen with no explanation.
+            for (int i = 0; i < 4; i++) { lv_timer_handler(); delay(40); }
             if (sSelf->onOtaInstallConfirmed) sSelf->onOtaInstallConfirmed();
         }, LV_EVENT_CLICKED, nullptr);
     }

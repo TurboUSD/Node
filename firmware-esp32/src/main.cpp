@@ -262,15 +262,6 @@ void checkAlarmTrigger() {
     }
 }
 
-// Returns true if the current LOCAL time is in the overnight OTA check window
-// (02:00–04:00). We avoid daytime checks so a download doesn't compete with
-// the heartbeat / data-refresh traffic during normal use.
-bool isOtaCheckWindow() {
-    time_t now = time(nullptr);
-    struct tm t;
-    localtime_r(&now, &t);
-    return (t.tm_hour >= 2 && t.tm_hour < 4);
-}
 
 void applyPendingOtaUpdate() {
     Log.printf("OTA: user confirmed install of %s\n", pendingOtaVersion.c_str());
@@ -488,10 +479,13 @@ void loop() {
         if (n > 0) uiManager.updateLeaderboard(lb, n);
     }
 
-    // OTA: check silently during the overnight window, once per OTA_CHECK_INTERVAL_MS.
-    // Never auto-apply — store the metadata and let the user confirm via the UI badge.
+    // OTA: check for a newer firmware AUTOMATICALLY — shortly after boot
+    // (lastOtaCheckAt == 0) and then every OTA_CHECK_INTERVAL_MS, at ANY time of
+    // day. (It used to only run in a 02:00-04:00 window, so the user never saw
+    // it fire.) Never auto-applies: it stores the metadata and shows the SAME
+    // bottom badge the manual "Check for updates" uses, so the user confirms the
+    // install themselves.
     if (bootValidMarked && pendingOtaVersion.isEmpty()
-        && isOtaCheckWindow()
         && (lastOtaCheckAt == 0 || now - lastOtaCheckAt > OTA_CHECK_INTERVAL_MS))
     {
         lastOtaCheckAt = now;
