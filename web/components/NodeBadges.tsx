@@ -45,7 +45,7 @@ export function LocationNote({ color = MUTED }: { color?: string }) {
         onClick={e => { e.stopPropagation(); e.preventDefault(); setOpen(true) }}
         style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'help', marginLeft: 3, userSelect: 'none',
+          cursor: 'help', marginLeft: 0, userSelect: 'none',
           verticalAlign: 'super',   // sit as a superscript above the country text
         }}
       >
