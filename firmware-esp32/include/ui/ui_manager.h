@@ -223,7 +223,7 @@ public:
 
         lv_obj_t* label = lv_label_create(_otaBadge);
         char text[48];
-        snprintf(text, sizeof(text), "\xEF\x81\xB7 Firmware %s available — tap to install", version);
+        snprintf(text, sizeof(text), "\xEF\x81\xB7 Firmware %s available, tap to install", version);
         lv_label_set_text(label, text);
         lv_obj_set_style_text_color(label, lv_color_hex(0x3aff7a), 0);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_12, 0);
@@ -1378,7 +1378,7 @@ private:
         lv_obj_set_width(body, 280);
         lv_label_set_text(body,
             "The new firmware will download and install automatically. "
-            "Your device will restart once — takes about 30 seconds total. "
+            "Your device will restart once. It takes about 30 seconds total. "
             "All your settings are preserved.");
         lv_obj_set_style_text_color(body, lv_color_hex(0x9a9a9e), 0);
 
@@ -1401,8 +1401,11 @@ private:
 
         lv_obj_add_event_cb(installBtn, [](lv_event_t*) {
             closeModal(sCard);
-            // Show a "Downloading..." label before handing off to main.cpp
+            // Show a "Downloading..." label before handing off to main.cpp.
+            // Kept in a member so otaFailed() can tear it down if the download
+            // fails (a 404 etc.) — otherwise it stayed on screen forever.
             lv_obj_t* splash = lv_obj_create(lv_layer_top());
+            sSelf->_otaSplash = splash;
             lv_obj_set_size(splash, LV_PCT(100), LV_PCT(100));
             lv_obj_set_style_bg_color(splash, lv_color_hex(0x000000), 0);
             lv_obj_center(splash);
@@ -1413,6 +1416,35 @@ private:
             lv_timer_handler(); // force a redraw so the splash is visible
             if (sSelf->onOtaInstallConfirmed) sSelf->onOtaInstallConfirmed();
         }, LV_EVENT_CLICKED, nullptr);
+    }
+
+    // Splash shown while the OTA image downloads (see the install button above).
+    lv_obj_t* _otaSplash = nullptr;
+
+    // main.cpp calls this when applyPendingUpdate() fails. WITHOUT it the
+    // "Downloading update... Do not turn off" splash stayed up forever, so the
+    // user thought it was still downloading when it had actually failed. Tear
+    // the splash down and show a clear, dismissable error instead.
+    void otaFailed(const char* reason = nullptr) {
+        if (_otaSplash) { lv_obj_del(_otaSplash); _otaSplash = nullptr; }
+        lv_obj_t* ov = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(ov, LV_PCT(100), LV_PCT(100));
+        lv_obj_set_style_bg_color(ov, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(ov, LV_OPA_COVER, 0);
+        lv_obj_add_flag(ov, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t* l = lv_label_create(ov);
+        char msg[192];
+        snprintf(msg, sizeof(msg),
+                 "Update failed.\n\n%s\n\nYour device is unchanged and still\nrunning the current version.\n\nTap to dismiss.",
+                 (reason && reason[0]) ? reason : "The download did not complete.");
+        lv_label_set_text(l, msg);
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(l, lv_color_hex(0xff6b6b), 0);
+        lv_obj_center(l);
+        lv_obj_add_event_cb(ov, [](lv_event_t* e) {
+            lv_obj_del(lv_event_get_current_target(e));
+        }, LV_EVENT_CLICKED, nullptr);
+        lv_timer_handler();   // paint it immediately
     }
 
     static void onAlarmLabelTapped(lv_event_t* e) { ((UiManager*)lv_event_get_user_data(e))->openAlarmPicker(); }

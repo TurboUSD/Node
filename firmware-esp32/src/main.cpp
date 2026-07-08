@@ -279,6 +279,9 @@ void applyPendingOtaUpdate() {
         ESP.restart();
     } else {
         Log.println("OTA: apply failed. Device continues on current firmware.");
+        // Replace the "Downloading..." splash with a clear on-screen error so the
+        // user isn't left staring at "Do not turn off" when nothing is happening.
+        uiManager.otaFailed("Could not download the update.\nCheck WiFi and try again later.");
         // Clear pending so the badge disappears; next nightly check will re-detect.
         pendingOtaVersion = "";
         pendingOtaUrl = "";
