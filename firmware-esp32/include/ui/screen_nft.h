@@ -1631,9 +1631,17 @@ private:
         // that gets fetched the moment the carousel reaches it.
         int nftIdx = _cellNftIdx(cw, cw.nftCurrent);
         int gCls = _gridClass();
-        if (nftIdx < (int)_nftCache.size() && !_nftCache[nftIdx].px[gCls]
-            && !_nftCache[nftIdx].tried[gCls])
+        // Force a fresh decode of the now-visible carousel item for the CURRENT
+        // grid class if its slot isn't ready. WITHOUT clearing tried[], a sibling
+        // that was already attempted once (a throttled wsrv fetch that failed, or
+        // one only decoded for a DIFFERENT class) keeps showing a stand-in from
+        // another class — a larger bitmap blitted 1:1 in a smaller cell reads as a
+        // zoomed, chunky "pixelated" crop. That's why only the FIRST NFT in a
+        // carousel cell (the one decoded for this class up front) looked crisp.
+        if (nftIdx >= 0 && nftIdx < (int)_nftCache.size() && !_nftCache[nftIdx].px[gCls]) {
+            _nftCache[nftIdx].tried[gCls] = false;
             _startImageFetch();
+        }
     }
 
     // ── Slideshow tick ────────────────────────────────────────────────────────
@@ -2384,6 +2392,21 @@ private:
             hStats.setTimeout(6000);
 
             int sc = hStats.GET();
+            // OpenSea throttles unauthenticated requests HARD (and keyed ones
+            // occasionally): a 429 or a dropped connection (-1) used to leave the
+            // floor at 0 for that collection PERMANENTLY, so most collections
+            // showed $0 and couldn't be floor-ranked. Retry once after a longer
+            // pause. (The real cure is a valid OPENSEA_API_KEY — without it the
+            // whole scan gets throttled after the first couple of collections.)
+            if (sc == 429 || sc <= 0) {
+                hStats.end();
+                delay(1200);
+                hStats.begin(statsUrl);
+                if (strlen(OPENSEA_API_KEY) > 0) hStats.addHeader("X-API-KEY", OPENSEA_API_KEY);
+                hStats.addHeader("Accept", "application/json");
+                hStats.setTimeout(6000);
+                sc = hStats.GET();
+            }
             if (sc == 200) {
                 JsonDocument sDoc;
                 if (deserializeJson(sDoc, hStats.getStream()) == DeserializationError::Ok) {
