@@ -240,11 +240,18 @@ async function handle(req: Request): Promise<Response> {
       // so the owner chooses it in the web editor.
       const validEvm = /^[a-z]+:0x[0-9a-f]{40}:[0-9]+$/i
       const validOrd = /^ord:[0-9a-f]{64}i[0-9]+:[0-9]+(:#[0-9a-f]{6})?$/i
-      for (const item of pinItems) {
-        if (!validEvm.test(item) && !validOrd.test(item))
-          return new Response(JSON.stringify({ error: `Invalid nft_pinlist item: "${item}". Expected chain:0xcontract:tokenId or ord:<inscriptionId>:0` }), { status: 400 })
-      }
-      updates.nft_pinlist = pinItems.join(',')
+      // Validate PER ENTRY, don't reject the whole request: the old
+      // all-or-nothing 400 silently threw away EVERY setting in the save
+      // (pinlist included) when one entry was malformed — a user who added a
+      // second pin via an unrecognized URL lost the save without noticing.
+      // Keep the valid entries, report the dropped ones in the response.
+      const validItems   = pinItems.filter(i => validEvm.test(i) || validOrd.test(i))
+      const droppedItems = pinItems.filter(i => !validEvm.test(i) && !validOrd.test(i))
+      if (validItems.length === 0 && droppedItems.length > 0)
+        return new Response(JSON.stringify({ error: `No valid nft_pinlist items (first invalid: "${droppedItems[0]}"). Expected chain:0xcontract:tokenId or ord:<inscriptionId>:0` }), { status: 400 })
+      if (droppedItems.length > 0)
+        console.warn(`nft_pinlist: dropped ${droppedItems.length} invalid item(s):`, droppedItems)
+      updates.nft_pinlist = validItems.length > 0 ? validItems.join(',') : null
     }
   }
 
