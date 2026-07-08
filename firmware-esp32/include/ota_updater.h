@@ -17,6 +17,7 @@
 
 #pragma once
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <Update.h>
 #include <ArduinoJson.h>
 #include <mbedtls/sha256.h>
@@ -87,8 +88,17 @@ private:
     }
 
     bool downloadAndFlash(const String& url, const String& expectedSha256Hex) {
+        // GitHub release-asset URLs 302-redirect to a CDN host
+        // (objects.githubusercontent.com). The download MUST follow that or it
+        // stops at the 302 (that was the "OTA download failed HTTP 302" error).
+        // The CDN host's TLS cert isn't pinned — image integrity is guaranteed
+        // by the SHA-256 verification below — so an insecure client is safe and
+        // avoids cert failures when the redirect lands on a different host.
+        WiFiClientSecure client;
+        client.setInsecure();
         HTTPClient http;
-        http.begin(url);
+        http.begin(client, url);
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
         int statusCode = http.GET();
         if (statusCode != 200) {
             Log.printf("OTA download failed, HTTP %d\n", statusCode);
