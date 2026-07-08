@@ -526,13 +526,13 @@ private:
     // Default (matches the intended UX order):
     //   pos 0 → CLOCK(0)        Home
     //   pos 1 → TURBO_STATS(1)  Price/chart
-    //   pos 2 → TICKERS(6)      Token screener  ← screen 3 (user-facing)
-    //   pos 3 → DEBT(2)         US debt
-    //   pos 4 → INFLATION_GAME(3) Inflation calculator
-    //   pos 5 → NFT(5)          NFT gallery     ← penultimate
+    //   pos 2 → TICKERS(6)      Token screener
+    //   pos 3 → NFT(5)          NFT gallery      ← now right after Tickers
+    //   pos 4 → DEBT(2)         US debt
+    //   pos 5 → INFLATION_GAME(3) Inflation calculator
     //   pos 6 → NODE_NETWORK(4) Node status     ← last
     // Can be overridden per-device from NVS (set via web setup page). Position 0 is always CLOCK.
-    uint8_t _swipeOrder[(int)ScreenId::COUNT] = { 0, 1, 6, 2, 3, 5, 4 };
+    uint8_t _swipeOrder[(int)ScreenId::COUNT] = { 0, 1, 6, 5, 2, 3, 4 };
     int     _swipeCount = (int)ScreenId::COUNT;   // visible screens (hidden ones filtered out)
     int     _currentSwipePos = 0;
     uint32_t _carouselLastMs = 0;                 // last screen change (manual or auto); gates the carousel

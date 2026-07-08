@@ -25,12 +25,21 @@ struct SharedHeaderRefs {
 };
 
 struct SharedFooterRefs {
+    lv_obj_t* bar = nullptr;            // the footer bar itself (so screens can host controls in it)
     lv_obj_t* nodeSepLabel  = nullptr;  // grey "|" between name and node count
     lv_obj_t* liveDot = nullptr;
     lv_obj_t* nodeNameLabel = nullptr;
     lv_obj_t* nodeCountLabel = nullptr;
     lv_obj_t* qrIcon = nullptr;
 };
+
+// Replace only the "Network: N nodes" count (and the config gear) with a
+// screen's own controls, which sit to the RIGHT of the separator. The live dot,
+// node name and "|" separator STAY (used on tickers / NFT).
+inline void hideFooterNetworkText(SharedFooterRefs& f) {
+    if (f.nodeCountLabel) lv_obj_add_flag(f.nodeCountLabel, LV_OBJ_FLAG_HIDDEN);
+    if (f.qrIcon)         lv_obj_add_flag(f.qrIcon,         LV_OBJ_FLAG_HIDDEN);
+}
 
 // Builds the top bar used on every screen except Clock (which has its own
 // simpler logo-only header). `onLogoTapped`/`onDateTapped`/`onAlarmTapped`
@@ -117,6 +126,7 @@ inline SharedFooterRefs buildSharedFooter(lv_obj_t* parent, lv_event_cb_t onQrTa
     SharedFooterRefs refs;
 
     lv_obj_t* bar = lv_obj_create(parent);
+    refs.bar = bar;
     lv_obj_set_size(bar, LV_PCT(100), 38);
     lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(bar, lv_color_black(), 0);

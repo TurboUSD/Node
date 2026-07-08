@@ -49,10 +49,11 @@
 #define NFT_CACHE_TTL_MS       (30UL * 60UL * 1000UL)  // 30 minutes
 #define NFT_RATELIMIT_DELAY_MS 300  // ms between OpenSea collection stats calls
 #define NFT_OPENSEA_CHAIN      "ethereum"  // chain for OpenSea v2 NFT lookup
-#define NFT_HEADER_H           26   // height of the grid-size selector strip (slimmed for grid space)
 #define NFT_CAPTION_H          16   // black caption band under each artwork (name + floor)
 #define NFT_BODY_H             (480 - 38 - 38)           // 404 px
-#define NFT_GRID_H             (NFT_BODY_H - NFT_HEADER_H) // 368 px
+// All NFT controls moved to the footer bar, so the body has no top strip and the
+// grid fills the whole body edge-to-edge.
+#define NFT_GRID_H             NFT_BODY_H                // 404 px
 
 // Cell background colours (floor-price tiers: gold > 1 ETH, blue > 0.1 ETH, grey otherwise)
 #define NFT_CLR_GOLD    0xe8b339
@@ -180,30 +181,89 @@ public:
         lv_obj_set_style_pad_all(_body, 0, 0);
         lv_obj_clear_flag(_body, LV_OBJ_FLAG_SCROLLABLE);
 
-        // ── Grid-size selector strip ──────────────────────────────────────────
-        _sizeBar = lv_obj_create(_body);
-        lv_obj_set_size(_sizeBar, 480, NFT_HEADER_H);
-        lv_obj_align(_sizeBar, LV_ALIGN_TOP_MID, 0, 0);
-        lv_obj_set_style_bg_color(_sizeBar, lv_color_hex(0x0a0a0a), 0);
-        lv_obj_set_style_border_width(_sizeBar, 0, 0);
-        lv_obj_set_style_pad_all(_sizeBar, 3, 0);
-        lv_obj_set_flex_flow(_sizeBar, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(_sizeBar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(_sizeBar, 6, 0);
-        lv_obj_clear_flag(_sizeBar, LV_OBJ_FLAG_SCROLLABLE);
+        // ── Footer controls ───────────────────────────────────────────────────
+        // Every NFT control now lives in the footer bar, to the RIGHT of the node
+        // name + "|" separator (which stay put). This frees the whole body for
+        // artwork. Order left→right:
+        //   Wallet · Edit(gear) · grid-cycle(1x1/2x2/3x3) · carousel · data · refresh
+        hideFooterNetworkText(footer);   // keeps the live dot + node name + "|" separator
+        lv_obj_t* fctl = lv_obj_create(footer.bar);
+        lv_obj_add_flag(fctl, LV_OBJ_FLAG_IGNORE_LAYOUT);   // float hard-right, past the separator
+        lv_obj_set_size(fctl, LV_SIZE_CONTENT, LV_PCT(100));
+        lv_obj_align(fctl, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_set_style_bg_opa(fctl, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(fctl, 0, 0);
+        lv_obj_set_style_pad_all(fctl, 0, 0);
+        lv_obj_set_flex_flow(fctl, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(fctl, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(fctl, 12, 0);
+        lv_obj_clear_flag(fctl, LV_OBJ_FLAG_SCROLLABLE);
 
-        _btn1x1 = _makeSizeBtn(_sizeBar, "1x1");
-        _btn2x2 = _makeSizeBtn(_sizeBar, "2x2");
-        _btn3x3 = _makeSizeBtn(_sizeBar, "3x3");
+        // Wallet — enter/change the NFT wallet. Muted grey word, no chrome.
+        _addWalletBtn = lv_btn_create(fctl);
+        lv_obj_set_size(_addWalletBtn, LV_SIZE_CONTENT, 22);
+        lv_obj_set_style_bg_opa(_addWalletBtn, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(_addWalletBtn, 0, 0);
+        lv_obj_set_style_shadow_width(_addWalletBtn, 0, 0);
+        lv_obj_set_style_pad_hor(_addWalletBtn, 2, 0);
+        lv_obj_set_ext_click_area(_addWalletBtn, 6);
+        {
+            lv_obj_t* awLbl = lv_label_create(_addWalletBtn);
+            lv_label_set_text(awLbl, "Wallet");
+            lv_obj_set_style_text_font(awLbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(awLbl, lv_color_hex(NFT_CLR_MUTED), 0);
+            lv_obj_center(awLbl);
+        }
+        lv_obj_add_event_cb(_addWalletBtn, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (self) self->_openWalletDialog();
+        }, LV_EVENT_CLICKED, this);
 
-        // Carousel toggle — a subtle tappable WORD, not a big switch (the
-        // switch dominated the strip). Lit green when on, muted grey when off.
-        _carouselSwitch = lv_label_create(_sizeBar);
+        // Edit — gear; toggles reorder/delete mode. Green when active.
+        _editBtn = lv_label_create(fctl);
+        lv_label_set_text(_editBtn, LV_SYMBOL_SETTINGS);
+        lv_obj_set_style_text_font(_editBtn, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(_editBtn, lv_color_hex(NFT_CLR_MUTED), 0);
+        lv_obj_add_flag(_editBtn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(_editBtn, 6);
+        lv_obj_add_event_cb(_editBtn, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            self->_editMode = !self->_editMode;
+            lv_obj_set_style_text_color(self->_editBtn,
+                lv_color_hex(self->_editMode ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
+            self->_rebuildReq = true;   // cells gain/lose their edit overlays
+        }, LV_EVENT_CLICKED, this);
+
+        // Grid-size cycle — single button, taps through 1x1 → 2x2 → 3x3 → 1x1.
+        // Same muted colour as Wallet, no active highlight (it always reads the
+        // current value). Deferred rebuild since we're inside the button event.
+        _gridCycleBtn = lv_btn_create(fctl);
+        lv_obj_set_size(_gridCycleBtn, 30, 20);
+        lv_obj_set_style_bg_opa(_gridCycleBtn, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(_gridCycleBtn, 0, 0);
+        lv_obj_set_style_shadow_width(_gridCycleBtn, 0, 0);
+        lv_obj_set_style_pad_all(_gridCycleBtn, 0, 0);
+        lv_obj_set_ext_click_area(_gridCycleBtn, 6);
+        _gridCycleLbl = lv_label_create(_gridCycleBtn);
+        lv_obj_set_style_text_font(_gridCycleLbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(_gridCycleLbl, lv_color_hex(NFT_CLR_MUTED), 0);
+        lv_obj_center(_gridCycleLbl);
+        lv_obj_add_event_cb(_gridCycleBtn, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (!self) return;
+            int ns = self->_gridSize == 1 ? 4 : (self->_gridSize == 4 ? 9 : 1);
+            self->_gridSize = ns;
+            storage.setNftGridSize((uint8_t)ns);
+            self->_updateSizeBtnStyles();
+            self->_rebuildReq = true;   // deferred — inside the button's event
+        }, LV_EVENT_CLICKED, this);
+
+        // Carousel toggle — cycle icon. Lit green when on, muted grey when off.
+        _carouselSwitch = lv_label_create(fctl);
         lv_label_set_text(_carouselSwitch, LV_SYMBOL_LOOP);   // carousel = cycle icon
         lv_obj_set_style_text_font(_carouselSwitch, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_pad_left(_carouselSwitch, 8, 0);
         lv_obj_add_flag(_carouselSwitch, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(_carouselSwitch, 10);
+        lv_obj_set_ext_click_area(_carouselSwitch, 6);
         _refreshCarouselLabel();
         lv_obj_add_event_cb(_carouselSwitch, [](lv_event_t* e) {
             NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
@@ -213,14 +273,13 @@ public:
             self->_applyCarouselSetting(on);
         }, LV_EVENT_CLICKED, this);
 
-        // "Data" toggle — same treatment as Carousel: green word = captions
-        // (collection name + floor) shown, grey = hidden. Default ON.
-        _dataSwitch = lv_label_create(_sizeBar);
+        // Data (captions) toggle — list icon. Green = collection name + floor
+        // shown under each artwork, grey = hidden. Default ON.
+        _dataSwitch = lv_label_create(fctl);
         lv_label_set_text(_dataSwitch, LV_SYMBOL_LIST);       // data captions = list icon
         lv_obj_set_style_text_font(_dataSwitch, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_pad_left(_dataSwitch, 8, 0);
         lv_obj_add_flag(_dataSwitch, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(_dataSwitch, 10);
+        lv_obj_set_ext_click_area(_dataSwitch, 6);
         _refreshDataLabel();
         lv_obj_add_event_cb(_dataSwitch, [](lv_event_t* e) {
             NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
@@ -230,71 +289,27 @@ public:
             for (int i = 0; i < self->_cellCount; i++) self->_refreshCell(i);
         }, LV_EVENT_CLICKED, this);
 
-        // Gear — edit mode (reorder arrows + delete on each cell), mirrors the
-        // tickers screen's gear. Sits at the far right, to the RIGHT of Wallet.
-        _editBtn = lv_label_create(_sizeBar);
-        lv_obj_add_flag(_editBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_label_set_text(_editBtn, LV_SYMBOL_SETTINGS);
-        lv_obj_set_style_text_font(_editBtn, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(_editBtn, lv_color_hex(NFT_CLR_MUTED), 0);
-        lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, -8, 0);   // far right — to the RIGHT of Wallet
-        lv_obj_add_flag(_editBtn, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(_editBtn, 10);
-        lv_obj_add_event_cb(_editBtn, [](lv_event_t* e) {
-            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
-            self->_editMode = !self->_editMode;
-            lv_obj_set_style_text_color(self->_editBtn,
-                lv_color_hex(self->_editMode ? NFT_CLR_GREEN : NFT_CLR_MUTED), 0);
-            self->_rebuildReq = true;   // cells gain/lose their edit overlays
-        }, LV_EVENT_CLICKED, this);
-
-        // ── "+ Wallet" button (floats at the right of the strip) ──────────────
-        // Dedicated target for entering/changing the NFT wallet, so the grid
-        // never has to be tappable (which used to fire on swipe-in). IGNORE_LAYOUT
-        // keeps it out of the flex row so it can sit hard against the right edge.
-        // Plain tappable green word — no button chrome (same treatment as the
-        // Carousel toggle; the solid green pill dominated the strip).
-        _addWalletBtn = lv_btn_create(_sizeBar);
-        lv_obj_add_flag(_addWalletBtn, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_obj_set_size(_addWalletBtn, LV_SIZE_CONTENT, 20);
-        lv_obj_align(_addWalletBtn, LV_ALIGN_RIGHT_MID, -30, 0);   // left of the gear
-        lv_obj_set_style_bg_opa(_addWalletBtn, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(_addWalletBtn, 0, 0);
-        lv_obj_set_style_shadow_width(_addWalletBtn, 0, 0);
-        lv_obj_set_style_pad_hor(_addWalletBtn, 4, 0);
-        lv_obj_set_ext_click_area(_addWalletBtn, 10);
-        lv_obj_t* awLbl = lv_label_create(_addWalletBtn);
-        lv_label_set_text(awLbl, "Wallet");
-        lv_obj_set_style_text_font(awLbl, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(awLbl, lv_color_hex(NFT_CLR_MUTED), 0);   // same grey as the gear icon on the right
-        lv_obj_center(awLbl);
-        lv_obj_add_event_cb(_addWalletBtn, [](lv_event_t* e) {
-            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
-            if (self) self->_openWalletDialog();
-        }, LV_EVENT_CLICKED, this);
-
-        // Manual refresh — bare refresh-arrows (same style as the tickers screen),
-        // to the LEFT of Wallet. Fallback to force a full re-fetch: re-resolve
-        // pins, pull items just added on the web, and re-order — for when the
-        // auto-sync hasn't picked up a web change yet.
-        lv_obj_t* nftRefresh = lv_btn_create(_sizeBar);
-        lv_obj_add_flag(nftRefresh, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_obj_set_size(nftRefresh, 24, 20);
-        lv_obj_set_style_bg_opa(nftRefresh, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(nftRefresh, 0, 0);
-        lv_obj_set_style_shadow_width(nftRefresh, 0, 0);
-        lv_obj_set_style_pad_all(nftRefresh, 2, 0);
-        lv_obj_align(nftRefresh, LV_ALIGN_RIGHT_MID, -84, 0);   // left of Wallet
-        lv_obj_set_ext_click_area(nftRefresh, 10);
-        lv_obj_add_event_cb(nftRefresh, [](lv_event_t* e) {
-            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
-            if (self) self->_forceRefresh();
-        }, LV_EVENT_CLICKED, this);
-        lv_obj_t* nftRefreshLbl = lv_label_create(nftRefresh);
-        lv_label_set_text(nftRefreshLbl, LV_SYMBOL_REFRESH);
-        lv_obj_set_style_text_font(nftRefreshLbl, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(nftRefreshLbl, lv_color_hex(0x63646c), 0);   // dim grey, same as tickers refresh
-        lv_obj_center(nftRefreshLbl);
+        // Manual refresh — bare refresh-arrows (same style as the tickers screen).
+        // Force a full re-fetch: re-resolve pins, pull web additions, re-order —
+        // for when auto-sync hasn't picked up a web change yet.
+        {
+            lv_obj_t* nftRefresh = lv_btn_create(fctl);
+            lv_obj_set_size(nftRefresh, 22, 20);
+            lv_obj_set_style_bg_opa(nftRefresh, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(nftRefresh, 0, 0);
+            lv_obj_set_style_shadow_width(nftRefresh, 0, 0);
+            lv_obj_set_style_pad_all(nftRefresh, 0, 0);
+            lv_obj_set_ext_click_area(nftRefresh, 6);
+            lv_obj_add_event_cb(nftRefresh, [](lv_event_t* e) {
+                NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+                if (self) self->_forceRefresh();
+            }, LV_EVENT_CLICKED, this);
+            lv_obj_t* nftRefreshLbl = lv_label_create(nftRefresh);
+            lv_label_set_text(nftRefreshLbl, LV_SYMBOL_REFRESH);
+            lv_obj_set_style_text_font(nftRefreshLbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(nftRefreshLbl, lv_color_hex(0x63646c), 0);   // dim grey, same as tickers refresh
+            lv_obj_center(nftRefreshLbl);
+        }
 
         // ── Grid area ─────────────────────────────────────────────────────────
         _gridArea = lv_obj_create(_body);
@@ -398,8 +413,7 @@ public:
         lv_obj_t* ftr = footer.qrIcon   ? lv_obj_get_parent(footer.qrIcon)   : nullptr;
         if (fs) {
             if (hdr) lv_obj_add_flag(hdr, LV_OBJ_FLAG_HIDDEN);
-            if (ftr) lv_obj_add_flag(ftr, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(_sizeBar, LV_OBJ_FLAG_HIDDEN);
+            if (ftr) lv_obj_add_flag(ftr, LV_OBJ_FLAG_HIDDEN);   // footer bar hides the controls too
             lv_obj_set_size(_body, 480, 480);
             lv_obj_align(_body, LV_ALIGN_TOP_MID, 0, 0);
             lv_obj_set_size(_gridArea, 480, 480);
@@ -409,7 +423,6 @@ public:
         } else {
             if (hdr) lv_obj_clear_flag(hdr, LV_OBJ_FLAG_HIDDEN);
             if (ftr) lv_obj_clear_flag(ftr, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_clear_flag(_sizeBar, LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_size(_body, 480, NFT_BODY_H);
             lv_obj_align(_body, LV_ALIGN_TOP_MID, 0, 38);
             lv_obj_set_size(_gridArea, 480, NFT_GRID_H);
@@ -424,10 +437,8 @@ private:
     bool       _fullscreen     = false;
     // ── Members ───────────────────────────────────────────────────────────────
     lv_obj_t*  _body           = nullptr;
-    lv_obj_t*  _sizeBar        = nullptr;
-    lv_obj_t*  _btn1x1         = nullptr;
-    lv_obj_t*  _btn2x2         = nullptr;
-    lv_obj_t*  _btn3x3         = nullptr;
+    lv_obj_t*  _gridCycleBtn   = nullptr;   // single 1x1/2x2/3x3 cycle button (footer)
+    lv_obj_t*  _gridCycleLbl   = nullptr;
     lv_obj_t*  _carouselSwitch = nullptr;
     lv_obj_t*  _gridArea       = nullptr;
     lv_obj_t*  _addWalletBtn   = nullptr;
@@ -1792,49 +1803,12 @@ private:
 
     // ── Size selector buttons ─────────────────────────────────────────────────
 
-    lv_obj_t* _makeSizeBtn(lv_obj_t* parent, const char* label) {
-        lv_obj_t* btn = lv_btn_create(parent);
-        lv_obj_set_size(btn, 44, 20);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x141414), 0);
-        lv_obj_set_style_border_color(btn, lv_color_hex(NFT_CLR_BORDER), 0);
-        lv_obj_set_style_border_width(btn, 1, 0);
-        lv_obj_set_style_radius(btn, 6, 0);
-        lv_obj_set_style_pad_all(btn, 2, 0);
-        lv_obj_t* lbl = lv_label_create(btn);
-        lv_label_set_text(lbl, label);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(NFT_CLR_MUTED), 0);
-        lv_obj_center(lbl);
-        lv_obj_add_event_cb(btn, _onSizeBtnTapped, LV_EVENT_CLICKED, this);
-        return btn;
-    }
-
-    static void _onSizeBtnTapped(lv_event_t* e) {
-        NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
-        lv_obj_t* btn = lv_event_get_current_target(e);
-        int newSize = 9;
-        if (btn == self->_btn1x1) newSize = 1;
-        else if (btn == self->_btn2x2) newSize = 4;
-        else if (btn == self->_btn3x3) newSize = 9;
-        if (newSize == self->_gridSize) return;
-        self->_gridSize = newSize;
-        storage.setNftGridSize((uint8_t)newSize);
-        self->_updateSizeBtnStyles();
-        self->_rebuildGrid();
-    }
-
+    // Reflect the current grid size on the single cycle button ("1x1"/"2x2"/"3x3").
+    // No active/inactive states — it always shows the live value.
     void _updateSizeBtnStyles() {
-        _applyBtnStyle(_btn1x1, _gridSize == 1);
-        _applyBtnStyle(_btn2x2, _gridSize == 4);
-        _applyBtnStyle(_btn3x3, _gridSize == 9);
-    }
-
-    void _applyBtnStyle(lv_obj_t* btn, bool active) {
-        if (!btn) return;
-        lv_obj_set_style_bg_color(btn, lv_color_hex(active ? 0x26262c : 0x141414), 0);
-        lv_obj_set_style_border_color(btn, lv_color_hex(active ? 0x4e4e58 : NFT_CLR_BORDER), 0);   // active: clearly darker than white, still visible
-        lv_obj_t* lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(active ? 0xa8a8b0 : NFT_CLR_MUTED), 0);   // active: brighter than muted but not white
+        if (!_gridCycleLbl) return;
+        const char* t = (_gridSize == 1) ? "1x1" : (_gridSize == 4 ? "2x2" : "3x3");
+        lv_label_set_text(_gridCycleLbl, t);
     }
 
     // ── Wallet entry dialog ───────────────────────────────────────────────────

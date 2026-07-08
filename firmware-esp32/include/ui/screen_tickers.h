@@ -57,7 +57,8 @@ extern "C" unsigned lodepng_decode32(unsigned char** out, unsigned* w, unsigned*
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 #define TICKER_MAX          10
-#define COMPACT_H           62      // px height of collapsed ticker card
+#define COMPACT_H           58      // px collapsed card: 6·58 + 5·6 gap + 2·8 pad = 394 ≤ 404 BODY_H,
+                                    // so all 6 fit in 1-col with a slight header/footer margin (no scroll)
 #define EXPANDED_H          250     // px height of expanded ticker card (chart got taller)
 #define CHART_BARS          24      // hourly OHLCV bars shown in expanded view
 #define BODY_H              (SCREEN_HEIGHT - 38 - 38)  // 404 px
@@ -187,81 +188,83 @@ public:
         lv_obj_set_scroll_dir(_body, LV_DIR_VER);
         lv_obj_set_scrollbar_mode(_body, LV_SCROLLBAR_MODE_ACTIVE);
 
-        // Title row: "TICKERS" label + "+ Add" button
-        _titleRow = lv_obj_create(_body);
-        lv_obj_set_size(_titleRow, LV_PCT(100), 28);
-        lv_obj_set_style_bg_opa(_titleRow, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(_titleRow, 0, 0);
-        lv_obj_set_style_pad_all(_titleRow, 0, 0);
-        lv_obj_clear_flag(_titleRow, LV_OBJ_FLAG_SCROLLABLE);
+        // ── Controls live in the FOOTER now (used to be a top title row). This
+        // frees ~28 px at the top so the 1-column view fits all 6 cards. The
+        // "Network: N nodes" text is hidden; order is Add · Edit · [1|2] · Refresh.
+        hideFooterNetworkText(footer);   // keeps the dot + node name + "|" separator
+        lv_obj_t* fctl = lv_obj_create(footer.bar);
+        lv_obj_add_flag(fctl, LV_OBJ_FLAG_IGNORE_LAYOUT);   // float hard-right, past the separator
+        lv_obj_set_size(fctl, LV_SIZE_CONTENT, LV_PCT(100));
+        lv_obj_align(fctl, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_set_style_bg_opa(fctl, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(fctl, 0, 0);
+        lv_obj_set_style_pad_all(fctl, 0, 0);
+        lv_obj_set_flex_flow(fctl, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(fctl, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(fctl, 18, 0);
+        lv_obj_clear_flag(fctl, LV_OBJ_FLAG_SCROLLABLE);
 
-        lv_obj_t* titleLbl = lv_label_create(_titleRow);
-        lv_label_set_text(titleLbl, "TICKERS");
-        lv_obj_set_style_text_color(titleLbl, lv_color_hex(CLR_MUTED), 0);
-        lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_10, 0);
-        lv_obj_align(titleLbl, LV_ALIGN_LEFT_MID, 0, 0);
-
-        _addBtn = lv_btn_create(_titleRow);
-        lv_obj_set_size(_addBtn, 52, 22);
-        // Bare word (like the NFT "Wallet" button) — no chip: no fill, no border.
+        // Add (bare word)
+        _addBtn = lv_btn_create(fctl);
+        lv_obj_set_size(_addBtn, LV_SIZE_CONTENT, 24);
         lv_obj_set_style_bg_opa(_addBtn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(_addBtn, 0, 0);
         lv_obj_set_style_shadow_width(_addBtn, 0, 0);
-        lv_obj_set_style_pad_all(_addBtn, 2, 0);
-        // Gear sits at the far right; Add just to its left (settings to the
-        // RIGHT of Add). The "+" is dropped — the label is just "Add".
-        lv_obj_align(_addBtn, LV_ALIGN_RIGHT_MID, -34, 0);
+        lv_obj_set_style_pad_hor(_addBtn, 2, 0);
         lv_obj_add_event_cb(_addBtn, _onAddBtnTapped, LV_EVENT_CLICKED, this);
-        lv_obj_t* addLbl = lv_label_create(_addBtn);
-        lv_label_set_text(addLbl, "Add");
-        lv_obj_set_style_text_font(addLbl, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(addLbl, lv_color_hex(CLR_MUTED), 0);   // same grey as the gear icon on the right
-        lv_obj_center(addLbl);
+        { lv_obj_t* l = lv_label_create(_addBtn); lv_label_set_text(l, "Add");
+          lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+          lv_obj_set_style_text_color(l, lv_color_hex(CLR_MUTED), 0); lv_obj_center(l); }
 
-        // 1-col / 2-col layout toggle (NFT-style pair of small buttons).
-        _cols = storage.getTickerCols();
-        _col1Btn = _makeColsBtn("1", 1);
-        lv_obj_align(_col1Btn, LV_ALIGN_RIGHT_MID, -120, 0);
-        _col2Btn = _makeColsBtn("2", 2);
-        lv_obj_align(_col2Btn, LV_ALIGN_RIGHT_MID, -90, 0);
-        _refreshColsBtns();
-
-        // Small refresh button, sitting to the LEFT of the "1" column toggle.
-        // Forces a live-data + missing-logo reload — handy when a card is stuck
-        // loading (the first ticker occasionally lagged behind the rest).
-        _refreshBtn = lv_btn_create(_titleRow);
-        lv_obj_set_size(_refreshBtn, 24, 22);
-        // Just the refresh arrows — no border, no fill (keeps the 24×22 tap area).
-        lv_obj_set_style_bg_opa(_refreshBtn, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(_refreshBtn, 0, 0);
-        lv_obj_set_style_shadow_width(_refreshBtn, 0, 0);
-        lv_obj_set_style_pad_all(_refreshBtn, 2, 0);
-        lv_obj_align(_refreshBtn, LV_ALIGN_RIGHT_MID, -148, 0);
-        lv_obj_add_event_cb(_refreshBtn, [](lv_event_t* e) {
-            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
-            if (self) self->_manualRefresh();
-        }, LV_EVENT_CLICKED, this);
-        lv_obj_t* refreshLbl = lv_label_create(_refreshBtn);
-        lv_label_set_text(refreshLbl, LV_SYMBOL_REFRESH);
-        lv_obj_set_style_text_font(refreshLbl, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(refreshLbl, lv_color_hex(0x63646c), 0);   // dimmer grey than CLR_MUTED
-        lv_obj_center(refreshLbl);
-
-        // Gear button → toggles edit mode (reorder ▲▼ + delete on each card).
-        _editBtn = lv_btn_create(_titleRow);
-        lv_obj_set_size(_editBtn, 30, 22);
-        // Bare gear icon like the NFT screen's — no fill, no border.
+        // Edit (gear = edit mode: reorder + delete)
+        _editBtn = lv_btn_create(fctl);
+        lv_obj_set_size(_editBtn, LV_SIZE_CONTENT, 24);
         lv_obj_set_style_bg_opa(_editBtn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(_editBtn, 0, 0);
         lv_obj_set_style_shadow_width(_editBtn, 0, 0);
-        lv_obj_set_style_pad_all(_editBtn, 2, 0);
-        lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, 0, 0);   // far right, to the right of Add
+        lv_obj_set_style_pad_hor(_editBtn, 2, 0);
         lv_obj_add_event_cb(_editBtn, _onEditBtnTapped, LV_EVENT_CLICKED, this);
         _editBtnLabel = lv_label_create(_editBtn);
         lv_label_set_text(_editBtnLabel, LV_SYMBOL_SETTINGS);
-        lv_obj_set_style_text_font(_editBtnLabel, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_font(_editBtnLabel, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(_editBtnLabel, lv_color_hex(CLR_MUTED), 0);
         lv_obj_center(_editBtnLabel);
+
+        // Single 1|2 column toggle — shows the current value and cycles on tap
+        // (saves the width of two separate buttons + the gap between them).
+        _cols = storage.getTickerCols();
+        _colsBtn = lv_btn_create(fctl);
+        lv_obj_set_size(_colsBtn, 26, 20);
+        lv_obj_set_style_radius(_colsBtn, 6, 0);
+        lv_obj_set_style_border_width(_colsBtn, 1, 0);
+        lv_obj_set_style_pad_all(_colsBtn, 2, 0);
+        lv_obj_add_event_cb(_colsBtn, [](lv_event_t* e) {
+            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+            if (!self) return;
+            self->_cols = (self->_cols >= 2) ? 1 : 2;   // cycle 1 → 2 → 1
+            storage.setTickerCols((uint8_t)self->_cols);
+            self->_refreshColsBtns();
+            self->_rebuildRequested = true;
+        }, LV_EVENT_CLICKED, this);
+        _colsLbl = lv_label_create(_colsBtn);
+        lv_obj_set_style_text_font(_colsLbl, &lv_font_montserrat_10, 0);
+        lv_obj_center(_colsLbl);
+        _refreshColsBtns();
+
+        // Refresh (bare arrows)
+        lv_obj_t* tRefresh = lv_btn_create(fctl);
+        lv_obj_set_size(tRefresh, LV_SIZE_CONTENT, 24);
+        lv_obj_set_style_bg_opa(tRefresh, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(tRefresh, 0, 0);
+        lv_obj_set_style_shadow_width(tRefresh, 0, 0);
+        lv_obj_set_style_pad_hor(tRefresh, 2, 0);
+        lv_obj_add_event_cb(tRefresh, [](lv_event_t* e) {
+            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+            if (self) self->_manualRefresh();
+        }, LV_EVENT_CLICKED, this);
+        { lv_obj_t* l = lv_label_create(tRefresh); lv_label_set_text(l, LV_SYMBOL_REFRESH);
+          lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+          lv_obj_set_style_text_color(l, lv_color_hex(0x63646c), 0); lv_obj_center(l); }
 
         // Placeholder shown when no tickers are loaded yet
         _emptyLabel = lv_label_create(_body);
@@ -312,14 +315,12 @@ private:
 
     // ── Members ───────────────────────────────────────────────────────────────
     lv_obj_t*        _body        = nullptr;
-    lv_obj_t*        _titleRow    = nullptr;
     lv_obj_t*        _addBtn      = nullptr;
     lv_obj_t*        _editBtn     = nullptr;
     lv_obj_t*        _editBtnLabel= nullptr;
     lv_obj_t*        _emptyLabel  = nullptr;
-    lv_obj_t*        _col1Btn     = nullptr;
-    lv_obj_t*        _col2Btn     = nullptr;
-    lv_obj_t*        _refreshBtn  = nullptr;  // manual force-reload (left of "1")
+    lv_obj_t*        _colsBtn     = nullptr;  // single 1|2 column toggle (footer)
+    lv_obj_t*        _colsLbl     = nullptr;
     int              _cols        = 1;       // 1 or 2 card columns (persisted)
     lv_coord_t       _savedScrollY = 0;      // view position restored across rebuilds/visits
     lv_obj_t*        _spinner     = nullptr;
@@ -440,44 +441,15 @@ private:
 
     // ── Card building ─────────────────────────────────────────────────────────
 
-    lv_obj_t* _makeColsBtn(const char* txt, int cols) {
-        lv_obj_t* btn = lv_btn_create(_titleRow);
-        lv_obj_set_size(btn, 26, 20);   // match the NFT grid-size buttons (shorter)
-        lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_SURFACE), 0);
-        lv_obj_set_style_border_color(btn, lv_color_hex(CLR_BORDER), 0);
-        lv_obj_set_style_border_width(btn, 1, 0);
-        lv_obj_set_style_radius(btn, 6, 0);
-        lv_obj_set_style_pad_all(btn, 2, 0);
-        lv_obj_set_user_data(btn, (void*)(intptr_t)cols);
-        lv_obj_add_event_cb(btn, [](lv_event_t* e) {
-            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
-            int cols = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e));
-            if (!self || self->_cols == cols) return;
-            self->_cols = cols;
-            storage.setTickerCols((uint8_t)cols);
-            self->_refreshColsBtns();
-            self->_rebuildRequested = true;   // deferred — we're inside the button's event
-        }, LV_EVENT_CLICKED, this);
-        lv_obj_t* l = lv_label_create(btn);
-        lv_label_set_text(l, txt);
-        lv_obj_set_style_text_font(l, &lv_font_montserrat_10, 0);
-        lv_obj_center(l);
-        return btn;
-    }
-
+    // Single 1|2 toggle: shows the current column count; the styling is a static
+    // "set" look (soft fill + border, brighter-than-muted text) since it always
+    // reflects the active value.
     void _refreshColsBtns() {
-        lv_obj_t* btns[2] = { _col1Btn, _col2Btn };
-        for (int k = 0; k < 2; k++) {
-            if (!btns[k]) continue;
-            bool active = (_cols == k + 1);
-            // Active is intentionally softer than before: still clearly distinct
-            // from the unselected cell (brighter border + number + a hint of fill)
-            // but no longer loud enough to pull the eye off the ticker cards.
-            lv_obj_set_style_bg_color(btns[k], lv_color_hex(active ? 0x232327 : CLR_SURFACE), 0);
-            lv_obj_set_style_border_color(btns[k], lv_color_hex(active ? 0x55555c : CLR_BORDER), 0);
-            lv_obj_t* l = lv_obj_get_child(btns[k], 0);
-            if (l) lv_obj_set_style_text_color(l, lv_color_hex(active ? 0xbebec4 : CLR_MUTED), 0);
-        }
+        if (!_colsBtn || !_colsLbl) return;
+        lv_label_set_text(_colsLbl, _cols >= 2 ? "2" : "1");
+        lv_obj_set_style_bg_color(_colsBtn, lv_color_hex(0x232327), 0);
+        lv_obj_set_style_border_color(_colsBtn, lv_color_hex(0x55555c), 0);
+        lv_obj_set_style_text_color(_colsLbl, lv_color_hex(0xbebec4), 0);
     }
 
     // Manual force-reload triggered by the refresh button. Marks every ticker's
