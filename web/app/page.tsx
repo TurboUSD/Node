@@ -5,7 +5,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import SiteHeader from '@/components/SiteHeader'
-import { LocationNote } from '@/components/NodeBadges'
+import { LocationNote, InfoModal, LOCATION_HELP } from '@/components/NodeBadges'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
 const C = {
@@ -740,6 +740,16 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
 
   const geoNodes = useMemo(() => nodes.filter(n => n.lat != null && n.lng != null), [nodes])
 
+  // The Leaflet popup is built from an HTML string, so its location "i" can't
+  // open a React modal directly. Bridge it: the popup calls window.__turboLocInfo,
+  // which flips this state and renders the SAME centered InfoModal the profile
+  // card uses (the inline reveal overflowed the small popup and couldn't close).
+  const [locInfoOpen, setLocInfoOpen] = useState(false)
+  useEffect(() => {
+    ;(window as any).__turboLocInfo = () => setLocInfoOpen(true)
+    return () => { delete (window as any).__turboLocInfo }
+  }, [])
+
   useEffect(() => {
     if (!containerRef.current || geoNodes.length === 0) return
 
@@ -774,7 +784,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
               <span style="font-weight:700;font-size:14px;color:#e8e8e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${node.display_name || node.node_code}</span>
               ${node.is_verified ? '<span style="font-size:11px;color:#5b8dee;flex-shrink:0">✓</span>' : ''}
             </div>
-            ${loc ? `<div style="font-size:12px;color:#6e7280;margin-bottom:10px">${loc}<svg width="11" height="11" viewBox="0 0 16 16" onclick="event.stopPropagation();var e=this.parentNode.querySelector('.loc-exp');e.style.display=e.style.display==='block'?'none':'block'" style="vertical-align:super;cursor:pointer"><title>Approximate location — tap for details</title><circle cx="8" cy="8" r="7" fill="none" stroke="#6e7280" stroke-width="1.4"/><circle cx="8" cy="4.7" r="1.05" fill="#6e7280"/><rect x="7.05" y="6.6" width="1.9" height="5" rx="0.95" fill="#6e7280"/></svg><div class="loc-exp" style="display:none;position:relative;margin-top:6px;padding:9px 24px 9px 11px;border:1px solid #333;border-radius:8px;background:#0c0c0c;font-size:11px;color:#8a8f9a;line-height:1.45">Approximate location, anonymized to ~300&nbsp;km. The network never stores a node's real position — it's derived from the IP and snapped to a coarse grid.<span onclick="event.stopPropagation();this.parentNode.style.display='none'" style="position:absolute;top:5px;right:7px;color:#9096a1;cursor:pointer;font-size:13px;line-height:1">✕</span></div></div>` : ''}
+            ${loc ? `<div style="font-size:12px;color:#6e7280;margin-bottom:10px">${loc}<svg width="11" height="11" viewBox="0 0 16 16" onclick="event.stopPropagation();window.__turboLocInfo&&window.__turboLocInfo()" style="vertical-align:super;cursor:pointer"><title>Approximate location — tap for details</title><circle cx="8" cy="8" r="7" fill="none" stroke="#6e7280" stroke-width="1.4"/><circle cx="8" cy="4.7" r="1.05" fill="#6e7280"/><rect x="7.05" y="6.6" width="1.9" height="5" rx="0.95" fill="#6e7280"/></svg></div>` : ''}
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
                 <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Rewards</div>
@@ -883,6 +893,9 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
       <p style={{ fontSize: 11, color: C.muted, marginTop: 8, opacity: 0.7 }}>
         Location is auto-detected from each device&apos;s IP and blurred to country level. Markers are intentionally NOT exact.
       </p>
+      {locInfoOpen && (
+        <InfoModal title="Approximate location" body={LOCATION_HELP} onClose={() => setLocInfoOpen(false)} />
+      )}
     </section>
   )
 }

@@ -28,7 +28,7 @@ const GENESIS_HELP =
   'One of the founding nodes that joined the TurboUSD network at launch. ' +
   'The lightning badge is permanent. It marks the earliest supporters of the network.'
 
-const LOCATION_HELP =
+export const LOCATION_HELP =
   'This location is approximate, anonymized to roughly country level (about 300 km).\n\n' +
   'The network NEVER stores a node’s real position: the location is derived from the ' +
   'node’s IP address and snapped to a coarse grid before it ever reaches the database. ' +
