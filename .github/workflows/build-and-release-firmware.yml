@@ -66,8 +66,20 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install PlatformIO
-        run: pip install platformio
+      # MUST be the pioarduino CORE fork, installed as the `pioarduino` PyPI
+      # package — NOT stock `pip install platformio`. `custom_sdkconfig` (the
+      # from-source IDF rebuild that actually compiles in the RGB stability
+      # flags: LCD_RGB_ISR_IRAM_SAFE, LCD_RGB_RESTART_IN_VSYNC,
+      # SPIRAM_XIP_FROM_PSRAM) is a pioarduino-ONLY feature. Stock PlatformIO
+      # runs the pioarduino *platform* fine but SILENTLY IGNORES custom_sdkconfig
+      # and links the precompiled Arduino libs, so the display fixes never reach
+      # the chip. The tell in the log: a ~40s build that only compiles LVGL +
+      # FrameworkArduino (no esp_lcd/esp_psram/gdma from source) and no
+      # '*** Add "custom_sdkconfig" settings ***' line. A correct from-source
+      # build is ~15-25 min the first time, then cached. pioarduino's own CI
+      # installs the core exactly this way.
+      - name: Install pioarduino core (NOT stock platformio — needed for custom_sdkconfig)
+        run: pip install -U pioarduino
 
       # Cache the PlatformIO toolchain, the pioarduino platform, and the build
       # directory. The FROM-SOURCE Arduino/IDF build (needed for custom_sdkconfig
@@ -110,6 +122,28 @@ jobs:
       - name: Build ESP32-S3 firmware
         working-directory: firmware-esp32
         run: pio run
+
+      # GUARD: prove the from-source build actually happened. This is the exact
+      # failure that shipped broken firmware before — stock platformio silently
+      # ignored custom_sdkconfig and produced a ~40s precompiled-libs build with
+      # NONE of the RGB stability flags, which still flashes and boots but keeps
+      # flickering/shifting. A real from-source build resolves our overrides into
+      # a generated sdkconfig (sdkconfig.<env> holds "CONFIG_..=y"; config/
+      # sdkconfig.h holds "#define CONFIG_.. 1"); a precompiled build has neither.
+      # platformio.ini is the SOURCE of the "=y" line, so it is excluded here.
+      - name: Verify custom_sdkconfig took effect (no silent precompiled build)
+        working-directory: firmware-esp32
+        run: |
+          HITS=$(grep -rslE "CONFIG_LCD_RGB_RESTART_IN_VSYNC(=y| 1)" .pio sdkconfig* 2>/dev/null || true)
+          if [ -n "$HITS" ]; then
+            echo "OK: custom_sdkconfig engaged (from-source IDF build). Resolved in:"
+            echo "$HITS"
+          else
+            echo "::error::custom_sdkconfig was IGNORED — this is a precompiled-libs build; the RGB flicker/shift fixes are NOT in this firmware."
+            echo "Fix: the install step must use the pioarduino core ('pip install pioarduino', NOT stock 'platformio')."
+            echo "If it still fails on platform 51.03.07 with framework=arduino, set 'framework = arduino, espidf' in platformio.ini."
+            exit 1
+          fi
 
       - name: Extract version from platformio.ini
         id: extract_version
