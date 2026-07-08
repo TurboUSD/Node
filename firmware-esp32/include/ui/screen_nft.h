@@ -584,6 +584,7 @@ private:
 
     void _startPinlistFetch() {
         if (_fetching) return;
+        if (!_spawnGateOk("pin fetch")) return;   // poll retries next tick
         _fetching = true;
         _fetchedPinlistSig = storage.getNftPinlist();   // remember what we're fetching
         _imgSettled = false;
@@ -615,6 +616,24 @@ private:
     // boot state. Waiting for headroom before each connect turns that into
     // "wait a few seconds, then succeed". On timeout we proceed anyway — the
     // callers' own retry/fallback paths still run, so this can't get stuck.
+    // SPAWN GATE — the 0.2.2 lesson, round two: even waiting BEFORE netLock
+    // was not enough, because the wait ran inside an ALREADY-CREATED task
+    // whose 16 KB stack (×3 concurrent workers = 40 KB) pinned the very RAM
+    // being waited for (log: free=18620 maxblk=7668 → every TLS -1). So the
+    // check now happens BEFORE xTaskCreate: no RAM → no task, zero cost, and
+    // the pollers that call these _start* functions simply retry next tick.
+    static bool _spawnGateOk(const char* who) {
+        if (netTlsRamOk()) return true;
+        static uint32_t lastLogAt = 0;
+        if (millis() - lastLogAt > 5000) {
+            lastLogAt = millis();
+            Log.printf("NFT: %s deferred — low TLS RAM (free=%u maxblk=%u)\n", who,
+                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        }
+        return false;
+    }
+
     // Thin logging wrapper over netTlsRamOk/netWaitTlsRam (net_lock.h). The
     // DEFAULT wait is short: every in-worker call site runs while HOLDING
     // netLock, and a long in-lock wait stalls the tickers/logo/chart workers
@@ -844,10 +863,10 @@ private:
     static void _bgPinlistFetchFn(void* /*pvArg*/) {
         NftScreen* self = s_instance;
         if (!self) { vTaskDelete(nullptr); return; }
-        // LONG RAM wait BEFORE the lock: other workers keep the lock flowing
-        // while we wait, drain their queues, free their stacks — which is
-        // usually exactly what releases the RAM this is waiting for.
-        _waitForTlsRam(25000);
+        // Short re-validation only — the SPAWN GATE already guaranteed TLS
+        // headroom when this task was created (long waits inside a live task
+        // pin its stack and starve everyone else — the 0.2.2 lesson).
+        _waitForTlsRam(3000);
         netLock();   // exclusive TLS ownership — see net_lock.h
 
         _pendingResult.count = 0;
@@ -971,6 +990,7 @@ private:
 
     void _startFetch() {
         if (_fetching) return;
+        if (!_spawnGateOk("wallet fetch")) return;   // poll retries next tick
         _fetching = true;
         _fetchedPinlistSig = storage.getNftPinlist();   // pins merge into wallet mode too
         _imgSettled = false;
@@ -1051,7 +1071,7 @@ private:
                 if (_imgTask) {
                     _imgGen++;   // signal the image worker to abort
                     Log.println("NFT: pinlist changed — aborting img worker to refetch");
-                } else {
+                } else if (netTlsRamOk()) {   // gated here too, or this would log every 500 ms
                     Log.printf("NFT: pinlist changed — refetching ('%s')\n",
                                   storage.getNftPinlist().c_str());
                     _imgSettled = false;
@@ -2180,6 +2200,11 @@ private:
                 if (!it.px[c] && !it.tried[c] && _entitledSlot(c, i)) { anyPending = true; break; }
         }
         if (!anyPending) return;
+        // Never alongside the fetch worker (two 16 KB stacks + interleaved TLS
+        // was part of the boot pile-up), and never without TLS headroom. The
+        // ~500 ms poll kick retries while !_imgSettled, so nothing is lost.
+        if (_bgTask) return;
+        if (!_spawnGateOk("img worker")) return;
         xTaskCreatePinnedToCore(_bgImgFetchFn, "nft_img", 16384, nullptr, 1, (TaskHandle_t*)&_imgTask, 0);
     }
 
@@ -2251,7 +2276,7 @@ private:
                     bool isOrdinal = it.floor_btc || strstr(it.image_url, "ordinals.com") != nullptr;
                     String prox     = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=png";
                     String proxNat  = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&output=png";
-                    _waitForTlsRam(8000);   // BEFORE the lock — see _bgPinlistFetchFn
+                    _waitForTlsRam(3000);   // BEFORE the lock — see _bgPinlistFetchFn
                     netLock();   // exclusive TLS only for THIS image's fetch+decode
                     uint8_t* px = nullptr;
                     if (isOrdinal) {
@@ -2336,10 +2361,9 @@ private:
     static void _bgFetchFn(void* pvArg) {
         NftScreen* self = s_instance;
         if (!self) { vTaskDelete(nullptr); return; }
-        // LONG RAM wait BEFORE the lock (see _bgPinlistFetchFn) — waiting
-        // in-lock stalled the tickers worker behind this task for 40+ s at
-        // boot while nothing loaded anywhere.
-        _waitForTlsRam(25000);
+        // Short re-validation only — see _bgPinlistFetchFn (spawn gate holds
+        // the long-wait duty now, at zero stack cost).
+        _waitForTlsRam(3000);
         netLock();   // exclusive TLS ownership — see net_lock.h
 
         String wallet = storage.getNftWallet();

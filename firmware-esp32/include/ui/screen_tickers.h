@@ -1386,11 +1386,11 @@ private:
         TickerScreen* self = s_instance;
         if (!self) { delete p; vTaskDelete(nullptr); return; }
 
-        // TLS RAM check BEFORE the lock (see net_lock.h): every HTTPS below
-        // silently returned -1 when internal heap was jammed after boot —
-        // that was "tickers don't load at all". Waiting unlocked lets other
-        // workers drain (and free the RAM) meanwhile.
-        if (!netWaitTlsRam(15000))
+        // Short re-validation only — pollPending's dispatch chain already
+        // gates task creation on netTlsRamOk(), so this task only exists when
+        // there WAS headroom moments ago. (Long waits inside a live task pin
+        // its 8 KB stack and starve everyone else — the 0.2.2 lesson.)
+        if (!netWaitTlsRam(3000))
             Log.println("tickers: TLS RAM wait timed out — trying anyway");
         netLock();   // exclusive TLS ownership for this whole job — see net_lock.h
 
@@ -2378,7 +2378,11 @@ public:
         // Queued work: retried every tick until the worker is free. Priority:
         // search (user waiting) → mutations (add/remove/reorder must reach the
         // server before a list reload, or the reload undoes them) → list reload.
-        if (self->_searchRequested && !self->_bgTask) {
+        // canSpawn ALSO requires TLS RAM headroom (net_lock.h): spawning a
+        // worker that can't complete a handshake just burns an 8 KB stack and
+        // a silent -1 — the queued flags stay set and retry when RAM returns.
+        bool canSpawn = !self->_bgTask && netTlsRamOk();
+        if (self->_searchRequested && canSpawn) {
             if (self->_searchOverlay && self->_searchTA) {
                 self->_searchRequested = false;
                 self->_dispatchTask(TT_SEARCH);
@@ -2386,23 +2390,23 @@ public:
                 self->_searchRequested = false;   // dialog closed meanwhile — cancel
             }
         }
-        else if (self->_pendingAddSet && !self->_bgTask) {
+        else if (self->_pendingAddSet && canSpawn) {
             self->_pendingAddSet = false;
             self->_dispatchAddEntry(self->_pendingAdd);
         }
-        else if (self->_pendingRemoveSet && !self->_bgTask) {
+        else if (self->_pendingRemoveSet && canSpawn) {
             self->_pendingRemoveSet = false;
             self->_dispatchRemovePool(self->_pendingRemovePool);
         }
-        else if (self->_pendingReorderSet && !self->_bgTask) {
+        else if (self->_pendingReorderSet && canSpawn) {
             self->_pendingReorderSet = false;
             self->_dispatchReorder();
         }
-        else if (self->_listReloadRequested && !self->_bgTask) {
+        else if (self->_listReloadRequested && canSpawn) {
             self->_listReloadRequested = false;
             self->_dispatchTask(TT_LOAD_LIST);
         }
-        else if (!self->_bgTask) {
+        else if (canSpawn) {
             // Individual chart loads (expand / TF change). LOWEST priority: a
             // queued list reload refetches every chart anyway. chart_want stays
             // set until the data really lands, so a failed fetch is retried —

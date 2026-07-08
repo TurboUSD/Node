@@ -97,6 +97,8 @@ inline SharedHeaderRefs buildSharedHeader(lv_obj_t* parent,
     lv_obj_align(refs.dateLabel, LV_ALIGN_LEFT_MID, 4, 0);
     if (onDateTapped) {
         lv_obj_add_flag(refs.dateLabel, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(refs.dateLabel, 14);   // 12 px text alone is a fiddly
+                                                         // target — pad the halo to finger size
         lv_obj_add_event_cb(refs.dateLabel, onDateTapped, LV_EVENT_CLICKED, userData);
     }
 
@@ -121,10 +123,11 @@ inline SharedHeaderRefs buildSharedHeader(lv_obj_t* parent,
     lv_label_set_text(refs.alarmIcon, LV_SYMBOL_BELL);
     lv_obj_set_style_text_font(refs.alarmIcon, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(refs.alarmIcon, lv_color_hex(0x3a3a3a), 0);  // starts dim; refreshed by refreshSharedAlarmIcon()
-    lv_obj_align_to(refs.alarmIcon, refs.timeLabel, LV_ALIGN_OUT_LEFT_MID, -6, 0);
+    lv_obj_align_to(refs.alarmIcon, refs.timeLabel, LV_ALIGN_OUT_LEFT_MID, -5, 0);
     if (onAlarmTapped) {
         lv_obj_add_flag(refs.alarmIcon, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(refs.alarmIcon, 6);  // extra tap area (small target)
+        lv_obj_set_ext_click_area(refs.alarmIcon, 14);  // bell glyph is ~12 px — the old
+                                                        // 6 px halo took several tries to hit
         lv_obj_add_event_cb(refs.alarmIcon, onAlarmTapped, LV_EVENT_CLICKED, userData);
     }
 
@@ -242,7 +245,9 @@ inline void refreshSharedHeader(SharedHeaderRefs& refs, struct tm& t, float temp
     // real width on every clock refresh (needs an up-to-date layout first).
     if (refs.alarmIcon) {
         lv_obj_update_layout(refs.timeLabel);
-        lv_obj_align_to(refs.alarmIcon, refs.timeLabel, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+        // -5 (half the old -10): the bell sits snug against the time. This
+        // per-second re-align OVERRIDES the build-time gap, so change BOTH.
+        lv_obj_align_to(refs.alarmIcon, refs.timeLabel, LV_ALIGN_OUT_LEFT_MID, -5, 0);
     }
 
     char tempBuf[12];
