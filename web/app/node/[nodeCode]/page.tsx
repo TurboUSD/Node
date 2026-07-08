@@ -13,7 +13,8 @@ import { supabase } from '@/lib/supabase'
 import { VerifiedBadge, UnverifiedBadge, GenesisBadge, LocationNote } from '@/components/NodeBadges'
 
 const C = {
-  bg:     '#0a0a0a',
+  bg:     '#000000',   // match the global body (#000) — the 560px centered column
+                       // used to be #0a0a0a, so it showed as a lighter strip
   card:   '#141416',   // was #111
   border: '#2a2a2e',
   text:   '#e8e8ea',
@@ -182,6 +183,6 @@ const s: Record<string, React.CSSProperties> = {
   back:   { color: C.green, textDecoration: 'none', fontSize: 14 },
   card:   { background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22 },
   badge:  { background: C.blue, color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 },
-  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, alignItems: 'start', borderTop: `1px solid ${C.border}`, paddingTop: 18 },
+  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, alignItems: 'start', borderTop: `1px solid ${C.border}`, paddingTop: 11 },
   linkBtn: { display: 'inline-block', background: '#1c1c1c', border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 18px', color: C.text, textDecoration: 'none', fontSize: 14 },
 }

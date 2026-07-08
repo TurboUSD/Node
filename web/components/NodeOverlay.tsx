@@ -118,7 +118,7 @@ export default function NodeOverlay({ nodeCode, onClose }: { nodeCode: string; o
 
             {node.bio && <p style={{ color: C.text, fontSize: 15, lineHeight: 1.7, margin: '0 0 20px' }}>{node.bio}</p>}
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, borderTop: `1px solid ${C.border}`, paddingTop: 18 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, borderTop: `1px solid ${C.border}`, paddingTop: 11 }}>
               <Stat label="Earned" value={`₸${node.total_tusd_earned.toFixed(2)}`} color={C.statVal} />
               <Stat label="Blocks" value={String(node.blocks_won)} color={C.statVal} />
               <Stat label="Uptime" value={fmtUptime(totalUptime)} color={C.statVal} />

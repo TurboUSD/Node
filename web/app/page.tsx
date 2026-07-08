@@ -307,7 +307,6 @@ export default function NetworkPage() {
         <div style={s.countdownBar}>
           <span style={s.countdownLabel}>Next block in</span>
           <span style={s.countdownTimer}>{countdown}</span>
-          <span style={s.countdownReward}>→ 100 ₸USD</span>
         </div>
       )}
 
@@ -337,7 +336,7 @@ export default function NetworkPage() {
           </div>
           <div style={s.tickerDivider} />
           {pendingBlock && (
-            <div style={{ padding: '12px 8px 16px 14px', flexShrink: 0 }}>
+            <div style={{ padding: '12px 8px 16px 8px', flexShrink: 0 }}>
               <BlockTile block={pendingBlock} circlePct={circlePct} minsLeft={minsLeft} />
             </div>
           )}
@@ -774,7 +773,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
               <span style="font-weight:700;font-size:14px;color:#e8e8e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${node.display_name || node.node_code}</span>
               ${node.is_verified ? '<span style="font-size:11px;color:#5b8dee;flex-shrink:0">✓</span>' : ''}
             </div>
-            ${loc ? `<div style="font-size:12px;color:#6e7280;margin-bottom:10px">${loc}<span title="Approximate location, anonymized to ~300 km. The network never stores the real position; the owner can set it manually." style="cursor:help;font-weight:700;margin-left:2px">*</span></div>` : ''}
+            ${loc ? `<div style="font-size:12px;color:#6e7280;margin-bottom:10px">${loc}<svg width="11" height="11" viewBox="0 0 16 16" style="vertical-align:super;margin-left:3px;cursor:help"><title>Approximate location, anonymized to ~300 km. The network never stores the real position.</title><circle cx="8" cy="8" r="7" fill="none" stroke="#6e7280" stroke-width="1.4"/><circle cx="8" cy="4.7" r="1.05" fill="#6e7280"/><rect x="7.05" y="6.6" width="1.9" height="5" rx="0.95" fill="#6e7280"/></svg></div>` : ''}
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
                 <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Rewards</div>
@@ -1227,14 +1226,14 @@ const s: Record<string, React.CSSProperties> = {
   // divider + pending) sits CENTERED; when it grows past ~70% width it clips
   // on the left, keeping the newest blocks visible next to the divider.
   tickerMinedLane: {
-    display: 'flex', gap: 14, padding: '12px 8px 16px', overflowX: 'auto' as const, overflowY: 'hidden' as const,
+    display: 'flex', gap: 14, padding: '12px 5px 16px 8px', overflowX: 'auto' as const, overflowY: 'hidden' as const,
     minWidth: 0, maxWidth: 'calc(100% - 180px)',
     // Scrollbar hidden — the lane drag-scrolls with the mouse (see
     // onBlockLaneDown) and swipes natively on touch.
     scrollbarWidth: 'none' as const, msOverflowStyle: 'none' as const,
     cursor: 'grab', userSelect: 'none' as const,
   },
-  tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '8px 14px', opacity: 0.75 },
+  tickerDivider:   { width: 0, borderLeft: '2px dashed #e8e8e8', margin: '8px 8px', opacity: 0.75 },
 
   block: {
     minWidth: 100, height: 104, padding: '8px 9px',

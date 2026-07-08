@@ -769,6 +769,11 @@ function FirmwareCheck({ current }: { current?: string | null }) {
         Firmware: <strong style={{ color: C.text }}>ESP32 v{current || 'unknown'}</strong> &middot; RP2040 v0.1.0.
         The ESP32 image updates over the air.
       </p>
+      <p style={{ margin: '0 0 10px', fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+        You can also update straight from the node: on the device open{' '}
+        <strong style={{ color: C.text }}>Settings</strong> (the gear icon, at the very bottom) and tap{' '}
+        <strong style={{ color: C.text }}>Check for updates</strong> to install the latest over WiFi.
+      </p>
       <button onClick={check} disabled={busy} style={{
         padding: '8px 16px', background: '#1b2438', border: '1px solid #4a6aa8', borderRadius: 8,
         color: '#dbe7ff', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,

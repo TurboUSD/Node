@@ -45,11 +45,18 @@ export function LocationNote({ color = MUTED }: { color?: string }) {
         onClick={e => { e.stopPropagation(); e.preventDefault(); setOpen(true) }}
         style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 14, height: 14, borderRadius: '50%', border: `1px solid ${color}`,
-          color, fontSize: 10, fontWeight: 700, fontStyle: 'italic', lineHeight: 1,
-          cursor: 'help', marginLeft: 5, userSelect: 'none', verticalAlign: 'middle',
+          cursor: 'help', marginLeft: 3, userSelect: 'none',
+          verticalAlign: 'super',   // sit as a superscript above the country text
         }}
-      >i</span>
+      >
+        {/* Crisp SVG info glyph — the old CSS italic "i" rendered off-centre and
+            looked crooked in the tiny circle. Drawn here so it's always centred. */}
+        <svg width={11} height={11} viewBox="0 0 16 16" aria-hidden="true" style={{ display: 'block' }}>
+          <circle cx="8" cy="8" r="7" fill="none" stroke={color} strokeWidth="1.4" />
+          <circle cx="8" cy="4.7" r="1.05" fill={color} />
+          <rect x="7.05" y="6.6" width="1.9" height="5" rx="0.95" fill={color} />
+        </svg>
+      </span>
       {open && <InfoModal title="Approximate location" body={LOCATION_HELP} onClose={() => setOpen(false)} />}
     </>
   )

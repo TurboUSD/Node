@@ -130,9 +130,8 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
               <Row label="Block"        value={`#${block.block_number}`} mono />
               {tipNum != null && (
                 <Row label="Depth"      value={tipNum - block.block_number === 0
-                                                 ? 'Chain tip (0 blocks deep)'
-                                                 : `${tipNum - block.block_number} block${tipNum - block.block_number !== 1 ? 's' : ''} deep`}
-                                        hint="How many blocks have been mined after this one. The newest block (the chain tip) is 0 deep." />
+                                                 ? 'Newest block'
+                                                 : `${tipNum - block.block_number} block${tipNum - block.block_number !== 1 ? 's' : ''} deep`} />
               )}
               <Row label="Timestamp"    value={formatTs(block.mined_at)} />
               <Row label="Reward"       value={`${block.reward_tusd} ₸USD`} color={C.green} />
@@ -186,12 +185,13 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
               </p>
             </div>
 
-            {/* Prev / Next navigation */}
+            {/* Prev / Next navigation — with a centered link to the full list */}
             <div style={s.navRow}>
               {prevNum != null
                 ? <a href={`/block/${prevNum}`} style={s.navBtn}>← Block #{prevNum}</a>
                 : <span style={s.navBtnDisabled}>← Previous</span>
               }
+              <a href="/blocks" style={s.navListLink}>☰ All blocks</a>
               {nextNum != null
                 ? <a href={`/block/${nextNum}`} style={s.navBtn}>Block #{nextNum} →</a>
                 : <span style={s.navBtnDisabled}>Next →</span>
@@ -274,8 +274,10 @@ const s: Record<string, React.CSSProperties> = {
   dim: { color: C.muted, fontSize: 14 },
   btn: { display: 'inline-block', padding: '10px 20px', border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, textDecoration: 'none', fontSize: 14, marginTop: 16 },
 
-  navRow:         { display: 'flex', justifyContent: 'space-between', gap: 12 },
-  // Solid, clearly-visible buttons (the translucent blue was almost invisible on black).
-  navBtn:         { padding: '11px 20px', background: '#18233b', border: '1px solid #4a6aa8', borderRadius: 8, color: '#dbe7ff', textDecoration: 'none', fontSize: 14, fontWeight: 700, display: 'inline-block', cursor: 'pointer' },
-  navBtnDisabled: { padding: '11px 20px', background: '#131316', border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 14, fontWeight: 700, opacity: 0.6, display: 'inline-block' },
+  navRow:         { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  navListLink:    { color: C.muted, textDecoration: 'none', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 },
+  // Neutral dark-gray buttons matching the detail-table surface chips — the solid
+  // blue stood out too much against the page. Still clearly readable on black.
+  navBtn:         { padding: '11px 20px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, textDecoration: 'none', fontSize: 14, fontWeight: 700, display: 'inline-block', cursor: 'pointer' },
+  navBtnDisabled: { padding: '11px 20px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 14, fontWeight: 700, opacity: 0.6, display: 'inline-block' },
 }
