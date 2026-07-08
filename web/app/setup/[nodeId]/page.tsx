@@ -967,9 +967,9 @@ const SCREEN_LABELS: Record<number, string> = {
   6: 'Tickers',     // TICKERS
 }
 
-// Matches the firmware's default _swipeOrder = {0,1,6,2,3,5,4}:
-// Home → TurboStats → Tickers → US Debt → Inflation → NFTs → Mining.
-const DEFAULT_ORDER = [0, 1, 6, 2, 3, 5, 4]
+// Matches the firmware's default _swipeOrder = {0,1,6,5,2,3,4}:
+// Home → TurboStats → Tickers → NFTs → US Debt → Inflation → Mining.
+const DEFAULT_ORDER = [0, 1, 6, 5, 2, 3, 4]
 
 function parseOrder(raw: string | null): number[] {
   if (!raw) return DEFAULT_ORDER
