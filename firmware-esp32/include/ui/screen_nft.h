@@ -2565,6 +2565,44 @@ private:
                 return;
             }
 
+            // BUFFERED READ → PSRAM → parse from memory. The account page is big
+            // (~60-150 KB for 50 NFTs) and ArduinoJson's STREAMING parse over
+            // mbedtls 3.x bails early on bodies this size — the 0.2.4 log's
+            // "IncompleteInput" right when TLS finally worked. Exactly the
+            // failure api_client.h's _httpGetBody was built for; same proven
+            // read loop here (custom because of the X-API-KEY header).
+            int declared = http.getSize();
+            const size_t BODY_CAP = 192 * 1024;
+            size_t cap = (declared > 0 && (size_t)declared < BODY_CAP) ? (size_t)declared : BODY_CAP;
+            uint8_t* body = (uint8_t*)heap_caps_malloc(cap + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            size_t bodyLen = 0;
+            if (body) {
+                WiFiClient* bs = http.getStreamPtr();
+                uint32_t lastData = millis();
+                while (bs && (http.connected() || bs->available()) && millis() - lastData < 9000) {
+                    size_t avail = bs->available();
+                    if (!avail) { delay(3); continue; }
+                    size_t room = cap - bodyLen;
+                    if (!room) break;
+                    int got = bs->readBytes(body + bodyLen, avail < room ? avail : room);
+                    if (got > 0) { bodyLen += got; lastData = millis(); }
+                    if (declared > 0 && bodyLen >= (size_t)declared) break;
+                }
+                body[bodyLen] = 0;
+            }
+            http.end();
+            if (!body) {
+                if (page > 0) break;
+                Log.println("NFT scan: ABORTED page 1 — no RAM for body buffer");
+                snprintf(_pendingResult.error_msg, sizeof(_pendingResult.error_msg), "Out of memory (scan body).");
+                _pendingResult.error = true;
+                _pendingResult.ready = true;
+                netUnlock();
+                if (s_instance) s_instance->_bgTask = nullptr;   // ALWAYS clear before self-delete
+                vTaskDelete(nullptr);
+                return;
+            }
+
             // Filtered parse: only the four fields we use + the page cursor —
             // keeps the JsonDocument small even at limit=50.
             JsonDocument filter;
@@ -2574,9 +2612,9 @@ private:
             filter["nfts"][0]["display_image_url"] = true;
             filter["nfts"][0]["image_url"]         = true;
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, http.getStream(),
+            DeserializationError err = deserializeJson(doc, (const char*)body, bodyLen,
                                                        DeserializationOption::Filter(filter));
-            http.end();
+            free(body);
             if (err) {
                 if (page > 0) break;
                 Log.printf("NFT scan: ABORTED page 1 — JSON parse error: %s\n", err.c_str());

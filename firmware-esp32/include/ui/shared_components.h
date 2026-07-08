@@ -137,6 +137,21 @@ inline SharedHeaderRefs buildSharedHeader(lv_obj_t* parent,
         lv_obj_set_ext_click_area(refs.alarmIcon, 14);  // bell glyph is ~12 px — the old
                                                         // 6 px halo took several tries to hit
         lv_obj_add_event_cb(refs.alarmIcon, onAlarmTapped, LV_EVENT_CLICKED, userData);
+
+        // ONE tap target for the whole clock cluster: an invisible overlay
+        // covering bell + gap + time (created LAST → sits on top and wins the
+        // hit-test). The separate per-label halos still left a dead spot
+        // between the bell and the time, and the bell alone was fiddly —
+        // now anywhere on the block opens the alarm picker.
+        lv_obj_t* touch = lv_obj_create(bar);
+        lv_obj_set_size(touch, 78, 22);                  // bar content height; ext area pads the rest
+        lv_obj_align(touch, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_set_style_bg_opa(touch, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(touch, 0, 0);
+        lv_obj_clear_flag(touch, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(touch, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(touch, 12);            // reach the bar's padding edges too
+        lv_obj_add_event_cb(touch, onAlarmTapped, LV_EVENT_CLICKED, userData);
     }
 
     // Temp/humidity labels: created (so the refresh code stays valid) but HIDDEN

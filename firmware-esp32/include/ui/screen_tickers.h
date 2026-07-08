@@ -412,6 +412,9 @@ private:
     // and re-marked them chart_loaded, so the follow-up reload skipped them
     // (old-TF data under new-TF X labels). Same pattern as the NFT _imgGen.
     volatile uint16_t _tfGen = 0;
+    // GeckoTerminal cooldown: set 20 s into the future when a chart fetch gets
+    // a 429 — every chart path (list pass + chart_want queue) waits it out.
+    volatile uint32_t _gtCooldownUntil = 0;
     int _tfGroup() const { return _chartTf == 0 ? 1 : (_chartTf == 1 ? 7 : 30); }
     int _tfBars()  const { return _chartTf == 2 ? 12 : CHART_BARS; }
     volatile bool    _listReloadRequested = false;  // retried until the worker is free
@@ -1479,6 +1482,7 @@ private:
                 }
                 for (int i = 0; i < self->_tickerCount; i++) {
                     if (self->_searchRequested) break;   // user is waiting — yield
+                    if (millis() < self->_gtCooldownUntil) break;   // 429 backoff — retry next pass
                     TickerEntry& te = self->_tickers[i];
                     // chart_at == 0 → forced by the manual refresh button (the
                     // plain age test misses it while uptime < the 15-min TTL).
@@ -1769,8 +1773,11 @@ private:
             te.chart_dirty  = true;   // pollPending redraws on core 1
         } else {
             // GeckoTerminal failures were completely silent (no log, no retry
-            // path) — "the mini charts just never load". 429 = rate limit.
+            // path) — "the mini charts just never load". 429 = rate limit
+            // (free tier ~30 req/min): back off ALL chart fetches for 20 s,
+            // retrying instantly just burns more of the quota.
             Log.printf("tickers: chart [%s] HTTP %d\n", te.base_symbol, code);
+            if (code == 429) self->_gtCooldownUntil = millis() + 20000UL;
         }
         http.end();
     }
@@ -2371,7 +2378,11 @@ public:
                 healAttempts = 0;   // everything present — reset the backoff
             } else if (self->_loadedOnce && !self->_bgTask && !self->_listReloadRequested) {
                 uint32_t backoff = 30000UL << (healAttempts > 4 ? 4 : healAttempts);
-                if (lastHealAt == 0 || millis() - lastHealAt > backoff) {
+                if (lastHealAt == 0) {
+                    lastHealAt = millis();   // ARM only — firing immediately after the
+                                             // first incomplete pass re-hit GeckoTerminal
+                                             // within seconds and earned a 429
+                } else if (millis() - lastHealAt > backoff) {
                     lastHealAt = millis();
                     if (healAttempts < 250) healAttempts++;
                     Log.printf("tickers: self-heal reload (attempt %u)\n", healAttempts);
@@ -2422,6 +2433,7 @@ public:
                 TickerEntry& te = self->_tickers[i];
                 if (!te.chart_want) continue;
                 if (te.chart_loaded) { te.chart_want = false; continue; }   // satisfied
+                if (millis() < self->_gtCooldownUntil) break;   // 429 backoff
                 if (millis() - lastChartDispatchAt < 5000 && lastChartDispatchAt != 0) break;
                 lastChartDispatchAt = millis();
                 self->_dispatchTask(TT_LOAD_CHART, i);
