@@ -83,19 +83,34 @@ jobs:
 
       # Cache the PlatformIO toolchain, the pioarduino platform, and the build
       # directory. The FROM-SOURCE Arduino/IDF build (needed for custom_sdkconfig
-      # → the RGB bounce buffer) is slow (~20-40 min) but ONLY the first time:
-      # once cached, later pushes restore the compiled framework and SCons only
-      # recompiles the source files that actually changed (~1-2 min). The key is
-      # hashed on platformio.ini, so it auto-refreshes when the platform or the
-      # custom_sdkconfig changes; restore-keys reuses the newest cache otherwise.
+      # → the RGB flags) is slow (~20-40 min) the first time; later pushes reuse
+      # the compiled framework and SCons only recompiles changed sources (~2 min).
+      #
+      # CRITICAL: also cache the GENERATED sdkconfig marker files. pioarduino's
+      # Hybrid Compile REINSTALLS + recompiles the whole Arduino framework (~4 min)
+      # on EVERY run UNLESS it finds a project-dir `sdkconfig.defaults` whose
+      # leading `# TASMOTA__<hash>` fingerprint matches the current custom_sdkconfig.
+      # Those files live in the project root (NOT in .pio), so before we cached them
+      # the framework rebuilt every run even on a clean cache hit (~5 min builds
+      # instead of ~2). Caching them makes the marker survive the fresh checkout →
+      # the framework recompile is skipped.
+      #
+      # The `-v2` in the key forces ONE fresh cache save that captures those marker
+      # files (a cache HIT never re-saves, so a path-only change wouldn't take).
+      # After that one build, pushes that don't touch platformio.ini are ~2 min.
+      # The key is hashed on platformio.ini so it auto-refreshes when the platform
+      # or custom_sdkconfig changes; restore-keys reuse the newest cache otherwise.
       - name: Cache PlatformIO build
         uses: actions/cache@v4
         with:
           path: |
             ~/.platformio
             firmware-esp32/.pio
-          key: pio-esp32-${{ runner.os }}-${{ hashFiles('firmware-esp32/platformio.ini') }}
+            firmware-esp32/sdkconfig.defaults
+            firmware-esp32/sdkconfig.sensecap_indicator_d1
+          key: pio-esp32-v2-${{ runner.os }}-${{ hashFiles('firmware-esp32/platformio.ini') }}
           restore-keys: |
+            pio-esp32-v2-${{ runner.os }}-
             pio-esp32-${{ runner.os }}-
 
       - name: Inject Supabase credentials into config.h
