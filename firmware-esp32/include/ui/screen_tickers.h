@@ -222,9 +222,13 @@ public:
         lv_obj_set_style_pad_hor(_addBtn, 4, 0);
         lv_obj_set_ext_click_area(_addBtn, 10);
         lv_obj_add_event_cb(_addBtn, _onAddBtnTapped, LV_EVENT_CLICKED, this);
+        // ONE grey for every footer clickable (both screens): 0x80808a @ 90% —
+        // exactly what the NFT data/carousel toggles show when active
+        // (NFT_CLR_TOGGLE_ON).
         { lv_obj_t* l = lv_label_create(_addBtn); lv_label_set_text(l, "Add");
           lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
-          lv_obj_set_style_text_color(l, lv_color_hex(CLR_MUTED), 0); lv_obj_center(l); }
+          lv_obj_set_style_text_color(l, lv_color_hex(0x80808a), 0);
+          lv_obj_set_style_text_opa(l, LV_OPA_90, 0); lv_obj_center(l); }
 
         // Edit — TEXT word (like Add), toggles reorder/delete mode. Does NOT change
         // colour on toggle (per request); edit mode is shown by the cell arrows/delete.
@@ -239,7 +243,8 @@ public:
         _editBtnLabel = lv_label_create(_editBtn);
         lv_label_set_text(_editBtnLabel, "Edit");
         lv_obj_set_style_text_font(_editBtnLabel, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(_editBtnLabel, lv_color_hex(CLR_MUTED), 0);
+        lv_obj_set_style_text_color(_editBtnLabel, lv_color_hex(0x80808a), 0);   // toolbar grey — see Add
+        lv_obj_set_style_text_opa(_editBtnLabel, LV_OPA_90, 0);
         lv_obj_center(_editBtnLabel);
 
         // Columns toggle — FLAT icon, no button chrome, same muted colour as the
@@ -248,13 +253,13 @@ public:
         // 2-column mode (i.e. it always shows the CURRENT layout). Tap cycles.
         _cols = storage.getTickerCols();
         _colsBtn = lv_obj_create(fctl);
-        lv_obj_set_size(_colsBtn, 20, 13);
+        lv_obj_set_size(_colsBtn, 16, 10);
         lv_obj_set_style_bg_opa(_colsBtn, LV_OPA_0, 0);
         lv_obj_set_style_border_width(_colsBtn, 0, 0);
         lv_obj_set_style_pad_all(_colsBtn, 0, 0);
         lv_obj_add_flag(_colsBtn, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_clear_flag(_colsBtn, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_ext_click_area(_colsBtn, 12);
+        lv_obj_set_ext_click_area(_colsBtn, 14);   // icon shrank — grow the touch halo
         lv_obj_add_event_cb(_colsBtn, [](lv_event_t* e) {
             auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
             if (!self) return;
@@ -267,7 +272,8 @@ public:
             _colsBars[b] = lv_obj_create(_colsBtn);
             lv_obj_set_style_radius(_colsBars[b], 2, 0);
             lv_obj_set_style_border_width(_colsBars[b], 0, 0);
-            lv_obj_set_style_bg_color(_colsBars[b], lv_color_hex(CLR_MUTED), 0);
+            lv_obj_set_style_bg_color(_colsBars[b], lv_color_hex(0x80808a), 0);   // toolbar grey — see Add
+            lv_obj_set_style_bg_opa(_colsBars[b], LV_OPA_90, 0);
             lv_obj_clear_flag(_colsBars[b], LV_OBJ_FLAG_CLICKABLE);
             lv_obj_clear_flag(_colsBars[b], LV_OBJ_FLAG_SCROLLABLE);
         }
@@ -287,7 +293,8 @@ public:
         }, LV_EVENT_CLICKED, this);
         { lv_obj_t* l = lv_label_create(tRefresh); lv_label_set_text(l, LV_SYMBOL_REFRESH);
           lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
-          lv_obj_set_style_text_color(l, lv_color_hex(0x63646c), 0); lv_obj_center(l); }
+          lv_obj_set_style_text_color(l, lv_color_hex(0x80808a), 0);   // toolbar grey — see Add
+          lv_obj_set_style_text_opa(l, LV_OPA_90, 0); lv_obj_center(l); }
 
         // Left-align the row after the "|", cap the name (marquee if long), keep the gear.
         // Gap 2 + fctl pad 2 + Add's own pad 4 = 8 px of visible space between the
@@ -480,13 +487,13 @@ private:
     void _refreshColsBtns() {
         if (!_colsBtn || !_colsBars[0] || !_colsBars[1]) return;
         if (_cols >= 2) {
-            lv_obj_set_size(_colsBars[0], 8, 13);
+            lv_obj_set_size(_colsBars[0], 6, 10);
             lv_obj_align(_colsBars[0], LV_ALIGN_LEFT_MID, 0, 0);
-            lv_obj_set_size(_colsBars[1], 8, 13);
+            lv_obj_set_size(_colsBars[1], 6, 10);
             lv_obj_align(_colsBars[1], LV_ALIGN_RIGHT_MID, 0, 0);
             lv_obj_clear_flag(_colsBars[1], LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_obj_set_size(_colsBars[0], 20, 13);
+            lv_obj_set_size(_colsBars[0], 16, 10);
             lv_obj_align(_colsBars[0], LV_ALIGN_LEFT_MID, 0, 0);
             lv_obj_add_flag(_colsBars[1], LV_OBJ_FLAG_HIDDEN);
         }
@@ -1379,6 +1386,12 @@ private:
         TickerScreen* self = s_instance;
         if (!self) { delete p; vTaskDelete(nullptr); return; }
 
+        // TLS RAM check BEFORE the lock (see net_lock.h): every HTTPS below
+        // silently returned -1 when internal heap was jammed after boot —
+        // that was "tickers don't load at all". Waiting unlocked lets other
+        // workers drain (and free the RAM) meanwhile.
+        if (!netWaitTlsRam(15000))
+            Log.println("tickers: TLS RAM wait timed out — trying anyway");
         netLock();   // exclusive TLS ownership for this whole job — see net_lock.h
 
         switch (p->type) {
@@ -1439,6 +1452,10 @@ private:
                     }
                     self->_tickerCount = n;
                     self->_pending.type = PR_LIST_LOADED;
+                } else {
+                    // Was completely silent — a failed boot-time list load looked
+                    // like "the tickers screen just never loads".
+                    Log.printf("tickers: list HTTP %d\n", code);
                 }
                 http.end();
 
@@ -1786,7 +1803,13 @@ private:
             http.useHTTP10(true);
             http.begin(url);
             http.setTimeout(9000);
-            if (http.GET() == 200) {
+            int liveCode = http.GET();
+            if (liveCode != 200)
+                // A silently failed batch left cards without price/mcap/change
+                // (and without logo_url, so the logo pass skipped them too) —
+                // the "VVV shows no market data above its chart" case.
+                Log.printf("tickers: live batch [%s] HTTP %d\n", chain, liveCode);
+            if (liveCode == 200) {
                 JsonDocument filter;
                 filter["pairs"][0]["pairAddress"]          = true;
                 filter["pairs"][0]["priceUsd"]             = true;
@@ -2322,6 +2345,33 @@ public:
                 // prices from before the first live load).
                 if (self->_tickers[i].is_expanded && self->_cards[i].chart)
                     lv_obj_invalidate(self->_cards[i].chart);
+            }
+        }
+
+        // SELF-HEAL: while any card is still missing live data, its logo or its
+        // chart (a fetch failed — RAM jam, DexScreener/GT hiccup, rate limit),
+        // queue another list pass. TTL-aware fetches make the retry cheap: only
+        // the missing pieces are re-requested. Growing backoff (30 s → 8 min)
+        // so a genuinely dead pool can't hammer the APIs forever.
+        {
+            static uint32_t lastHealAt   = 0;
+            static uint8_t  healAttempts = 0;
+            bool incomplete = false;
+            for (int i = 0; i < self->_tickerCount; i++) {
+                TickerEntry& te = self->_tickers[i];
+                if (!te.live_loaded || !te.chart_loaded ||
+                    (te.logo_url[0] && !te.logo_ready)) { incomplete = true; break; }
+            }
+            if (!incomplete) {
+                healAttempts = 0;   // everything present — reset the backoff
+            } else if (self->_loadedOnce && !self->_bgTask && !self->_listReloadRequested) {
+                uint32_t backoff = 30000UL << (healAttempts > 4 ? 4 : healAttempts);
+                if (lastHealAt == 0 || millis() - lastHealAt > backoff) {
+                    lastHealAt = millis();
+                    if (healAttempts < 250) healAttempts++;
+                    Log.printf("tickers: self-heal reload (attempt %u)\n", healAttempts);
+                    self->_listReloadRequested = true;
+                }
             }
         }
 

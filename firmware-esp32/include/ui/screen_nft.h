@@ -222,7 +222,10 @@ public:
             lv_obj_t* awLbl = lv_label_create(_addWalletBtn);
             lv_label_set_text(awLbl, "Wallet");
             lv_obj_set_style_text_font(awLbl, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(awLbl, lv_color_hex(NFT_CLR_MUTED), 0);
+            // ONE grey for every footer clickable (both screens): TOGGLE_ON @ 90%
+            // — exactly what the data/carousel toggles show when active.
+            lv_obj_set_style_text_color(awLbl, lv_color_hex(NFT_CLR_TOGGLE_ON), 0);
+            lv_obj_set_style_text_opa(awLbl, LV_OPA_90, 0);
             lv_obj_center(awLbl);
         }
         lv_obj_add_event_cb(_addWalletBtn, [](lv_event_t* e) {
@@ -244,7 +247,8 @@ public:
             lv_obj_t* edLbl = lv_label_create(_editBtn);
             lv_label_set_text(edLbl, "Edit");
             lv_obj_set_style_text_font(edLbl, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(edLbl, lv_color_hex(NFT_CLR_MUTED), 0);
+            lv_obj_set_style_text_color(edLbl, lv_color_hex(NFT_CLR_TOGGLE_ON), 0);
+            lv_obj_set_style_text_opa(edLbl, LV_OPA_90, 0);   // toolbar grey — see Wallet
             lv_obj_center(edLbl);
         }
         lv_obj_add_event_cb(_editBtn, [](lv_event_t* e) {
@@ -273,7 +277,8 @@ public:
         lv_obj_set_ext_click_area(_gridCycleBtn, 10);
         _gridCycleLbl = lv_label_create(_gridCycleBtn);
         lv_obj_set_style_text_font(_gridCycleLbl, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(_gridCycleLbl, lv_color_hex(NFT_CLR_MUTED), 0);
+        lv_obj_set_style_text_color(_gridCycleLbl, lv_color_hex(NFT_CLR_TOGGLE_ON), 0);
+        lv_obj_set_style_text_opa(_gridCycleLbl, LV_OPA_90, 0);   // toolbar grey — see Wallet
         lv_obj_center(_gridCycleLbl);
         lv_obj_add_event_cb(_gridCycleBtn, [](lv_event_t* e) {
             NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
@@ -334,7 +339,8 @@ public:
             lv_obj_t* nftRefreshLbl = lv_label_create(nftRefresh);
             lv_label_set_text(nftRefreshLbl, LV_SYMBOL_REFRESH);
             lv_obj_set_style_text_font(nftRefreshLbl, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(nftRefreshLbl, lv_color_hex(0x63646c), 0);   // dim grey, same as tickers refresh
+            lv_obj_set_style_text_color(nftRefreshLbl, lv_color_hex(NFT_CLR_TOGGLE_ON), 0);
+            lv_obj_set_style_text_opa(nftRefreshLbl, LV_OPA_90, 0);   // toolbar grey — see Wallet
             lv_obj_center(nftRefreshLbl);
         }
 
@@ -609,23 +615,21 @@ private:
     // boot state. Waiting for headroom before each connect turns that into
     // "wait a few seconds, then succeed". On timeout we proceed anyway — the
     // callers' own retry/fallback paths still run, so this can't get stuck.
-    static bool _waitForTlsRam(uint32_t maxWaitMs = 20000) {
-        const size_t NEED_FREE = 64 * 1024;   // total internal free
-        const size_t NEED_BLK  = 24 * 1024;   // largest contiguous block
-        size_t freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        size_t blk     = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (freeInt >= NEED_FREE && blk >= NEED_BLK) return true;
+    // Thin logging wrapper over netTlsRamOk/netWaitTlsRam (net_lock.h). The
+    // DEFAULT wait is short: every in-worker call site runs while HOLDING
+    // netLock, and a long in-lock wait stalls the tickers/logo/chart workers
+    // behind it — worse, their blocked task stacks pin the very RAM this is
+    // waiting for (the 0.2.1 boot jam). The LONG waits happen before netLock,
+    // at the top of the worker task functions.
+    static bool _waitForTlsRam(uint32_t maxWaitMs = 5000) {
+        if (netTlsRamOk()) return true;
         Log.printf("NFT: waiting for TLS RAM (free=%u maxblk=%u)\n",
-                   (unsigned)freeInt, (unsigned)blk);
-        uint32_t t0 = millis();
-        while (millis() - t0 < maxWaitMs) {
-            vTaskDelay(pdMS_TO_TICKS(500));
-            freeInt = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-            blk     = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-            if (freeInt >= NEED_FREE && blk >= NEED_BLK) return true;
-        }
+                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        if (netWaitTlsRam(maxWaitMs)) return true;
         Log.printf("NFT: TLS RAM wait timed out (free=%u maxblk=%u) — trying anyway\n",
-                   (unsigned)freeInt, (unsigned)blk);
+                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         return false;
     }
 
@@ -840,8 +844,11 @@ private:
     static void _bgPinlistFetchFn(void* /*pvArg*/) {
         NftScreen* self = s_instance;
         if (!self) { vTaskDelete(nullptr); return; }
+        // LONG RAM wait BEFORE the lock: other workers keep the lock flowing
+        // while we wait, drain their queues, free their stacks — which is
+        // usually exactly what releases the RAM this is waiting for.
+        _waitForTlsRam(25000);
         netLock();   // exclusive TLS ownership — see net_lock.h
-
 
         _pendingResult.count = 0;
         _appendPinlistItems();
@@ -2244,6 +2251,7 @@ private:
                     bool isOrdinal = it.floor_btc || strstr(it.image_url, "ordinals.com") != nullptr;
                     String prox     = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=png";
                     String proxNat  = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&output=png";
+                    _waitForTlsRam(8000);   // BEFORE the lock — see _bgPinlistFetchFn
                     netLock();   // exclusive TLS only for THIS image's fetch+decode
                     uint8_t* px = nullptr;
                     if (isOrdinal) {
@@ -2328,6 +2336,10 @@ private:
     static void _bgFetchFn(void* pvArg) {
         NftScreen* self = s_instance;
         if (!self) { vTaskDelete(nullptr); return; }
+        // LONG RAM wait BEFORE the lock (see _bgPinlistFetchFn) — waiting
+        // in-lock stalled the tickers worker behind this task for 40+ s at
+        // boot while nothing loaded anywhere.
+        _waitForTlsRam(25000);
         netLock();   // exclusive TLS ownership — see net_lock.h
 
         String wallet = storage.getNftWallet();
