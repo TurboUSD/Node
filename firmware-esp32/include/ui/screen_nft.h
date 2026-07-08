@@ -873,6 +873,14 @@ private:
     // items just added on the web, re-orders), and abort any in-flight image
     // decode so it happens right away instead of waiting for the worker.
     void _forceRefresh() {
+        // Debounce: the button was getting mashed, and every tap kicked a FULL
+        // re-fetch (OpenSea + resolve-ordinal + DexScreener + images = many TLS
+        // handshakes). Back-to-back, that fragmented internal RAM until every
+        // https call started returning -1 (the "nothing loads anymore" state).
+        static uint32_t lastManual = 0;
+        uint32_t nowMs = millis();
+        if (lastManual && nowMs - lastManual < 8000) { Log.println("NFT: refresh ignored (debounce)"); return; }
+        lastManual = nowMs;
         Log.println("NFT: manual refresh — forcing refetch");
         _fetchedPinlistSig = "";
         if (_imgTask) _imgGen++;
@@ -2342,6 +2350,7 @@ private:
 
         String nextCursor = "";
         int    code       = -1;
+        bool   walletScanFailed = false;   // OpenSea down → keep cached wallet items (copied AFTER the assemble reset)
         for (int page = 0; page < MAX_PAGES && rawCount < NFT_MAX_ITEMS; page++) {
             String nftsUrl = String(ENDPOINT_OPENSEA_BASE) +
                              "/chain/" + NFT_OPENSEA_CHAIN +
@@ -2382,9 +2391,7 @@ private:
                 // through to the pin-append below so a newly-added pin comes in.
                 if (storage.hasNftPinlist()) {
                     Log.printf("NFT wallet scan HTTP %d — keeping cached wallet items, refreshing pins\n", code);
-                    for (auto& it : self->_nftCache)
-                        if (!it.pinned && _pendingResult.count < NFT_MAX_ITEMS)
-                            _pendingResult.items[_pendingResult.count++] = it;
+                    walletScanFailed = true;   // copy them AFTER the assemble reset below (which would wipe it here)
                     http.end();
                     break;
                 }
@@ -2553,6 +2560,15 @@ private:
 
         // ── Step 3: Assemble NftItem list — filter spam, sort by floor price ─
         _pendingResult.count = 0;
+        // Wallet scan failed (OpenSea down) but there are pins: carry the wallet
+        // collections already in the cache FORWARD so they don't vanish. This is
+        // done AFTER the count reset above — doing it in the failure branch got
+        // wiped here, leaving only the pins (the "wallet NFTs disappeared" bug).
+        if (walletScanFailed) {
+            for (auto& it : self->_nftCache)
+                if (!it.pinned && _pendingResult.count < NFT_MAX_ITEMS)
+                    _pendingResult.items[_pendingResult.count++] = it;
+        }
         for (int ri = 0; ri < rawCount && _pendingResult.count < NFT_MAX_ITEMS; ri++) {
             // Find this item's collection floor price
             float fp = 0.0f;

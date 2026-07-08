@@ -125,6 +125,12 @@ inline void _sendBmp() {
         if (millis() - lastLv >= 20) { lv_timer_handler(); lastLv = millis(); }
         delay(0);                                // feed the watchdog
     }
+    // Explicitly flush + close the socket. The ESP32 WebServer otherwise leaves
+    // the connection keep-alive, so even after ALL Content-Length bytes arrive
+    // the browser keeps waiting and never finalizes the file — it sat forever as
+    // ".crdownload". Closing here signals end-of-response so it renames to .bmp.
+    c.flush();
+    c.stop();
     Log.println("Screenshot served");
 }
 

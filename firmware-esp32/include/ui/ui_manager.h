@@ -96,6 +96,17 @@ public:
 
     void loop() {
         lv_timer_handler();
+        // Deferred OTA install: the install button (which runs INSIDE
+        // lv_timer_handler) only sets this flag + shows the splash, because a
+        // nested lv_timer_handler() there is a no-op (that's why the message
+        // never painted). Now that we're OUTSIDE the handler, paint the splash
+        // for a few frames so the user actually sees "Updating firmware...",
+        // THEN start the blocking download.
+        if (_otaInstallPending) {
+            _otaInstallPending = false;
+            for (int i = 0; i < 6; i++) { lv_timer_handler(); delay(30); }
+            if (onOtaInstallConfirmed) onOtaInstallConfirmed();
+        }
         updateClockIfNeeded();
         _checkScreenTimeout();
         _checkScreenCarousel();
@@ -1432,18 +1443,22 @@ private:
             lv_obj_set_style_text_align(dlLabel, LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_set_style_text_color(dlLabel, lv_color_hex(0x3aff7a), 0);
             lv_obj_center(dlLabel);
-            // Paint the message into BOTH framebuffers (a couple of handler
-            // passes) BEFORE the blocking download begins — otherwise the panel
-            // could still show the old frame when the UI freezes, and the user
-            // sees a "frozen" screen with no explanation.
-            for (int i = 0; i < 4; i++) { lv_timer_handler(); delay(40); }
-            if (sSelf->onOtaInstallConfirmed) sSelf->onOtaInstallConfirmed();
+            // Do NOT paint or start the download HERE: this callback runs INSIDE
+            // lv_timer_handler(), so a nested lv_timer_handler() is a no-op (LVGL
+            // ignores re-entrant calls) — that's why the splash never showed and
+            // the screen just froze on the old frame. Defer to loop() (runs
+            // OUTSIDE the handler): it paints the splash for a few frames, THEN
+            // kicks off the blocking download.
+            sSelf->_otaInstallPending = true;
         }, LV_EVENT_CLICKED, nullptr);
     }
 
 public:
     // Splash shown while the OTA image downloads (see the install button above).
     lv_obj_t* _otaSplash = nullptr;
+    // Set by the install button; consumed in loop() to paint the splash before
+    // the blocking download (the button can't paint — it runs inside the handler).
+    bool _otaInstallPending = false;
 
     // main.cpp calls this when applyPendingUpdate() fails. WITHOUT it the
     // "Downloading update... Do not turn off" splash stayed up forever, so the

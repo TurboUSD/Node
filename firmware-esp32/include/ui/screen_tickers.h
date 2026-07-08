@@ -250,10 +250,10 @@ public:
         // Gear button → toggles edit mode (reorder ▲▼ + delete on each card).
         _editBtn = lv_btn_create(_titleRow);
         lv_obj_set_size(_editBtn, 30, 22);
-        lv_obj_set_style_bg_color(_editBtn, lv_color_hex(CLR_SURFACE), 0);
-        lv_obj_set_style_border_color(_editBtn, lv_color_hex(CLR_BORDER), 0);
-        lv_obj_set_style_border_width(_editBtn, 1, 0);
-        lv_obj_set_style_radius(_editBtn, 6, 0);
+        // Bare gear icon like the NFT screen's — no fill, no border.
+        lv_obj_set_style_bg_opa(_editBtn, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(_editBtn, 0, 0);
+        lv_obj_set_style_shadow_width(_editBtn, 0, 0);
         lv_obj_set_style_pad_all(_editBtn, 2, 0);
         lv_obj_align(_editBtn, LV_ALIGN_RIGHT_MID, 0, 0);   // far right, to the right of Add
         lv_obj_add_event_cb(_editBtn, _onEditBtnTapped, LV_EVENT_CLICKED, this);
@@ -442,7 +442,7 @@ private:
 
     lv_obj_t* _makeColsBtn(const char* txt, int cols) {
         lv_obj_t* btn = lv_btn_create(_titleRow);
-        lv_obj_set_size(btn, 26, 22);
+        lv_obj_set_size(btn, 26, 20);   // match the NFT grid-size buttons (shorter)
         lv_obj_set_style_bg_color(btn, lv_color_hex(CLR_SURFACE), 0);
         lv_obj_set_style_border_color(btn, lv_color_hex(CLR_BORDER), 0);
         lv_obj_set_style_border_width(btn, 1, 0);
