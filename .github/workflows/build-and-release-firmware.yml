@@ -302,12 +302,22 @@ jobs:
         uses: actions/download-artifact@v4
         with: { name: rp2040-sha256, path: ./artifacts }
 
+      - name: Compute release tag
+        id: tag
+        # softprops/action-gh-release does NOT expose a `tag_name` output, so the
+        # Supabase registration below (which built the OTA binary_url from
+        # steps.release.outputs.tag_name) got an EMPTY tag → a 404 download URL
+        # (…/releases/download//esp32s3-x.bin). That was the "OTA download failed
+        # HTTP 404" bug. Compute the tag ONCE and reuse it for BOTH the release
+        # and the registration so the URL always points at a real asset.
+        run: echo "name=fw-${{ needs.build-esp32.outputs.version || needs.build-rp2040.outputs.version }}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         id: release
         uses: softprops/action-gh-release@v2
         with:
           # Fall back to whichever chip built for the tag/version.
-          tag_name: fw-${{ needs.build-esp32.outputs.version || needs.build-rp2040.outputs.version }}-${{ github.run_number }}
+          tag_name: ${{ steps.tag.outputs.name }}
           files: |
             artifacts/esp32s3-*.bin
             artifacts/firmware-esp32s3.bin
@@ -329,7 +339,7 @@ jobs:
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"target\":\"esp32s3\",\"version\":\"${{ needs.build-esp32.outputs.version }}\",\"binary_url\":\"https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag_name }}/$ESP32_URL\",\"sha256\":\"$ESP32_SHA\"}"
+            -d "{\"target\":\"esp32s3\",\"version\":\"${{ needs.build-esp32.outputs.version }}\",\"binary_url\":\"https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.name }}/$ESP32_URL\",\"sha256\":\"$ESP32_SHA\"}"
 
       - name: Register RP2040 release with Supabase
         if: needs.build-rp2040.result == 'success'
@@ -340,4 +350,4 @@ jobs:
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"target\":\"rp2040\",\"version\":\"${{ needs.build-rp2040.outputs.version }}\",\"binary_url\":\"https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag_name }}/$RP2040_URL\",\"sha256\":\"$RP2040_SHA\"}"
+            -d "{\"target\":\"rp2040\",\"version\":\"${{ needs.build-rp2040.outputs.version }}\",\"binary_url\":\"https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.name }}/$RP2040_URL\",\"sha256\":\"$RP2040_SHA\"}"
