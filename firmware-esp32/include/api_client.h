@@ -76,6 +76,7 @@ struct LeaderboardEntry {
     char     country[40] = {};  // anonymized country (shown in the node info popup)
     char     twitter[20] = {};  // twitter handle (no @), shown in the node info popup
     double   earned     = 0;
+    int      blocksWon  = 0;    // total blocks mined → shown in the node info popup
     int      uptimePct  = 0;
     uint32_t totalUptimeSecs = 0;  // cumulative uptime → the device "Uptime" column
                                    // shows real time ("4h 58m"), matching the web card
@@ -519,7 +520,7 @@ public:
         HTTPClient http;
         http.useHTTP10(true);   // see header note
         http.begin(String(SUPABASE_REST_BASE_URL) +
-                   "/public_node_directory?select=display_name,node_code,country,twitter_handle,total_tusd_earned,uptime_pct,total_uptime_seconds,is_online&limit=24");
+                   "/public_node_directory?select=display_name,node_code,country,twitter_handle,total_tusd_earned,blocks_won,uptime_pct,total_uptime_seconds,is_online&limit=24");
         http.setTimeout(8000);
         http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
         http.addHeader("apikey", SUPABASE_ANON_KEY);
@@ -541,6 +542,7 @@ public:
             { const char* tw = row["twitter_handle"] | ""; if (tw[0] == '@') tw++;
               snprintf(e.twitter, sizeof(e.twitter), "%s", tw); }
             e.earned          = row["total_tusd_earned"] | 0.0;
+            e.blocksWon       = row["blocks_won"] | 0;
             e.uptimePct       = row["uptime_pct"] | 0;
             e.totalUptimeSecs = row["total_uptime_seconds"] | 0;
             e.online          = row["is_online"] | false;

@@ -331,7 +331,7 @@ public:
     }
 
     void _showNodeInfo(const char* name, const char* country, const char* twitter,
-                       bool hasStats, double earned, const char* uptimeStr) {
+                       bool hasStats, double earned, int blocksWon, const char* uptimeStr) {
         if (g_touchWasSwipe()) return;   // a swipe that merely started on the name — not a tap
         lv_obj_t* card = openModal(lv_scr_act());
 
@@ -367,6 +367,13 @@ public:
             lv_obj_set_style_text_color(r, lv_color_hex(0x3aff7a), 0);
             lv_obj_set_style_text_font(r, tengeFont12(), 0);
 
+            // Total blocks mined — white, same weight as the Uptime value below.
+            lv_obj_t* b = lv_label_create(card);
+            snprintf(buf, sizeof(buf), "Blocks   %d", blocksWon);
+            lv_label_set_text(b, buf);
+            lv_obj_set_style_text_color(b, lv_color_hex(0xe8e8e8), 0);
+            lv_obj_set_style_text_font(b, &lv_font_montserrat_12, 0);
+
             if (uptimeStr && uptimeStr[0]) {
                 lv_obj_t* u = lv_label_create(card);
                 snprintf(buf, sizeof(buf), "Uptime   %s", uptimeStr);
@@ -385,7 +392,7 @@ public:
         // always show stats (an unverified node still has ₸0 rewards + real uptime).
         LeaderboardEntry* d = s->_findSlotByName(s->_ownName);
         s->_showNodeInfo(s->_ownName, d ? d->country : "", d ? d->twitter : "",
-                         true, s->_ownEarned, s->_ownUptime);
+                         true, s->_ownEarned, d ? d->blocksWon : 0, s->_ownUptime);
     }
     static void _onLbNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
@@ -393,7 +400,7 @@ public:
         if (idx < 0 || idx >= 2 * LB_ROWS || !s->_slotEntry[idx].name[0]) return;
         LeaderboardEntry& en = s->_slotEntry[idx];
         char up[24]; _fmtUptimeShort(up, sizeof(up), en.totalUptimeSecs);
-        s->_showNodeInfo(en.name, en.country, en.twitter, true, en.earned, up);
+        s->_showNodeInfo(en.name, en.country, en.twitter, true, en.earned, en.blocksWon, up);
     }
     static void _onBlockNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
@@ -405,9 +412,9 @@ public:
         LeaderboardEntry* d = s->_findSlotByName(wn);
         if (d) {
             char up[24]; _fmtUptimeShort(up, sizeof(up), d->totalUptimeSecs);
-            s->_showNodeInfo(wn, wc, d->twitter, true, d->earned, up);
+            s->_showNodeInfo(wn, wc, d->twitter, true, d->earned, d->blocksWon, up);
         } else {
-            s->_showNodeInfo(wn, wc, "", false, 0, "");
+            s->_showNodeInfo(wn, wc, "", false, 0, 0, "");
         }
     }
 

@@ -210,7 +210,7 @@ public:
         lv_obj_set_style_pad_hor(fctl, 2, 0);
         lv_obj_set_flex_flow(fctl, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(fctl, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(fctl, 14, 0);
+        lv_obj_set_style_pad_column(fctl, 10, 0);   // match the NFT footer button spacing (a touch closer)
         lv_obj_set_ext_click_area(fctl, 8);
         lv_obj_clear_flag(fctl, LV_OBJ_FLAG_SCROLLABLE);
 
