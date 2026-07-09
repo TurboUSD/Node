@@ -758,19 +758,29 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
 
         // Privacy: the map shows the COUNTRY only, never the city.
         const loc = node.country ?? ''
-        const memberSince = node.created_at
-          ? Math.floor((Date.now() - new Date(node.created_at).getTime()) / 86400000)
-          : 0
-        const memberStr = memberSince === 0 ? 'today' : memberSince < 30 ? `${memberSince}d` : `${Math.floor(memberSince / 30)}mo`
+        const sinceStr = node.created_at
+          ? new Date(node.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+          : '—'
+        // Second line, same shape as the overlay/public cards: id · country + info · X.
+        // The id only appears here when the node HAS a name (otherwise the id is the
+        // headline above). Twitter sits to the right of the country in turbo green.
+        const hasName = !!node.display_name
+        const twh = node.twitter_handle ? node.twitter_handle.replace(/^@/, '') : ''
+        const infoSvg = `<svg width="11" height="11" viewBox="0 0 16 16" onclick="event.stopPropagation();window.__turboLocInfo&&window.__turboLocInfo()" style="vertical-align:super;cursor:pointer"><title>Approximate location — tap for details</title><circle cx="8" cy="8" r="7" fill="none" stroke="#9096a1" stroke-width="1.4"/><circle cx="8" cy="4.7" r="1.05" fill="#9096a1"/><rect x="7.05" y="6.6" width="1.9" height="5" rx="0.95" fill="#9096a1"/></svg>`
+        const metaParts: string[] = []
+        if (hasName) metaParts.push(`#${node.node_code}`)
+        if (loc)     metaParts.push(`${loc}${infoSvg}`)
+        if (twh)     metaParts.push(`<a href="https://x.com/${twh}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()" style="color:#43e397;text-decoration:none">@${twh}</a>`)
+        const line2 = metaParts.length ? `<div style="font-size:12px;color:#9096a1;margin-bottom:10px">${metaParts.join(' · ')}</div>` : ''
 
         const popupHtml = `
-          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:244px;background:#111;border:1px solid #222;border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px #000a">
+          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:272px;background:#111;border:1px solid #222;border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px #000a">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
               <span style="width:8px;height:8px;border-radius:50%;background:${online ? '#43e397' : '#555'};flex-shrink:0${online ? ';animation:tgNodePulse 2.4s ease-in-out infinite' : ''}"></span>
               <span style="font-weight:700;font-size:14px;color:#e8e8e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${node.display_name || node.node_code}</span>
               ${node.is_verified ? '<span style="font-size:11px;color:#5b8dee;flex-shrink:0">✓</span>' : ''}
             </div>
-            ${loc ? `<div style="font-size:12px;color:#6e7280;margin-bottom:10px">${loc}<svg width="11" height="11" viewBox="0 0 16 16" onclick="event.stopPropagation();window.__turboLocInfo&&window.__turboLocInfo()" style="vertical-align:super;cursor:pointer"><title>Approximate location — tap for details</title><circle cx="8" cy="8" r="7" fill="none" stroke="#6e7280" stroke-width="1.4"/><circle cx="8" cy="4.7" r="1.05" fill="#6e7280"/><rect x="7.05" y="6.6" width="1.9" height="5" rx="0.95" fill="#6e7280"/></svg></div>` : ''}
+            ${line2}
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
                 <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Rewards</div>
@@ -781,8 +791,8 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
                 <div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-top:2px;white-space:nowrap">${fmtUptimeSecs(totalUptime(node))}</div>
               </div>
               <div style="background:#181818;border-radius:7px;padding:8px 8px">
-                <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Member</div>
-                <div style="font-size:12px;font-weight:700;color:#e8e8e8;margin-top:2px">${memberStr}</div>
+                <div style="font-size:9px;color:#6e7280;text-transform:uppercase;letter-spacing:.5px">Since</div>
+                <div style="font-size:11px;font-weight:700;color:#e8e8e8;margin-top:2px;white-space:nowrap">${sinceStr}</div>
               </div>
             </div>
             <a href="/node/${node.node_code}" style="display:block;text-align:center;background:#1c1c1c;border:1px solid #2a2a2a;border-radius:8px;padding:8px;font-size:12px;font-weight:600;color:#e8e8e8;text-decoration:none">View profile →</a>
@@ -818,6 +828,18 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         { attribution: 'Tiles © Esri &mdash; Esri, DeLorme, NAVTEQ', maxZoom: 16 }
       ).addTo(map)
       mapRef.current = map
+      // The Leaflet popup lives inside the transformed map-pane, so NO z-index can
+      // lift it above the zoom control (a separate stacking context) — most visible
+      // on mobile, where the card overlaps the top-left zoom buttons. So hide the
+      // zoom control while a popup is open and restore it on close.
+      map.on('popupopen', () => {
+        const zc = containerRef.current?.querySelector('.leaflet-control-zoom') as HTMLElement | null
+        if (zc) zc.style.visibility = 'hidden'
+      })
+      map.on('popupclose', () => {
+        const zc = containerRef.current?.querySelector('.leaflet-control-zoom') as HTMLElement | null
+        if (zc) zc.style.visibility = 'visible'
+      })
       buildMarkers(L)
     }
 

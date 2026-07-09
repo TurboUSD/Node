@@ -75,6 +75,7 @@ export default function PublicNodePage() {
 
   const [node,  setNode]  = useState<NodeProfile | null>(null)
   const [stats, setStats] = useState<NodeStats | null>(null)
+  const [lastBlock, setLastBlock] = useState<{ block_number: number; mined_at: string } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -94,6 +95,15 @@ export default function PublicNodePage() {
       .eq('node_code', nodeCode)
       .maybeSingle()
       .then(({ data }) => { if (data) setStats(data as NodeStats) })
+    supabase
+      .from('public_mining_feed')
+      .select('block_number, mined_at')
+      .eq('winner_node_code', nodeCode)
+      .not('mined_at', 'is', null)
+      .order('block_number', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => { if (data) setLastBlock(data as { block_number: number; mined_at: string }) })
   }, [nodeCode])
 
   if (loading) {
@@ -173,6 +183,18 @@ export default function PublicNodePage() {
           <Stat label="Uptime"  value={fmtUptime(totalUptime)}                               color={C.statVal} />
           <Stat label="Since"   value={joinDate(node.created_at)}                            color={C.statVal} />
         </div>
+
+        {/* Last block won — same area the map overlay card shows. */}
+        {lastBlock && (
+          <div style={s.lastBlockBox}>
+            <div style={{ fontSize: 10, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Last block won</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>Block #{lastBlock.block_number}</span>
+              <span style={{ fontSize: 12, color: C.muted }}>{timeSince(lastBlock.mined_at)}</span>
+            </div>
+            <a href={`/block/${lastBlock.block_number}`} style={{ fontSize: 12, color: C.green, textDecoration: 'none', marginTop: 6, display: 'inline-block' }}>View in explorer →</a>
+          </div>
+        )}
       </div>
 
       <p style={{ textAlign: 'center', color: C.muted, fontSize: 12, marginTop: 18 }}>
@@ -205,5 +227,6 @@ const s: Record<string, React.CSSProperties> = {
   card:   { background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22 },
   badge:  { background: C.blue, color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 },
   statsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
+  lastBlockBox: { marginTop: 14, padding: '12px 14px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 },
   linkBtn: { display: 'inline-block', background: '#1c1c1c', border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 18px', color: C.text, textDecoration: 'none', fontSize: 14 },
 }
