@@ -22,6 +22,7 @@ const C = {
   green:  '#43e397',
   yellow: '#ffcf72',
   blue:   '#5b8dee',
+  surface:'#1b1b1e',   // stat-card fill, matches the overlay card
   statVal:'#d2d2d8',   // unified stat value colour, matches the overlay card
 }
 
@@ -120,17 +121,21 @@ export default function PublicNodePage() {
 
   return (
     <main style={s.page}>
+      {/* Soft "alive" pulse for the online dot (matches the device footer dot). */}
+      <style>{`@keyframes tgNodePulse{0%,100%{opacity:1}50%{opacity:.5}}`}</style>
       <header style={s.header}>
         <a href="/" style={s.back}>← Network</a>
         <span style={{ fontSize: 13, color: C.muted }}>Node {node.node_code}</span>
       </header>
 
       <div style={s.card}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+        {/* Line 1: online dot (soft pulse) + name + verified/unverified + genesis */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
           <span style={{
             width: 10, height: 10, borderRadius: '50%',
             background: stats?.is_online ? C.green : '#333',
             boxShadow: stats?.is_online ? `0 0 8px ${C.green}88` : 'none',
+            animation: stats?.is_online ? 'tgNodePulse 2.4s ease-in-out infinite' : undefined,
             flexShrink: 0,
           }} />
           <h1 style={{ fontSize: 24, margin: 0 }}>{name}</h1>
@@ -138,10 +143,25 @@ export default function PublicNodePage() {
           {node.is_genesis  && <GenesisBadge />}
         </div>
 
-        <div style={{ color: C.muted, fontSize: 13, marginBottom: node.bio ? 14 : 18 }}>
+        {/* Line 2: id · country + info · X handle (inline text, " · " separators). */}
+        {(() => {
+          const parts: React.ReactNode[] = []
+          if (node.display_name) parts.push(<span key="id">#{node.node_code}</span>)
+          if (location) parts.push(<span key="loc">{location}<LocationNote /></span>)
+          if (node.twitter_handle) parts.push(
+            <a key="tw" href={`https://x.com/${node.twitter_handle.replace(/^@/, '')}`} target="_blank" rel="noreferrer"
+              style={{ color: C.green, textDecoration: 'none' }}>@{node.twitter_handle.replace(/^@/, '')}</a>,
+          )
+          return parts.length > 0 ? (
+            <div style={{ color: C.muted, fontSize: 13 }}>
+              {parts.map((p, i) => <span key={i}>{i > 0 && ' · '}{p}</span>)}
+            </div>
+          ) : null
+        })()}
+
+        {/* Line 3: live status — Online now if online, else last seen. */}
+        <div style={{ color: C.muted, fontSize: 13, marginTop: 3, marginBottom: node.bio ? 14 : 18 }}>
           {stats?.is_online ? 'Online now' : stats?.last_seen_at ? `Last seen ${timeSince(stats.last_seen_at)}` : 'Offline'}
-          {location && <> · {location}<LocationNote /></>}
-          {node.twitter_handle && <> · <a href={`https://x.com/${node.twitter_handle.replace(/^@/, '')}`} style={{ color: C.blue, textDecoration: 'none' }}>@{node.twitter_handle.replace(/^@/, '')}</a></>}
         </div>
 
         {node.bio && <p style={{ color: C.text, fontSize: 15, lineHeight: 1.7, margin: '0 0 20px' }}>{node.bio}</p>}
@@ -163,14 +183,15 @@ export default function PublicNodePage() {
 }
 
 function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+  // Bordered stat card, same format as the map overlay card (2x2 grid).
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', minWidth: 0 }}>
-      {/* Flexible min-height (fits two lines like "27 Jun 2026") so the value
-          never overflows onto the label below, and labels stay aligned across
-          all four columns. */}
+    <div style={{
+      background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', minWidth: 0,
+    }}>
       <div style={{
-        fontSize: 16, fontWeight: 'bold', color, lineHeight: 1.2, minHeight: 40,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 16, fontWeight: 'bold', color, lineHeight: 1.2, minHeight: 22,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
       }}>{value}</div>
       <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
     </div>
@@ -183,6 +204,6 @@ const s: Record<string, React.CSSProperties> = {
   back:   { color: C.green, textDecoration: 'none', fontSize: 14 },
   card:   { background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22 },
   badge:  { background: C.blue, color: '#fff', borderRadius: '50%', width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 },
-  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, alignItems: 'start', borderTop: `1px solid ${C.border}`, paddingTop: 11 },
+  statsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   linkBtn: { display: 'inline-block', background: '#1c1c1c', border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 18px', color: C.text, textDecoration: 'none', fontSize: 14 },
 }

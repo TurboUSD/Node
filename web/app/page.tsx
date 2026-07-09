@@ -5,7 +5,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import SiteHeader from '@/components/SiteHeader'
-import { LocationNote, LOCATION_HELP } from '@/components/NodeBadges'
+import { LocationNote, LOCATION_HELP, VerifiedBadge } from '@/components/NodeBadges'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
 const C = {
@@ -654,20 +654,6 @@ function UnverifiedBadge({ size = 10 }: { size?: number }) {
   )
 }
 
-function GenesisChip() {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <span
-        title="Genesis node. Tap to learn more"
-        onClick={e => { e.stopPropagation(); setOpen(true) }}
-        style={{ fontSize: 12, color: C.yellow, fontWeight: 'bold', cursor: 'help' }}
-      >⚡ genesis</span>
-      {open && <InfoModal title="Genesis node ⚡" body={GENESIS_HELP.replace('Genesis node ⚡\n\n', '')} onClose={() => setOpen(false)} />}
-    </>
-  )
-}
-
 function GenesisBadge({ size = 11 }: { size?: number }) {
   const [open, setOpen] = useState(false)
   return (
@@ -780,7 +766,7 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         const popupHtml = `
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:244px;background:#111;border:1px solid #222;border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px #000a">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-              <span style="width:8px;height:8px;border-radius:50%;background:${online ? '#43e397' : '#555'};flex-shrink:0"></span>
+              <span style="width:8px;height:8px;border-radius:50%;background:${online ? '#43e397' : '#555'};flex-shrink:0${online ? ';animation:tgNodePulse 2.4s ease-in-out infinite' : ''}"></span>
               <span style="font-weight:700;font-size:14px;color:#e8e8e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${node.display_name || node.node_code}</span>
               ${node.is_verified ? '<span style="font-size:11px;color:#5b8dee;flex-shrink:0">✓</span>' : ''}
             </div>
@@ -880,11 +866,16 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         .turbousd-popup .leaflet-popup-content-wrapper{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;border-radius:0!important}
         .turbousd-popup .leaflet-popup-content{margin:0!important}
         .turbousd-popup .leaflet-popup-tip-container{display:none!important}
+        /* Node popup must sit ABOVE the zoom control (Leaflet controls are z-index 1000). */
+        .leaflet-popup{z-index:1200!important}
+        .leaflet-pane.leaflet-popup-pane{z-index:1200!important}
         .leaflet-container{background:#0d0d0d!important;font-family:inherit}
         .leaflet-control-zoom a{background:#1c1c1c!important;color:#aaa!important;border-color:#2a2a2a!important}
         .leaflet-control-zoom a:hover{background:#242424!important;color:#e8e8e8!important}
         .leaflet-control-attribution{background:rgba(0,0,0,.5)!important;color:#444!important;font-size:9px!important}
         .leaflet-control-attribution a{color:#555!important}
+        /* Soft "alive" pulse for online node dots (matches the device footer dot). */
+        @keyframes tgNodePulse{0%,100%{opacity:1}50%{opacity:.5}}
       `}</style>
       <div
         ref={containerRef}
@@ -1108,7 +1099,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
     window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank')
   }
 
-  const uptimeColor = node.uptime_pct >= 90 ? C.green : node.uptime_pct >= 60 ? C.yellow : C.muted
+  const detailLocation = [node.city, node.country].filter(Boolean).join(', ')
 
   return (
     <>
@@ -1116,37 +1107,42 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
       <div style={s.panel} role="dialog" aria-modal="true">
         <button style={s.closeBtn} onClick={onClose} aria-label="Close">✕</button>
 
-        {/* Name + badges */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
-          <div style={{
-            width: 10, height: 10, borderRadius: '50%', marginTop: 5, flexShrink: 0,
+        {/* Line 1: online dot (soft pulse) + name + verified/unverified + genesis */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
             background: node.is_online ? C.green : '#333',
             boxShadow: node.is_online ? `0 0 8px ${C.green}88` : 'none',
+            animation: node.is_online ? 'tgNodePulse 2.4s ease-in-out infinite' : undefined,
           }} />
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 'bold', color: C.text }}>
-              {node.display_name || `Node #${node.node_code}`}
+          <span style={{ fontSize: 18, fontWeight: 'bold', color: C.text }}>
+            {node.display_name || `Node #${node.node_code}`}
+          </span>
+          {node.is_verified ? <VerifiedBadge size={18} /> : <UnverifiedBadge size={14} />}
+          {node.is_genesis && <GenesisBadge size={16} />}
+        </div>
+
+        {/* Line 2: id · country + info · X handle. Inline text with " · " separators
+            (matches the public node page). NOT a center-aligned flex, so the info
+            icon renders as a real superscript instead of sitting on the baseline. */}
+        {(() => {
+          const parts: React.ReactNode[] = []
+          if (node.display_name) parts.push(<span key="id">#{node.node_code}</span>)
+          if (detailLocation) parts.push(<span key="loc">{detailLocation}<LocationNote /></span>)
+          if (node.twitter_handle) parts.push(
+            <a key="tw" href={`https://x.com/${node.twitter_handle.replace(/^@/, '')}`} target="_blank" rel="noreferrer"
+              style={{ color: C.green, textDecoration: 'none' }}>@{node.twitter_handle.replace(/^@/, '')}</a>,
+          )
+          return parts.length > 0 ? (
+            <div style={{ fontSize: 13, color: C.muted }}>
+              {parts.map((p, i) => <span key={i}>{i > 0 && ' · '}{p}</span>)}
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, color: C.muted }}>#{node.node_code}</span>
-              {node.is_verified && <span style={{ fontSize: 12, color: C.blue, fontWeight: 'bold' }}>✓ verified</span>}
-              {node.is_genesis  && <GenesisChip />}
-              {node.twitter_handle && (
-                <a href={`https://x.com/${node.twitter_handle}`} target="_blank" rel="noreferrer"
-                  style={{ fontSize: 12, color: C.green, textDecoration: 'none' }}>
-                  @{node.twitter_handle}
-                </a>
-              )}
-              {node.country && (
-                // NOT inline-flex: as a flex item with alignItems:center the info
-                // icon's verticalAlign:super was ignored and it sat on the baseline.
-                // A plain inline span lets the icon render as a real superscript.
-                <span style={{ fontSize: 12, color: C.muted }}>
-                  {node.country}{node.city ? ` · ${node.city}` : ''}<LocationNote />
-                </span>
-              )}
-            </div>
-          </div>
+          ) : null
+        })()}
+
+        {/* Line 3: live status — Online now if online, else last seen. */}
+        <div style={{ fontSize: 13, color: C.muted, marginTop: 3, marginBottom: 16 }}>
+          {node.is_online ? 'Online now' : node.last_seen_at ? `Last seen ${timeSince(node.last_seen_at)}` : 'Offline'}
         </div>
 
         {node.bio && (
@@ -1193,12 +1189,6 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>Full profile →</a>
         </div>
-
-        {node.last_seen_at && (
-          <p style={{ fontSize: 11, color: C.muted, marginTop: 16 }}>
-            Last seen {timeSince(node.last_seen_at)}
-          </p>
-        )}
       </div>
     </>
   )
