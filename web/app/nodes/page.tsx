@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { VerifiedBadge, UnverifiedBadge, GenesisBadge } from '@/components/NodeBadges'
+import NodeOverlay from '@/components/NodeOverlay'
 
 const C = {
   green:   '#43e397',
@@ -38,12 +39,16 @@ interface NodeRow {
 }
 
 type SortKey = 'since' | 'rewards' | 'blocks' | 'uptime'
+type SortDir = 'asc' | 'desc'
 const SORTS: { key: SortKey; label: string }[] = [
   { key: 'since',   label: 'Since' },
   { key: 'rewards', label: 'Rewards' },
   { key: 'blocks',  label: 'Blocks' },
   { key: 'uptime',  label: 'Uptime' },
 ]
+// Direction applied when a sort is FIRST selected; clicking the active sort again flips it.
+const DEFAULT_DIR: Record<SortKey, SortDir> = { since: 'asc', rewards: 'desc', blocks: 'desc', uptime: 'desc' }
+const PAGE_SIZES = [25, 50, 100]
 
 function uptimeOf(n: NodeRow): number {
   return n.total_uptime_seconds ?? n.uptime_seconds ?? 0
@@ -62,23 +67,33 @@ function nameOf(n: NodeRow): string {
   return n.display_name || `#${n.node_code}`
 }
 
-function sortNodes(rows: NodeRow[], key: SortKey): NodeRow[] {
-  const arr = [...rows]
+function cmpAsc(a: NodeRow, b: NodeRow, key: SortKey): number {
   switch (key) {
-    // Earliest registered on top (the founders first).
-    case 'since':   arr.sort((a, b) => a.created_at.localeCompare(b.created_at)); break
-    case 'rewards': arr.sort((a, b) => b.total_tusd_earned - a.total_tusd_earned); break
-    case 'blocks':  arr.sort((a, b) => b.blocks_won - a.blocks_won); break
-    case 'uptime':  arr.sort((a, b) => uptimeOf(b) - uptimeOf(a)); break
+    case 'since':   return a.created_at.localeCompare(b.created_at)   // earliest first
+    case 'rewards': return a.total_tusd_earned - b.total_tusd_earned
+    case 'blocks':  return a.blocks_won - b.blocks_won
+    case 'uptime':  return uptimeOf(a) - uptimeOf(b)
   }
+}
+function sortNodes(rows: NodeRow[], key: SortKey, dir: SortDir): NodeRow[] {
+  const arr = [...rows].sort((a, b) => cmpAsc(a, b, key))
+  if (dir === 'desc') arr.reverse()
   return arr
 }
 
 export default function NodesPage() {
   const [rows,    setRows]    = useState<NodeRow[]>([])
   const [sort,    setSort]    = useState<SortKey>('since')
+  const [dir,     setDir]     = useState<SortDir>('asc')
+  const [query,   setQuery]   = useState('')
+  const [page,    setPage]    = useState(0)
+  const [pageSize, setPageSize] = useState(25)
+  const [overlayCode, setOverlayCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [winW,    setWinW]    = useState(1024)
+
+  // Any change to the result set or ordering jumps back to the first page.
+  useEffect(() => { setPage(0) }, [sort, dir, query, pageSize])
 
   useEffect(() => {
     const on = () => setWinW(window.innerWidth)
@@ -98,9 +113,26 @@ export default function NodesPage() {
       })
   }, [])
 
-  const sorted   = sortNodes(rows, sort)
+  const q        = query.trim().toLowerCase()
+  const filtered = q
+    ? rows.filter(n => (n.display_name || '').toLowerCase().includes(q) || n.node_code.toLowerCase().includes(q))
+    : rows
+  const sorted   = sortNodes(filtered, sort, dir)
   const onlineCt = rows.filter(n => n.is_online).length
   const wide     = winW >= 720
+
+  // Client-side pagination — slices the sorted+filtered set, so it's ready for
+  // many entries without breaking sort/search (which need the whole set).
+  const totalPages   = Math.max(1, Math.ceil(sorted.length / pageSize))
+  const pageClamped   = Math.min(page, totalPages - 1)
+  const paged        = sorted.slice(pageClamped * pageSize, pageClamped * pageSize + pageSize)
+  const hasPrev      = pageClamped > 0
+  const hasNext      = pageClamped < totalPages - 1
+
+  function onSort(key: SortKey) {
+    if (key === sort) setDir(d => (d === 'asc' ? 'desc' : 'asc'))   // flip within the same filter
+    else { setSort(key); setDir(DEFAULT_DIR[key]) }
+  }
 
   return (
     <div style={s.root}>
@@ -122,21 +154,52 @@ export default function NodesPage() {
           <div style={s.sizeRow}>
             <span style={{ fontSize: 12, color: C.muted }}>Sort by</span>
             {SORTS.map(o => (
-              <button key={o.key} onClick={() => setSort(o.key)}
+              <button key={o.key} onClick={() => onSort(o.key)}
                 style={o.key === sort ? { ...s.sizeBtn, ...s.sizeBtnActive } : s.sizeBtn}>
-                {o.label}
+                {o.label}{o.key === sort ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}
               </button>
             ))}
           </div>
         </div>
 
+        {/* Simple search — filters by node name or id; wraps fine on mobile. */}
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search by name or id…"
+          style={s.search}
+        />
+
         {loading && rows.length === 0
           ? <p style={s.dim}>Loading…</p>
           : rows.length === 0
             ? <p style={s.dim}>No nodes registered yet.</p>
-            : wide ? <DesktopTable rows={sorted} /> : <MobileList rows={sorted} />
+            : sorted.length === 0
+              ? <p style={s.dim}>No nodes match &ldquo;{query}&rdquo;.</p>
+              : wide ? <DesktopTable rows={paged} onOpen={setOverlayCode} /> : <MobileList rows={paged} onOpen={setOverlayCode} />
         }
+
+        {sorted.length > 0 && (
+          <div style={s.navRow}>
+            {hasPrev
+              ? <button onClick={() => setPage(p => Math.max(0, p - 1))} style={s.navBtn}>← Previous</button>
+              : <span style={s.navBtnDisabled}>← Previous</span>}
+            <div style={s.pageMid}>
+              <span style={s.pageInfo}>Page {pageClamped + 1} / {totalPages}</span>
+              <span style={{ color: C.muted, fontSize: 12 }}>·</span>
+              {PAGE_SIZES.map(nn => (
+                <button key={nn} onClick={() => setPageSize(nn)}
+                  style={nn === pageSize ? { ...s.sizeBtn, ...s.sizeBtnActive } : s.sizeBtn}>{nn}</button>
+              ))}
+            </div>
+            {hasNext
+              ? <button onClick={() => setPage(p => p + 1)} style={s.navBtn}>Next →</button>
+              : <span style={s.navBtnDisabled}>Next →</span>}
+          </div>
+        )}
       </div>
+
+      {overlayCode && <NodeOverlay nodeCode={overlayCode} onClose={() => setOverlayCode(null)} />}
     </div>
   )
 }
@@ -161,7 +224,7 @@ function Badges({ n }: { n: NodeRow }) {
   )
 }
 
-function DesktopTable({ rows }: { rows: NodeRow[] }) {
+function DesktopTable({ rows, onOpen }: { rows: NodeRow[]; onOpen: (code: string) => void }) {
   return (
     <div style={s.tableWrap}>
       <div style={{ ...s.tr, ...s.thead }}>
@@ -172,7 +235,8 @@ function DesktopTable({ rows }: { rows: NodeRow[] }) {
         <div style={{ ...s.td, ...s.cSince }}>Since</div>
       </div>
       {rows.map(n => (
-        <a key={n.node_code} href={`/node/${n.node_code}`} style={s.tr}>
+        <div key={n.node_code} onClick={() => onOpen(n.node_code)} role="button" tabIndex={0}
+          onKeyDown={e => e.key === 'Enter' && onOpen(n.node_code)} style={{ ...s.tr, cursor: 'pointer' }}>
           <div style={{ ...s.td, ...s.cNode, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <StatusDot online={n.is_online} />
             <span style={{ ...s.ellip, fontWeight: 600 }}>{nameOf(n)}</span>
@@ -182,17 +246,18 @@ function DesktopTable({ rows }: { rows: NodeRow[] }) {
           <div style={{ ...s.td, ...s.cNum, color: C.statVal }}>{n.blocks_won}</div>
           <div style={{ ...s.td, ...s.cNum, color: C.statVal }}>{fmtUptime(uptimeOf(n))}</div>
           <div style={{ ...s.td, ...s.cSince, color: C.muted }}>{joinDate(n.created_at)}</div>
-        </a>
+        </div>
       ))}
     </div>
   )
 }
 
-function MobileList({ rows }: { rows: NodeRow[] }) {
+function MobileList({ rows, onOpen }: { rows: NodeRow[]; onOpen: (code: string) => void }) {
   return (
     <div>
       {rows.map(n => (
-        <a key={n.node_code} href={`/node/${n.node_code}`} style={s.mCard}>
+        <div key={n.node_code} onClick={() => onOpen(n.node_code)} role="button" tabIndex={0}
+          onKeyDown={e => e.key === 'Enter' && onOpen(n.node_code)} style={{ ...s.mCard, cursor: 'pointer' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <StatusDot online={n.is_online} />
             <span style={{ ...s.ellip, color: C.text, fontWeight: 700, fontSize: 15 }}>{nameOf(n)}</span>
@@ -204,7 +269,7 @@ function MobileList({ rows }: { rows: NodeRow[] }) {
             <span>· {fmtUptime(uptimeOf(n))} up</span>
             <span>· since {joinDate(n.created_at)}</span>
           </div>
-        </a>
+        </div>
       ))}
     </div>
   )
@@ -227,8 +292,18 @@ const s: Record<string, React.CSSProperties> = {
   dim:      { color: C.muted, fontSize: 14 },
 
   sizeRow:       { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  sizeBtn:       { padding: '5px 12px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, color: C.muted, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
+  // outline:none so a clicked (but inactive) button doesn't keep a white focus ring —
+  // only the active sort should read as selected (green).
+  sizeBtn:       { padding: '5px 12px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, color: C.muted, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', outline: 'none' },
   sizeBtnActive: { background: C.green, color: '#000', borderColor: C.green },
+
+  search: { width: '100%', boxSizing: 'border-box', padding: '9px 14px', marginBottom: 14, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14, fontFamily: 'inherit', outline: 'none' },
+
+  navRow:         { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 18 },
+  navBtn:         { padding: '11px 20px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', outline: 'none' },
+  navBtnDisabled: { padding: '11px 20px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 14, fontWeight: 700, opacity: 0.6 },
+  pageMid:        { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'center' },
+  pageInfo:       { fontSize: 13, color: C.muted },
 
   tableWrap: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', marginBottom: 4 },
   tr:        { display: 'flex', alignItems: 'center', gap: 8, padding: '11px 12px', borderBottom: `1px solid ${C.border}`, textDecoration: 'none', color: C.text, fontSize: 13 },

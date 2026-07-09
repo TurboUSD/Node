@@ -256,7 +256,7 @@ export default function NodeProductPage() {
         <div style={s.statsBar}>
           <StatPill label="Total nodes" value={nodes.length}         color={C.text}  />
           <StatPill label="Online now"  value={onlineCount}          color={C.green} />
-          <StatPill label="Blocks won"  value={totalBlocks}          color={C.yellow} />
+          <StatPill label="Blocks mined" value={totalBlocks}         color={C.yellow} />
           <StatPill label="₸ distributed" value={`₸${totalTusd.toFixed(0)}`} color={C.green} />
         </div>
 
