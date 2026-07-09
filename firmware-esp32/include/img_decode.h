@@ -77,9 +77,28 @@ static uint8_t* _decodeScale(const uint8_t* body, size_t len,
     bool rgbaFromLvMem = false;
 
     if (body[0] == 0x89 && body[1] == 0x50) {              // PNG
+        // Dimension guard BEFORE inflating (same spirit as the 800×800 JPEG
+        // guard below — PNG had none): IHDR width/height sit at fixed offsets
+        // 16/20. lodepng peaks at roughly 2× W×H×4 bytes of PSRAM; oversized
+        // sources just fail as rc=83 (alloc) after wasting seconds and RAM.
+        if (len >= 24) {
+            uint32_t pw32 = ((uint32_t)body[16] << 24) | ((uint32_t)body[17] << 16) |
+                            ((uint32_t)body[18] << 8)  |  (uint32_t)body[19];
+            uint32_t ph32 = ((uint32_t)body[20] << 24) | ((uint32_t)body[21] << 16) |
+                            ((uint32_t)body[22] << 8)  |  (uint32_t)body[23];
+            if (pw32 == 0 || ph32 == 0 || pw32 > 800 || ph32 > 800 ||
+                (uint64_t)pw32 * ph32 > 640u * 640u) {
+                Log.printf("img[%s] png too big (%ux%u) — skipping\n",
+                           tag, (unsigned)pw32, (unsigned)ph32);
+                return nullptr;
+            }
+        }
         unsigned rc = lodepng_decode32(&rgba, &iw, &ih, body, len);
         if (rc != 0 || !rgba || iw == 0 || ih == 0) {
-            Log.printf("img[%s] png decode rc=%u\n", tag, rc);
+            // rc=83 = lodepng alloc failure → log the PSRAM state that caused it.
+            Log.printf("img[%s] png decode rc=%u (psram free=%u maxblk=%u)\n", tag, rc,
+                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
             if (rgba) lv_mem_free(rgba);
             return nullptr;
         }

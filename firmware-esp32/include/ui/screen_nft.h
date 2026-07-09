@@ -92,8 +92,11 @@ struct NftItem {
     uint16_t pw[3]    = {};
     uint16_t ph[3]    = {};
     bool     tried[3] = {};
+    uint8_t  failCnt[3] = {};   // consecutive decode failures per class — after 3 the
+                                // slideshow prefetch stops re-queuing it (rc=83 images
+                                // were re-downloaded every tick, forever)
 
-    void freeSlot(int c) { if (px[c]) { free(px[c]); px[c] = nullptr; } tried[c] = false; }
+    void freeSlot(int c) { if (px[c]) { free(px[c]); px[c] = nullptr; } tried[c] = false; failCnt[c] = 0; }
 };
 
 struct NftPendingResult {
@@ -471,6 +474,12 @@ public:
             lv_obj_set_style_pad_gap(_gridArea, 4, 0);
         }
         _rebuildGrid();
+        // Repaint the WHOLE panel: with direct-mode double buffering, the
+        // body/grid resize sometimes left a stale strip from the previous
+        // layout in one framebuffer (the occasional black band at the bottom
+        // / short line at the top-left in fullscreen). A full invalidate
+        // forces both buffers through a complete redraw.
+        lv_obj_invalidate(lv_scr_act());
     }
 
 private:
@@ -1912,9 +1921,11 @@ private:
         // zoomed, chunky "pixelated" crop. That's why only the FIRST NFT in a
         // carousel cell (the one decoded for this class up front) looked crisp.
         if (nftIdx >= 0 && nftIdx < (int)_nftCache.size() && !_nftCache[nftIdx].px[gCls]) {
-            _nftCache[nftIdx].tried[gCls] = false;
+            _nftCache[nftIdx].tried[gCls]   = false;
+            _nftCache[nftIdx].failCnt[gCls] = 0;   // manual tap = explicit retry, even after give-up
             _startImageFetch();
         }
+        _pruneOneUpWindow();   // 1x1: slide the decode window along with the carousel
     }
 
     // ── Slideshow tick ────────────────────────────────────────────────────────
@@ -1950,7 +1961,11 @@ private:
                     _refreshCell(i);
                     break;
                 }
-                if (wantDecode < 0) wantDecode = cand;   // remember the gap
+                // Remember the gap — but give up on an image after 3 failed
+                // decode attempts (rc=83 items were re-downloaded every tick
+                // forever). A manual tap on the cell still forces a retry.
+                if (wantDecode < 0 && _nftCache[cand].failCnt[gCls] < 3)
+                    wantDecode = cand;
             }
             if (wantDecode >= 0) {
                 _nftCache[wantDecode].tried[gCls] = false;   // queue the missing sibling
@@ -1963,6 +1978,7 @@ private:
             _imgSettled = false;
             _startImageFetch();
         }
+        _pruneOneUpWindow();   // 1x1: slide the decode window along with the carousel
     }
 
     // ── Carousel setting ──────────────────────────────────────────────────────
@@ -2277,8 +2293,44 @@ private:
     }
 
     bool _entitledSlot(int cls, int idx) {
-        if (cls == _gridClass()) return true;
+        if (cls == _gridClass()) {
+            // 1x1 (windowed or fullscreen): the single carousel spans EVERY
+            // visible NFT at the biggest decode size (~260-460 KB each) —
+            // keeping all of them resident would need >10 MB of PSRAM, so the
+            // eager pass ran out part-way and the carousel looked like "only
+            // the first collection". Entitle only a SLIDING WINDOW around the
+            // carousel position (previous, current, next two); the slideshow
+            // prefetch + _pruneOneUpWindow move the window as it advances.
+            if (cls == 0 && _cellCount == 1 && _cells[0].nftCount > 4) {
+                const CellWidgets& cw = _cells[0];
+                int n = cw.nftCount;
+                for (int d = -1; d <= 2; d++) {
+                    int off = ((cw.nftCurrent + d) % n + n) % n;
+                    if (_cellNftIdx(cw, off) == idx) return true;
+                }
+                return idx >= 0 && idx < NFT_MAX_ITEMS && (_entMask[idx] & 1u);   // grid-switch covers stay
+            }
+            return true;
+        }
         return idx >= 0 && idx < NFT_MAX_ITEMS && (_entMask[idx] & (1u << cls));
+    }
+
+    // Free 1x1-class bitmaps that fell OUT of the sliding window (see
+    // _entitledSlot) as the carousel advances — without this the window only
+    // bounded NEW decodes and the old ones still accumulated to OOM.
+    void _pruneOneUpWindow() {
+        if (_gridClass() != 0 || _cellCount != 1) return;
+        CellWidgets& cw = _cells[0];
+        int n = cw.nftCount;
+        if (n <= 4) return;
+        for (int off = 0; off < n; off++) {
+            int dist = ((off - cw.nftCurrent) % n + n) % n;
+            if (dist <= 2 || dist == n - 1) continue;      // the window itself
+            int idx = _cellNftIdx(cw, off);
+            if (idx < 0 || idx >= (int)_nftCache.size()) continue;
+            if (_entMask[idx] & 1u) continue;              // grid-switch cover — keep
+            if (_nftCache[idx].px[0]) _nftCache[idx].freeSlot(0);
+        }
     }
 
     void _startImageFetch() {
@@ -2367,7 +2419,18 @@ private:
                     // — otherwise loadAlloc() returns a stale blob cached under
                     // it.image_url and the proxy is never fetched.
                     bool isOrdinal = it.floor_btc || strstr(it.image_url, "ordinals.com") != nullptr;
-                    String prox     = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&w=512&output=png";
+                    // Request size TIERED to the target cell: a fixed 512 meant every
+                    // 3x3 cell (106 px) decode still inflated a 512×512 RGBA (~1 MB,
+                    // ~2.5 MB peak inside lodepng) — with 40+ decoded items resident,
+                    // PSRAM ran dry and lodepng failed rc=83 ("some cells never show").
+                    // 2× the box keeps NEAREST downscales clean at a fraction of the RAM.
+                    int proxW = (boxW <= 128 && boxH <= 128) ? 256
+                              : (boxW <= 256 && boxH <= 256) ? 384 : 512;
+                    // &h + fit=inside: &w alone lets a TALL source exceed the decoder's
+                    // dimension guard (wsrv scales width only, height follows aspect).
+                    String prox     = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) +
+                                      "&w=" + String(proxW) + "&h=" + String(proxW) +
+                                      "&fit=inside&output=png";
                     String proxNat  = "https://wsrv.nl/?url=" + _urlEncode(it.image_url) + "&output=png";
                     _waitForTlsRam(3000);   // BEFORE the lock — see _bgPinlistFetchFn
                     netLock();   // exclusive TLS only for THIS image's fetch+decode
@@ -2377,8 +2440,12 @@ private:
                         if (!px) px = imgdec::fetchRgb565(it.image_url, boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color);
                     } else {
                         bool unsup = false;
-                        px = imgdec::fetchRgb565((base + "?w=512&auto=format").c_str(),
-                                                 boxW, boxH, it.name, it.image_url, &w, &h, it.bg_color, &unsup);
+                        // Cache key = the SIZED url (not it.image_url): with per-class
+                        // sizes a small blob cached under the raw url would poison the
+                        // bigger classes with an upscaled-blurry source.
+                        String sized = base + "?w=" + String(proxW) + "&auto=format";
+                        px = imgdec::fetchRgb565(sized.c_str(),
+                                                 boxW, boxH, it.name, sized.c_str(), &w, &h, it.bg_color, &unsup);
                         // Only retry the RAW url when the sized variant failed for a
                         // NETWORK reason (404/timeout). If it DECODED but the format is
                         // unsupported (SVG like on-chain Checks, webp, gif), the raw url
@@ -2405,7 +2472,9 @@ private:
                         aborted = true;
                         break;
                     }
+                    if (!px && it.failCnt[cls] < 255) it.failCnt[cls]++;   // see NftItem::failCnt
                     if (px) {
+                        it.failCnt[cls] = 0;
                         it.px[cls] = px;
                         it.pw[cls] = w;
                         it.ph[cls] = h;
