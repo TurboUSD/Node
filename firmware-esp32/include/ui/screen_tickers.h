@@ -220,7 +220,7 @@ public:
         lv_obj_set_style_bg_opa(_addBtn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(_addBtn, 0, 0);
         lv_obj_set_style_shadow_width(_addBtn, 0, 0);
-        lv_obj_set_style_pad_hor(_addBtn, 4, 0);
+        lv_obj_set_style_pad_hor(_addBtn, 0, 0);   // uniform gaps — see pad_column above
         lv_obj_set_ext_click_area(_addBtn, 10);
         lv_obj_add_event_cb(_addBtn, _onAddBtnTapped, LV_EVENT_CLICKED, this);
         // ONE grey for every footer clickable (both screens): 0x80808a @ 90% —
@@ -238,7 +238,7 @@ public:
         lv_obj_set_style_bg_opa(_editBtn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(_editBtn, 0, 0);
         lv_obj_set_style_shadow_width(_editBtn, 0, 0);
-        lv_obj_set_style_pad_hor(_editBtn, 4, 0);
+        lv_obj_set_style_pad_hor(_editBtn, 0, 0);   // uniform gaps
         lv_obj_set_ext_click_area(_editBtn, 10);
         lv_obj_add_event_cb(_editBtn, _onEditBtnTapped, LV_EVENT_CLICKED, this);
         _editBtnLabel = lv_label_create(_editBtn);
@@ -286,7 +286,7 @@ public:
         lv_obj_set_style_bg_opa(tRefresh, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(tRefresh, 0, 0);
         lv_obj_set_style_shadow_width(tRefresh, 0, 0);
-        lv_obj_set_style_pad_hor(tRefresh, 4, 0);
+        lv_obj_set_style_pad_hor(tRefresh, 0, 0);   // uniform gaps
         lv_obj_set_ext_click_area(tRefresh, 10);
         lv_obj_add_event_cb(tRefresh, [](lv_event_t* e) {
             auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
@@ -298,10 +298,10 @@ public:
           lv_obj_set_style_text_opa(l, LV_OPA_90, 0); lv_obj_center(l); }
 
         // Left-align the row after the "|", cap the name (marquee if long), keep the gear.
-        // Gap 2 + fctl pad 2 + Add's own pad 4 = 8 px of visible space between the
-        // "|" and "Add" — the SAME 8 px the node name keeps to the "|". The old 12
-        // read as a hole and wasted width the name could use.
-        layoutFooterControls(footer, fctl, 2);
+        // Gap 6 + fctl pad 2 + Add's pad 0 = 8 px of visible space between the
+        // "|" and "Add" — the SAME 8 px the node name keeps to the "|", and the
+        // same formula as the NFT footer.
+        layoutFooterControls(footer, fctl, 6);
 
         // Placeholder shown when no tickers are loaded yet
         _emptyLabel = lv_label_create(_body);
