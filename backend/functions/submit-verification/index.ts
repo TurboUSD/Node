@@ -73,19 +73,54 @@ async function handle(req: Request): Promise<Response> {
 
   const supabase = createClient(supabaseUrl, serviceRoleKey)
 
+  const nodeCode = body.node_code.toUpperCase()
+  const wallet   = body.wallet_address.toLowerCase()
+
   const { data, error } = await supabase
     .from('nodes')
     .update({
       verification_tweet_url: body.tweet_url,
-      verification_wallet_address: body.wallet_address.toLowerCase(),
+      verification_wallet_address: wallet,
+      verification_submitted_at: new Date().toISOString(),
+      verification_notified: false,   // AMI re-alerts the admin about this fresh submission
       // is_verified intentionally left untouched here -- a human reviews it next.
     })
-    .eq('node_code', body.node_code.toUpperCase())
+    .eq('node_code', nodeCode)
     .select('node_code, is_verified')
     .single()
 
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+  }
+
+  // Best-effort email notification via Web3Forms (zero-config). The access key
+  // is PUBLIC by design (these keys live in client-side HTML forms), so it's fine
+  // hardcoded as a default — email then works with no setup at all. Emails land in
+  // the inbox that created the key (turbousd2024@gmail.com). Override or disable
+  // with the WEB3FORMS_ACCESS_KEY secret (set it empty to turn email off). We NEVER
+  // fail the request just because email hiccuped — the submission already saved.
+  const web3key = Deno.env.get('WEB3FORMS_ACCESS_KEY') ?? '44f243e1-3083-45f4-bb5e-5cddb84b0d7f'
+  if (web3key) {
+    try {
+      await fetch('https://api.web3forms.com/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({
+          access_key: web3key,
+          subject: `New node verification: ${nodeCode}`,
+          from_name: 'TurboUSD Node network',
+          email: 'noreply@turbousd.com',   // reply-to; Web3Forms expects an email field
+          node_code: nodeCode,
+          tweet_url: body.tweet_url,
+          wallet_address: wallet,
+          message:
+            `Node ${nodeCode} submitted a verification request.\n\n` +
+            `X post: ${body.tweet_url}\n` +
+            `Wallet: ${wallet}\n\n` +
+            `Profile: https://network.turbousd.com/node/${nodeCode}`,
+        }),
+      })
+    } catch (_err) { /* email is best-effort — the submission already succeeded */ }
   }
 
   return new Response(JSON.stringify({ node: data, message: 'Submitted for manual review' }), {

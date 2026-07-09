@@ -87,6 +87,20 @@ create table if not exists nodes (
 alter table nodes add column if not exists screen_carousel      boolean  default false;
 alter table nodes add column if not exists screen_carousel_secs smallint default 10;
 
+-- Verification submissions (written by the submit-verification function; the
+-- owner sends their X post + wallet, a human reviews and flips is_verified).
+-- These were referenced by the function but never declared — without them the
+-- submission update silently failed.
+alter table nodes add column if not exists verification_tweet_url      text;
+alter table nodes add column if not exists verification_wallet_address text;
+alter table nodes add column if not exists verification_submitted_at   timestamptz;
+-- verification_notified: reset to false on each new submission; the AMI bot flips
+-- it true once it has DM'd the admin, so each request is alerted exactly once.
+alter table nodes add column if not exists verification_notified       boolean default false;
+-- Written by the AMI bot's verify button when it flips is_verified.
+alter table nodes add column if not exists verified_at                 timestamptz;
+alter table nodes add column if not exists verified_by                 text;
+
 -- Running reward + activity totals per node (upserted by mine-block).
 create table if not exists node_reward_balances (
   node_id           uuid primary key references nodes(id) on delete cascade,
