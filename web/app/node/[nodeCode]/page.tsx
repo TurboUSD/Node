@@ -76,6 +76,8 @@ export default function PublicNodePage() {
   const [node,  setNode]  = useState<NodeProfile | null>(null)
   const [stats, setStats] = useState<NodeStats | null>(null)
   const [lastBlock, setLastBlock] = useState<{ block_number: number; mined_at: string } | null>(null)
+  const [prevCode, setPrevCode] = useState<string | null>(null)   // neighbours in registration order
+  const [nextCode, setNextCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -105,6 +107,29 @@ export default function PublicNodePage() {
       .maybeSingle()
       .then(({ data }) => { if (data) setLastBlock(data as { block_number: number; mined_at: string }) })
   }, [nodeCode])
+
+  // Neighbours for the Prev/Next buttons — in registration order (join date), so
+  // "Previous" is the node registered just before this one and "Next" just after,
+  // matching the default order of the /nodes list.
+  useEffect(() => {
+    if (!node?.created_at) return
+    supabase
+      .from('public_node_directory')
+      .select('node_code')
+      .lt('created_at', node.created_at)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => setPrevCode((data as { node_code: string } | null)?.node_code ?? null))
+    supabase
+      .from('public_node_directory')
+      .select('node_code')
+      .gt('created_at', node.created_at)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => setNextCode((data as { node_code: string } | null)?.node_code ?? null))
+  }, [node?.created_at])
 
   if (loading) {
     return <main style={s.page}><p style={{ color: C.muted, textAlign: 'center', marginTop: 80 }}>Loading node {nodeCode}…</p></main>
@@ -197,6 +222,17 @@ export default function PublicNodePage() {
         )}
       </div>
 
+      {/* Navigate between nodes (registration order) + link to the full list. */}
+      <div style={s.navRow}>
+        {prevCode
+          ? <a href={`/node/${prevCode}`} style={s.navBtn}>← Previous</a>
+          : <span style={s.navBtnDisabled}>← Previous</span>}
+        <a href="/nodes" style={s.navListLink}>☰ Node List</a>
+        {nextCode
+          ? <a href={`/node/${nextCode}`} style={s.navBtn}>Next →</a>
+          : <span style={s.navBtnDisabled}>Next →</span>}
+      </div>
+
       <p style={{ textAlign: 'center', color: C.muted, fontSize: 12, marginTop: 18 }}>
         Part of the <a href="/" style={{ color: C.green, textDecoration: 'none' }}>TurboUSD mining network</a>
       </p>
@@ -229,4 +265,10 @@ const s: Record<string, React.CSSProperties> = {
   statsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   lastBlockBox: { marginTop: 14, padding: '12px 14px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 },
   linkBtn: { display: 'inline-block', background: '#1c1c1c', border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 18px', color: C.text, textDecoration: 'none', fontSize: 14 },
+
+  // Prev / Node List / Next — same neutral dark buttons as the block page.
+  navRow:         { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 18 },
+  navBtn:         { padding: '11px 20px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, textDecoration: 'none', fontSize: 14, fontWeight: 700, display: 'inline-block', cursor: 'pointer' },
+  navBtnDisabled: { padding: '11px 20px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 14, fontWeight: 700, opacity: 0.6, display: 'inline-block' },
+  navListLink:    { color: C.muted, textDecoration: 'none', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 },
 }
