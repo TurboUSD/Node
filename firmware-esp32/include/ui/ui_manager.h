@@ -498,12 +498,17 @@ public:
     // Checked every loop() tick. Turns off the backlight after the configured
     // idle period when always-on mode is disabled.
     void _checkScreenTimeout() {
-        if (storage.getScreenAlwaysOn()) return;
-        uint32_t timeoutMs = (uint32_t)storage.getScreenTimeoutMins() * 60UL * 1000UL;
-        if (_screenIsOn && (millis() - _lastTouchMs > timeoutMs)) {
-            _screenIsOn = false;
-            ledcWrite(LCD_PIN_BL, 0);  // channel 0 = backlight
+        if (!storage.getScreenAlwaysOn()) {
+            uint32_t timeoutMs = (uint32_t)storage.getScreenTimeoutMins() * 60UL * 1000UL;
+            if (_screenIsOn && (millis() - _lastTouchMs > timeoutMs)) {
+                _screenIsOn = false;
+                ledcWrite(LCD_PIN_BL, 0);  // channel 0 = backlight
+            }
         }
+        // Keep the global backlight state fresh (button toggle AND idle timeout).
+        // Screens pause their heavy network/decode work while this is false so a
+        // dark screen can't starve the task watchdog into a reboot.
+        g_displayAwake() = (_screenOn && _screenIsOn);
     }
 
 private:
@@ -2197,7 +2202,7 @@ private:
     // is active — none of which the user wants yanked away on a timer.
     void _checkScreenCarousel() {
         if (!storage.getScreenCarousel())   return;
-        if (!_screenOn)                      return;
+        if (!g_displayAwake())               return;   // off via button OR idle timeout
         if (isAlarmOverlayActive())          return;
         if (_nftFullscreen)                  return;
         if (anyModalOpen())                  return;

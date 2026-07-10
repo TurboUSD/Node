@@ -2316,6 +2316,10 @@ public:
         auto* self = static_cast<TickerScreen*>(timer->user_data);
         if (!self) return;
 
+        // Screen off → pause all ticker fetching/decoding (TLS on the loop task was
+        // starving the watchdog while dark). Deferred flags persist and run on wake.
+        if (!g_displayAwake()) return;
+
         // Deferred card-tree rebuild (requested by event callbacks — doing it
         // there would delete the widget that was dispatching the event).
         if (self->_rebuildRequested) {

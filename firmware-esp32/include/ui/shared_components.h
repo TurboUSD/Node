@@ -15,6 +15,14 @@ LV_IMG_DECLARE(turbousd_logo); // generated asset, see assets/README.md
 // on their widget — otherwise the popup opened on the screen you swiped to.
 inline bool& g_touchWasSwipe() { static bool v = false; return v; }
 
+// True while the backlight is actually ON. UiManager keeps it in sync every loop
+// tick (button toggle + inactivity timeout). Screens read it to PAUSE their heavy
+// network/decode work while the display is dark — nobody's looking, and a stuck
+// TLS fetch or a long image decode with the screen off was starving the task
+// watchdog and rebooting the device (which turned the screen back on). Heartbeat,
+// OTA and the alarm live in loop() and keep running; on wake the pollers resume.
+inline bool& g_displayAwake() { static bool v = true; return v; }
+
 struct SharedHeaderRefs {
     lv_obj_t* dateLabel    = nullptr;
     lv_obj_t* tempLabel    = nullptr;

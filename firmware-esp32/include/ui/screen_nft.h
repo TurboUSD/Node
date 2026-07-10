@@ -1087,6 +1087,13 @@ private:
     }
 
     void _pollPending() {
+        // Screen off → pause all NFT fetching + image decoding. A long decode or a
+        // stuck OpenSea/TLS fetch with the screen dark was starving the task
+        // watchdog and rebooting the device (which turned the screen back on).
+        // Deferred flags (_imgDirty, _rebuildReq, pinlist sig) persist and are
+        // applied on the next tick once the backlight comes back.
+        if (!g_displayAwake()) return;
+
         // Fresh decoded images → repaint ONLY the cells whose artwork changed
         // (a full 9-cell repaint per decoded image made the screen blink
         // randomly through the whole loading phase).
@@ -1931,6 +1938,7 @@ private:
     // ── Slideshow tick ────────────────────────────────────────────────────────
 
     void _onSlideshowTick() {
+        if (!g_displayAwake()) return;   // screen off: don't advance/redecode NFTs
         uint8_t slideSecs = storage.getNftSlideshowSecs();
         if (slideSecs == 0 || !storage.getNftCarousel()) return;
         if (_cellCount == 0) return;
