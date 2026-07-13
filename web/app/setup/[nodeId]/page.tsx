@@ -72,6 +72,13 @@ interface NodeConfig {
   // Manual NFT pinlist (optional, requires DB migration)
   // Comma-separated "chain:contract:tokenId" items, max 20. Takes priority over nft_wallet_address on device.
   nft_pinlist?:           string | null
+  // Ticker Stats screen selection: which DEX pool the screen shows stats for.
+  // Defaults to ₸USD. Chosen here or via the device's footer picker.
+  ticker_stats_pool?:     string | null
+  ticker_stats_chain?:    string | null
+  ticker_stats_symbol?:   string | null
+  // Home (first screen) background image URL (1:1 recommended). Empty = black.
+  home_bg_url?:           string | null
   // Reported by the device on each heartbeat (the ESP32 image OTA compares against).
   firmware_version?:      string | null
 }
@@ -304,6 +311,10 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
                                    .join(',')
                                  : null,
         screen_order:          node.screen_order ?? undefined,
+        ticker_stats_pool:     node.ticker_stats_pool   ?? undefined,
+        ticker_stats_chain:    node.ticker_stats_chain  ?? undefined,
+        ticker_stats_symbol:   node.ticker_stats_symbol ?? undefined,
+        home_bg_url:           node.home_bg_url ?? '',
       })
       setSaveMsg({ text: 'Saved. Your device will pick up changes on its next check-in.', ok: true })
     } catch (err) {
@@ -560,6 +571,40 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
             <ToggleRow label="Time format" value={node.time_format}
               options={[['24H', '24h'], ['AMPM', 'AM/PM']]}
               onChange={v => setNode({ ...node, time_format: v as '24H' | 'AMPM' })}
+            />
+
+            {/* Home screen background image */}
+            <div style={{ paddingTop: 10, borderTop: `1px solid ${C.border}`, marginTop: 6 }}>
+              <Field label="Home background image"
+                hint="Paste an image URL (a square 1:1 image looks best). The clock, date and alarm get a soft shadow behind them so they stay readable. Leave empty for a plain black background.">
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  <input style={{ ...s.input, flex: 1 }} placeholder="https://…/image.png" maxLength={400}
+                    value={node.home_bg_url ?? ''}
+                    onChange={e => setNode({ ...node, home_bg_url: e.target.value || null })}
+                  />
+                  {node.home_bg_url
+                    ? <img src={node.home_bg_url} alt="preview"
+                        style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover', border: `1px solid ${C.border}`, flexShrink: 0 }}
+                        onError={e => { (e.target as HTMLImageElement).style.opacity = '0.2' }} />
+                    : null}
+                </div>
+              </Field>
+            </div>
+          </Section>
+
+          {/* ── Ticker Stats screen ── */}
+          <Section title="Ticker Stats Screen" accent={C.yellow}>
+            <p style={s.bodyText}>
+              The second screen shows detailed stats for a single token. ₸USD is the
+              default; pick any other token below and the device shows its price,
+              market cap, volume and liquidity (custom tokens like DRB show tailored
+              fields). You can also change this from the device itself.
+            </p>
+            <TickerStatsSelector
+              pool={node.ticker_stats_pool     ?? TUSD_STATS.pool}
+              chain={node.ticker_stats_chain   ?? TUSD_STATS.chain}
+              symbol={node.ticker_stats_symbol ?? TUSD_STATS.symbol}
+              onChange={(pool, chain, symbol) => setNode({ ...node, ticker_stats_pool: pool, ticker_stats_chain: chain, ticker_stats_symbol: symbol })}
             />
           </Section>
 
@@ -903,6 +948,106 @@ function AccessDenied({ nodeCode }: { nodeCode: string }) {
   )
 }
 
+// ₸USD is the Ticker Stats default (its own Base pool).
+const TUSD_STATS = { pool: '0xd013725b904e76394A3aB0334Da306C505D778F8', chain: 'base', symbol: 'TUSD' }
+
+// Single-select token search for the Ticker Stats screen. Same DexScreener
+// source + liquidity filter as the device's on-screen search; picking a token
+// stores its pool/chain/symbol (saved with the main Save button, then synced to
+// the device on its next heartbeat).
+function TickerStatsSelector({ pool, chain, symbol, onChange }: {
+  pool: string; chain: string; symbol: string
+  onChange: (pool: string, chain: string, symbol: string) => void
+}) {
+  const [query, setQuery]     = useState('')
+  const [results, setResults] = useState<{ pool: string; chain: string; symbol: string; name: string; liq: number }[]>([])
+  const [loading, setLoading] = useState(false)
+  const isTusd = pool.toLowerCase() === TUSD_STATS.pool.toLowerCase()
+
+  async function search() {
+    if (query.trim().length < 2) return
+    setLoading(true)
+    try {
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query.trim())}`)
+      if (!res.ok) throw new Error(`DexScreener ${res.status}`)
+      const data = await res.json() as { pairs?: Array<{
+        pairAddress: string; chainId: string; liquidity?: { usd?: number }
+        baseToken?: { symbol?: string; name?: string }
+      }> }
+      setResults((data.pairs ?? [])
+        .filter(pr => (pr.liquidity?.usd ?? 0) >= 1000)
+        .slice(0, 10)
+        .map(pr => ({
+          pool:   pr.pairAddress,
+          chain:  pr.chainId,
+          symbol: pr.baseToken?.symbol ?? '?',
+          name:   pr.baseToken?.name ?? '',
+          liq:    pr.liquidity?.usd ?? 0,
+        })))
+    } catch { setResults([]) }
+    setLoading(false)
+  }
+
+  const btn: React.CSSProperties = {
+    padding: '8px 14px', background: 'transparent', color: C.green,
+    border: `1px solid ${C.green}`, borderRadius: 8, fontWeight: 'bold',
+    fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
+  }
+
+  return (
+    <div>
+      {/* Current selection */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+                    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, color: C.text, fontWeight: 700 }}>
+            {symbol || 'TUSD'}{isTusd ? '  (₸USD · default)' : ''}
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+            {chain} · {pool.slice(0, 6)}…{pool.slice(-4)}
+          </div>
+        </div>
+        {!isTusd && (
+          <button type="button" style={{ ...btn, color: C.muted, borderColor: C.border }}
+            onClick={() => onChange(TUSD_STATS.pool, TUSD_STATS.chain, TUSD_STATS.symbol)}>
+            Reset to ₸USD
+          </button>
+        )}
+      </div>
+
+      {/* Search */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input style={s.input} value={query} onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && search()}
+          placeholder="Search a token to show its stats…" />
+        <button type="button" style={btn} onClick={search} disabled={loading}>
+          {loading ? '…' : 'Search'}
+        </button>
+      </div>
+
+      {results.length > 0 && (
+        <div style={{ marginTop: 8, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+          {results.map(r => (
+            <div key={r.pool + r.chain} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                  padding: '8px 12px', borderTop: `1px solid ${C.border}` }}>
+              <div style={{ minWidth: 0 }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{r.name || r.symbol}</span>
+                <span style={{ fontSize: 11, color: C.muted, marginLeft: 6 }}>
+                  {r.symbol} · {r.chain} · Liq ${Math.round(r.liq).toLocaleString()}
+                </span>
+              </div>
+              <button type="button" style={{ ...btn, padding: '6px 12px' }}
+                onClick={() => { onChange(r.pool, r.chain, r.symbol); setResults([]); setQuery('') }}>
+                Select
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Section({ title, accent, children }: { title: string; accent: string; children: React.ReactNode }) {
   return (
     <div style={{ ...s.section, borderLeftColor: accent }}>
@@ -959,7 +1104,7 @@ function ToggleRow({ label, value, options, onChange }: {
 // Default swipe order: Home → TurboStats → Tickers → Debt → Inflation → NFT → My Node
 const SCREEN_LABELS: Record<number, string> = {
   0: 'Home',        // CLOCK, always fixed first
-  1: 'TurboStats',  // TURBO_STATS
+  1: 'Ticker Stats',  // TURBO_STATS
   2: 'US Debt',     // DEBT
   3: 'Inflation',   // INFLATION_GAME
   4: 'Mining',      // NODE_NETWORK (live mining view)
