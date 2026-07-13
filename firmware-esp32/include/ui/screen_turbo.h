@@ -458,11 +458,12 @@ private:
         if (self->_pickCb) self->_pickCb(self->_pickUd);
     }
 
-    // "$26M" / "$850k" / "$1.2B" — chart Y-axis market-cap ticks.
+    // Chart Y-axis market-cap ticks — max 1 decimal to keep them narrow
+    // ("$1.2B" / "$10.3M" / "$740.5k").
     static void _fmtMcap(char* out, size_t sz, double v) {
         if      (v >= 1e9) snprintf(out, sz, "$%.1fB", v / 1e9);
-        else if (v >= 1e6) snprintf(out, sz, "$%.0fM", v / 1e6);
-        else if (v >= 1e3) snprintf(out, sz, "$%.0fk", v / 1e3);
+        else if (v >= 1e6) snprintf(out, sz, "$%.1fM", v / 1e6);
+        else if (v >= 1e3) snprintf(out, sz, "$%.1fk", v / 1e3);
         else               snprintf(out, sz, "$%.0f",  v);
     }
 
