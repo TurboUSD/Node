@@ -1170,6 +1170,17 @@ private:
                 w.series->y_points[i] = LV_CHART_POINT_NONE;
         } else {
             // Compact sparkline: line of closes.
+            // SHORT-HISTORY pools (young tokens): GeckoTerminal returns fewer
+            // candles than requested, and with a FIXED point count the series'
+            // trailing slots stayed LV_CHART_POINT_NONE — the line drew its
+            // first stretch and stopped mid-card ("half-drawn sparkline").
+            // Resize the series to the REAL candle count so the line always
+            // spans the full width, however young the pool is.
+            if (t.chart_count >= 2 && pc != (int)t.chart_count) {
+                lv_chart_set_point_count(w.chart, t.chart_count);
+                pc   = (int)t.chart_count;
+                nPts = pc;
+            }
             float minV = t.chart_closes[0], maxV = t.chart_closes[0];
             for (int i = 1; i < t.chart_count; i++) {
                 if (t.chart_closes[i] < minV) minV = t.chart_closes[i];
