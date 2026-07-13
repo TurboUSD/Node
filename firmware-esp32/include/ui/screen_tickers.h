@@ -348,6 +348,16 @@ public:
     SharedHeaderRefs header;
     SharedFooterRefs footer;
 
+    // Open the token search in "pick" mode: on selection, cb(ud, entry) fires
+    // and the dialog closes WITHOUT adding a ticker. Used by the Ticker Stats
+    // screen's footer picker.
+    void openPickDialog(void (*cb)(void*, const SearchResultEntry&), void* ud) {
+        _pickMode     = true;
+        _pickResultCb = cb;
+        _pickResultUd = ud;
+        _openSearchDialog();
+    }
+
 private:
 
     // ── Members ───────────────────────────────────────────────────────────────
@@ -439,6 +449,21 @@ private:
 
     bool             _loadedOnce = false;   // false until the first list load returns
 
+    // Signature of the currently-BUILT card tree (pools+order+cols+edit+expand).
+    // A background list reload that produces the SAME signature reuses the
+    // existing widgets instead of deleting + recreating them — the mini
+    // sparklines were flashing on every periodic/self-heal reload because the
+    // whole tree was rebuilt each time even when nothing about the list changed.
+    String           _builtSignature;
+    String _listSignature() {
+        String sig = String(_cols) + (_editMode ? "|E" : "|-") + "|" + String(_tickerCount);
+        for (int i = 0; i < _tickerCount; i++) {
+            sig += "|"; sig += _tickers[i].pool_address;
+            if (_tickers[i].is_expanded) sig += "*";
+        }
+        return sig;
+    }
+
     TickerEntry      _tickers[TICKER_MAX];
     int              _tickerCount = 0;
 
@@ -470,6 +495,13 @@ private:
 
     SearchResultEntry _searchResults[12];
     int               _searchResultCount = 0;
+
+    // "Pick" mode: the same search dialog, but on selection it invokes a caller
+    // callback (used by the Ticker Stats screen to choose its pool) instead of
+    // adding a ticker to this node.
+    bool  _pickMode = false;
+    void (*_pickResultCb)(void*, const SearchResultEntry&) = nullptr;
+    void*  _pickResultUd = nullptr;
 
     // FreeRTOS async task. `volatile` because it's written by the bg task on
     // core 0 (self-clearing on exit) and read by the UI on core 1.
@@ -586,6 +618,9 @@ private:
         // and expects to find the screen exactly there on return).
         lv_obj_update_layout(_body);
         lv_obj_scroll_to_y(_body, _savedScrollY, LV_ANIM_OFF);
+
+        // Remember what we just built so a same-list reload can skip the rebuild.
+        _builtSignature = _listSignature();
     }
 
     void _buildCard(int idx) {
@@ -650,6 +685,14 @@ private:
         TickerEntry& t = _tickers[idx];
         CardWidgets& w = _cards[idx];
         if (!t.logo_ready || t.logo_applied || !w.symBg) return;
+        // Idempotent: if this card already has a logo image (e.g. a same-list
+        // reload reset logo_applied but kept the widget), refresh its source
+        // instead of stacking a SECOND lv_img on the circle.
+        if (w.logoImg) {
+            lv_img_set_src(w.logoImg, &t.logo_dsc);
+            t.logo_applied = true;
+            return;
+        }
         w.logoImg = lv_img_create(w.symBg);
         lv_img_set_src(w.logoImg, &t.logo_dsc);
         lv_obj_center(w.logoImg);
@@ -1176,7 +1219,7 @@ private:
         lv_obj_set_style_pad_all(dlgHeader, 0, 0);
 
         lv_obj_t* dlgTitle = lv_label_create(dlgHeader);
-        lv_label_set_text(dlgTitle, "Add Ticker");
+        lv_label_set_text(dlgTitle, _pickMode ? "Select Ticker" : "Add Ticker");
         lv_obj_set_style_text_font(dlgTitle, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(dlgTitle, lv_color_hex(CLR_TEXT), 0);
         lv_obj_align(dlgTitle, LV_ALIGN_LEFT_MID, 0, 0);
@@ -1304,6 +1347,7 @@ private:
             _searchResultsCont= nullptr;
             _searchSpinner    = nullptr;
         }
+        _pickMode = false;   // leave pick mode when the dialog closes (X or select)
     }
 
     // ── Async task dispatcher ─────────────────────────────────────────────────
@@ -2299,6 +2343,15 @@ private:
         lv_obj_t* obj = lv_event_get_current_target(e);   // the row the cb is on, not a child label
         int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
         if (!self || idx < 0 || idx >= self->_searchResultCount) return;
+        // Pick mode: hand the chosen entry to the caller, don't add a ticker.
+        if (self->_pickMode) {
+            SearchResultEntry chosen = self->_searchResults[idx];
+            void (*cb)(void*, const SearchResultEntry&) = self->_pickResultCb;
+            void* ud = self->_pickResultUd;
+            self->_closeSearchDialog();   // resets _pickMode
+            if (cb) cb(ud, chosen);
+            return;
+        }
         self->_closeSearchDialog();
         self->_dispatchAdd(idx);
     }
@@ -2455,11 +2508,30 @@ public:
         self->_pending.type = PR_NONE;   // consume
 
         switch (type) {
-            case PR_LIST_LOADED:
+            case PR_LIST_LOADED: {
                 self->_loadedOnce = true;   // real data has arrived at least once
                 lv_obj_add_flag(self->_spinner, LV_OBJ_FLAG_HIDDEN);
-                self->_rebuildTickerCards();
+                // Only rebuild the card tree when the list actually changed
+                // (pools/order/cols/edit/expand). An unchanged reload reuses the
+                // existing widgets — the bg task already carried over each pool's
+                // cached price/chart/logo, and fresh values arrive via the
+                // live_dirty/chart_dirty loops above. This is what stops the
+                // right-side mini charts from flashing on every periodic reload.
+                bool sameLayout = self->_cards[0].container != nullptr &&
+                                  self->_listSignature() == self->_builtSignature;
+                if (sameLayout) {
+                    for (int i = 0; i < self->_tickerCount; i++) {
+                        // Don't let the re-attach loop add a SECOND logo image to
+                        // a card that already shows one; still allow a brand-new
+                        // logo to attach.
+                        self->_tickers[i].logo_applied = (self->_cards[i].logoImg != nullptr);
+                        if (self->_tickers[i].chart_loaded) self->_updateChartData(i);
+                    }
+                } else {
+                    self->_rebuildTickerCards();
+                }
                 break;
+            }
             case PR_LIVE_LOADED:
                 if (tidx >= 0 && tidx < self->_tickerCount) {
                     self->_updateFdvLabel(tidx);

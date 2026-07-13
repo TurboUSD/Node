@@ -244,4 +244,17 @@ inline void init() {
 // Call every loop() pass while connected.
 inline void poll() { if (s_srv) s_srv->handleClient(); }
 
+// Re-announce mDNS. The responder is bound to the network interface, so after a
+// WiFi disconnect + reconnect it silently stops answering (turbousd.local dies)
+// until it's begun again. The loop calls this on every fresh (re)connection so the
+// fixed name ALWAYS resolves — this was the "worked on boot, dead after a WiFi blip"
+// bug: mDNS was only started once, never re-registered on reconnect.
+inline void restartMdns() {
+    MDNS.end();
+    if (MDNS.begin("turbousd")) {
+        MDNS.addService("http", "tcp", 80);
+        Log.println("mDNS: re-announced http://turbousd.local/ (logs: /logs)");
+    }
+}
+
 } // namespace screenshot

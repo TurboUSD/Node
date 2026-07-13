@@ -371,7 +371,9 @@ void loop() {
 
     wifiManager.checkConnection(); // reconnect if dropped post-boot
 
+    static bool wifiWasUp = false;
     if (!wifiManager.isConnected()) {
+        wifiWasUp = false;   // mark down so mDNS is re-announced on the next connect
         delay(500);
         return;
     }
@@ -379,6 +381,13 @@ void loop() {
     // Screenshot server: lazy-started on the first connected pass (the
     // provisioning portal owns port 80 in AP mode, never simultaneously).
     if (!screenshot::started()) screenshot::init();
+    // mDNS stops answering after a WiFi reconnect (the responder is bound to the
+    // old interface), so re-announce it on every fresh connection — otherwise
+    // turbousd.local works on a fresh boot and dies after the first WiFi blip.
+    if (!wifiWasUp) {
+        wifiWasUp = true;
+        screenshot::restartMdns();
+    }
     screenshot::poll();
 
     uint32_t now = millis();
@@ -421,13 +430,16 @@ void loop() {
         lastHeartbeatAt = now;
     }
 
-    if (lastTreasuryRefreshAt == 0 || now - lastTreasuryRefreshAt > TREASURY_DATA_REFRESH_MS) {
-        TreasuryData data = apiClient.fetchTreasuryData();
-        if (data.valid) uiManager.updateTreasuryData(data);
-        // Live price from DexScreener/GeckoTerminal — works even if the treasury
-        // service is down, and overrides its (possibly stale) price.
-        double price = apiClient.fetchTusdPrice();
-        if (price > 0) uiManager.updateTusdPrice(price);
+    // Ticker Stats: the backend ticker-stats function computes the display
+    // fields for whichever pool the node has selected (₸USD by default) — the
+    // device just paints them. Refetch on the periodic window OR immediately
+    // after a device-side ticker pick (tickerStatsConsumeDirty).
+    if (lastTreasuryRefreshAt == 0 || now - lastTreasuryRefreshAt > TREASURY_DATA_REFRESH_MS
+        || uiManager.tickerStatsConsumeDirty()) {
+        TickerStats ts = apiClient.fetchTickerStats(storage.getTickerStatsChain(),
+                                                    storage.getTickerStatsPool(),
+                                                    storage.getTickerStatsSymbol());
+        if (ts.valid) uiManager.updateTickerStats(ts);
         lastTreasuryRefreshAt = now;
     }
 
@@ -453,10 +465,13 @@ void loop() {
     }
 
     if (lastOhlcvRefreshAt == 0 || now - lastOhlcvRefreshAt > OHLCV_CHART_REFRESH_MS
-        || uiManager.turboTfConsumeDirty()) {   // 1D/1W/1M dropdown changed
+        || uiManager.turboTfConsumeDirty()) {   // 1D/1W/1M dropdown OR ticker changed
         OhlcvCandle candles[26];
+        String tsPool  = storage.getTickerStatsPool();
+        String tsChain = storage.getTickerStatsChain();
         int count = apiClient.fetchOhlcvHistory(candles, uiManager.turboBars(),
-                                                uiManager.turboGroupDays());
+                                                uiManager.turboGroupDays(),
+                                                tsPool.c_str(), tsChain.c_str());
         if (count > 0) uiManager.loadOhlcvChart(candles, count);
         lastOhlcvRefreshAt = now;
     }
@@ -489,13 +504,13 @@ void loop() {
         && (lastOtaCheckAt == 0 || now - lastOtaCheckAt > OTA_CHECK_INTERVAL_MS))
     {
         lastOtaCheckAt = now;
-        String ver, url, sha;
-        if (otaUpdater.checkNewVersion(ver, url, sha)) {
+        String ver, url, sha, notes;
+        if (otaUpdater.checkNewVersion(ver, url, sha, notes)) {
             pendingOtaVersion = ver;
             pendingOtaUrl     = url;
             pendingOtaSha256  = sha;
             // Show a persistent badge on all screens; user can dismiss or install.
-            uiManager.showOtaBadge(ver.c_str());
+            uiManager.showOtaBadge(ver.c_str(), notes.c_str());
         }
     }
 
@@ -504,12 +519,12 @@ void loop() {
     // newer image exists, or an "up to date" bar otherwise.
     if (uiManager.otaCheckRequested) {
         uiManager.otaCheckRequested = false;
-        String ver, url, sha;
-        if (otaUpdater.checkNewVersion(ver, url, sha)) {
+        String ver, url, sha, notes;
+        if (otaUpdater.checkNewVersion(ver, url, sha, notes)) {
             pendingOtaVersion = ver;
             pendingOtaUrl     = url;
             pendingOtaSha256  = sha;
-            uiManager.showOtaBadge(ver.c_str());
+            uiManager.showOtaBadge(ver.c_str(), notes.c_str());
         } else {
             uiManager.showOtaInfo("Firmware is up to date");
         }

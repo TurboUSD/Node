@@ -87,6 +87,17 @@ create table if not exists nodes (
 alter table nodes add column if not exists screen_carousel      boolean  default false;
 alter table nodes add column if not exists screen_carousel_secs smallint default 10;
 
+-- Ticker Stats screen (formerly "TurboUSD Stats"): which single ticker the screen
+-- shows detailed stats for. Defaults to ₸USD. A footer button on-device and a web
+-- setting change it; the value is a DEX pool (chain + pool address) like node_tickers.
+alter table nodes add column if not exists ticker_stats_pool   text default '0xd013725b904e76394A3aB0334Da306C505D778F8';
+alter table nodes add column if not exists ticker_stats_chain  text default 'base';
+alter table nodes add column if not exists ticker_stats_symbol text default 'TUSD';
+
+-- Home (first screen) background image. When set, the device paints it behind
+-- the clock and draws a shadow panel behind the clock/alarm box for legibility.
+alter table nodes add column if not exists home_bg_url text;
+
 -- Verification submissions (written by the submit-verification function; the
 -- owner sends their X post + wallet, a human reviews and flips is_verified).
 -- These were referenced by the function but never declared — without them the
@@ -100,6 +111,21 @@ alter table nodes add column if not exists verification_notified       boolean d
 -- Written by the AMI bot's verify button when it flips is_verified.
 alter table nodes add column if not exists verified_at                 timestamptz;
 alter table nodes add column if not exists verified_by                 text;
+
+-- Append-only history of every verification post an owner has submitted. The
+-- nodes.verification_tweet_url column only keeps the LATEST link (each submit
+-- overwrites it); this table keeps them ALL — an owner may re-submit a different
+-- post on another day (first one wrong, etc.), and you want every link reviewable.
+-- Admin/service-role only: NOT granted to anon, so it's never in the public API.
+create table if not exists node_verification_submissions (
+  id             uuid primary key default gen_random_uuid(),
+  node_id        uuid references nodes(id) on delete cascade,
+  node_code      text not null,
+  tweet_url      text not null,
+  wallet_address text,
+  submitted_at   timestamptz not null default now()
+);
+create index if not exists idx_nvs_node_code on node_verification_submissions (node_code, submitted_at desc);
 
 -- Running reward + activity totals per node (upserted by mine-block).
 create table if not exists node_reward_balances (

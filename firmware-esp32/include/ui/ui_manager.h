@@ -110,6 +110,7 @@ public:
         updateClockIfNeeded();
         _checkScreenTimeout();
         _checkScreenCarousel();
+        _pollHomeBg();
     }
 
     // Set backlight brightness level 1–5 immediately via LEDC PWM.
@@ -220,8 +221,10 @@ public:
     // Called by main.cpp when the nightly OTA check finds a newer version.
     // Creates a small persistent badge at the bottom of the screen. Tapping
     // it opens a confirm dialog; on confirm, onOtaInstallConfirmed is called.
-    void showOtaBadge(const char* version) {
+    void showOtaBadge(const char* version, const char* notes = "") {
         clearOtaBadge(); // remove any existing one first
+        strncpy(_otaNotes, notes ? notes : "", sizeof(_otaNotes) - 1);
+        _otaNotes[sizeof(_otaNotes) - 1] = '\0';
 
         _otaBadge = lv_obj_create(lv_layer_top()); // layer_top() floats over all screens
         lv_obj_set_size(_otaBadge, LV_PCT(100), 42);
@@ -309,9 +312,9 @@ public:
         lastMiningFeedFetch = millis() - MINING_FEED_REFRESH_MS + 3000;
     }
 
-    void updateTreasuryData(const TreasuryData& data) {
-        latestTreasury = data;
-        turboScreen.updateData(data);
+    // Backend-computed stats for the selected ticker → painted generically.
+    void updateTickerStats(const TickerStats& s) {
+        turboScreen.applyStats(s);
     }
 
     void loadOhlcvChart(OhlcvCandle* candles, int count) {
@@ -327,18 +330,36 @@ public:
         turboScreen.tfDirty = false;
         return true;
     }
+    // True (once) right after the Ticker Stats selection changed on-device, so
+    // main.cpp refetches the stats + chart immediately instead of waiting for
+    // the periodic window.
+    bool tickerStatsConsumeDirty() {
+        if (!_tickerStatsDirty) return false;
+        _tickerStatsDirty = false;
+        return true;
+    }
+
+    // Footer picker on the Ticker Stats screen: open the Token Screener's search
+    // dialog in "pick" mode; on selection, persist the choice + trigger a refetch.
+    static void _onStatsTickerPick(void* ud) {
+        UiManager* self = (UiManager*)ud;
+        if (self) self->tickerScreen.openPickDialog(_onStatsTickerPicked, self);
+    }
+    static void _onStatsTickerPicked(void* ud, const SearchResultEntry& e) {
+        UiManager* self = (UiManager*)ud;
+        if (!self) return;
+        storage.setTickerStatsPool(e.pair_address);
+        storage.setTickerStatsChain(e.chain_id);
+        storage.setTickerStatsSymbol(e.base_symbol);
+        self->_tickerStatsDirty     = true;   // stats refetch now (main.cpp)
+        self->turboScreen.tfDirty   = true;   // chart refetch for the new pool
+    }
 
     // Retry hook for main.cpp: true once the debt chart has real data.
     bool debtHistLoaded() const { return _debtHistLoaded; }
     void retryDebtHistory() {
         static const int yearValues[] = {5, 10, 20, 30, 50, 75};
         reloadDebtHistory(yearValues[debtYearsRangeIndex % 6]);
-    }
-
-    // Live TUSD price from DexScreener/GeckoTerminal (independent of the
-    // treasury service, which may be down / not deployed).
-    void updateTusdPrice(double priceUsd) {
-        turboScreen.updatePrice(priceUsd);
     }
 
     void updateDebtData(const DebtData& data) {
@@ -563,9 +584,9 @@ private:
     TickerScreen tickerScreen;
     NftScreen    nftScreen;
 
-    TreasuryData latestTreasury;
     DebtData latestDebt;
     uint32_t lastMiningFeedFetch = 0;
+    bool _tickerStatsDirty = false;   // set on device-side ticker pick → main.cpp refetches now
 
     esp_lcd_panel_handle_t _lcdPanel = nullptr;
     lv_obj_t* _otaBadge = nullptr;
@@ -597,6 +618,85 @@ private:
     lv_obj_t* clockWeatherLabel = nullptr;  // "23° · 48%" line on the Home screen
     uint32_t lastClockRedrawSecond = 255;
     SharedFooterRefs clockFooterRefs;
+
+    // ── Home background image (web-set) + legibility shadow ─────────────────
+    lv_obj_t*    _homeBgImg   = nullptr;
+    lv_obj_t*    _homeShadow  = nullptr;
+    lv_img_dsc_t _homeBgDsc   = {};
+    uint8_t*     _homeBgPx    = nullptr;   // live bitmap (freed on replace)
+    uint8_t*     _homeBgNewPx = nullptr;   // bg task → UI handoff
+    uint16_t     _homeBgW = 0, _homeBgH = 0;
+    char         _homeBgAppliedUrl[400] = {};   // URL currently shown ("" = none)
+    char         _homeBgWantUrl[400]    = {};   // URL to fetch next
+    volatile bool _homeBgReady = false;
+    volatile TaskHandle_t _homeBgTask = nullptr;
+    uint32_t     _homeBgNextTry = 0;            // retry gate after a failed fetch
+
+    // Runs every loop tick: applies a decoded background, notices a URL change
+    // from the config sync, and spawns the download on a bg task (core 0).
+    void _pollHomeBg() {
+        if (!_homeBgImg) return;
+
+        if (_homeBgReady) {
+            _homeBgReady = false;
+            if (_homeBgNewPx) {
+                if (_homeBgPx && _homeBgPx != _homeBgNewPx) free(_homeBgPx);
+                _homeBgPx = _homeBgNewPx; _homeBgNewPx = nullptr;
+                _homeBgDsc.header.always_zero = 0;
+                _homeBgDsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+                _homeBgDsc.header.w  = _homeBgW;
+                _homeBgDsc.header.h  = _homeBgH;
+                _homeBgDsc.data_size = (uint32_t)_homeBgW * _homeBgH * 2;
+                _homeBgDsc.data      = _homeBgPx;
+                lv_img_set_src(_homeBgImg, &_homeBgDsc);
+                lv_obj_align(_homeBgImg, LV_ALIGN_CENTER, 0, 0);
+                lv_obj_clear_flag(_homeBgImg, LV_OBJ_FLAG_HIDDEN);
+                if (_homeShadow) lv_obj_clear_flag(_homeShadow, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+
+        // React to a URL change pushed down by the heartbeat config sync.
+        String url = storage.getHomeBgUrl();
+        if (url != _homeBgAppliedUrl && url != _homeBgWantUrl) {
+            if (url.length() == 0) {   // cleared on the web → hide bg + shadow
+                _homeBgAppliedUrl[0] = '\0';
+                _homeBgWantUrl[0]    = '\0';
+                lv_obj_add_flag(_homeBgImg, LV_OBJ_FLAG_HIDDEN);
+                if (_homeShadow) lv_obj_add_flag(_homeShadow, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                strncpy(_homeBgWantUrl, url.c_str(), sizeof(_homeBgWantUrl) - 1);
+                _homeBgNextTry = 0;   // fetch asap
+            }
+        }
+
+        if (_homeBgWantUrl[0] && strcmp(_homeBgWantUrl, _homeBgAppliedUrl) != 0 &&
+            !_homeBgTask && g_displayAwake() && netTlsRamOk() && millis() >= _homeBgNextTry) {
+            _homeBgNextTry = millis() + 30000;   // if the fetch fails, retry in 30 s
+            xTaskCreatePinnedToCore(_homeBgTaskFn, "home_bg", 6144, this, 1,
+                                    (TaskHandle_t*)&_homeBgTask, 0);
+        }
+    }
+
+    static void _homeBgTaskFn(void* arg) {
+        UiManager* self = (UiManager*)arg;
+        if (!self) { vTaskDelete(nullptr); return; }
+        char url[400];
+        strncpy(url, self->_homeBgWantUrl, sizeof(url) - 1); url[sizeof(url) - 1] = '\0';
+        if (netWaitTlsRam(3000)) { /* headroom */ }
+        netLock();
+        uint16_t w = 0, h = 0;
+        // Fit within the 480×480 home area; 1:1 images fill it edge to edge.
+        uint8_t* px = imgdec::fetchRgb565(url, 480, 480, "homebg", url, &w, &h);
+        netUnlock();
+        if (px) {
+            self->_homeBgNewPx = px;
+            self->_homeBgW = w; self->_homeBgH = h;
+            strncpy(self->_homeBgAppliedUrl, url, sizeof(self->_homeBgAppliedUrl) - 1);
+            self->_homeBgReady = true;   // _pollHomeBg applies on core 1
+        }
+        self->_homeBgTask = nullptr;
+        vTaskDelete(nullptr);
+    }
 
     // Ambient readings from the AHT20 on the RP2040 (polled over UART in the
     // main loop). _sensorValid is false until the first good read, or whenever
@@ -1132,6 +1232,8 @@ private:
         turboScreen.build(screens[(int)ScreenId::TURBO_STATS], onLogoTapped, onDateTapped, onQrTapped, this);
         _wireAlarmIcon(turboScreen.header);
         _wireFooterNav(turboScreen.footer);
+        turboScreen.setPickHandler(_onStatsTickerPick, this);   // footer picker → ticker search
+        lv_timer_create(TurboScreen::pollLogo, 200, &turboScreen);
 
         screens[(int)ScreenId::DEBT] = lv_obj_create(nullptr);
         lv_obj_set_style_bg_color(screens[(int)ScreenId::DEBT], lv_color_black(), 0);
@@ -1228,6 +1330,32 @@ private:
     lv_obj_t* buildClockScreen() {
         lv_obj_t* scr = lv_obj_create(nullptr);
         lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+
+        // Optional home background image + a translucent shadow behind the
+        // clock/alarm cluster so text stays legible over a busy image. Created
+        // FIRST so they sit BEHIND the clock widgets (z-order = creation order).
+        // Both hidden until a background URL is set and downloaded (_pollHomeBg).
+        _homeBgImg = lv_img_create(scr);
+        lv_obj_set_size(_homeBgImg, 480, 480);
+        lv_obj_align(_homeBgImg, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_clear_flag(_homeBgImg, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(_homeBgImg, LV_OBJ_FLAG_HIDDEN);
+
+        _homeShadow = lv_obj_create(scr);
+        lv_obj_set_size(_homeShadow, 320, 240);
+        lv_obj_align(_homeShadow, LV_ALIGN_CENTER, 0, -6);
+        lv_obj_set_style_bg_color(_homeShadow, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(_homeShadow, LV_OPA_50, 0);
+        lv_obj_set_style_border_width(_homeShadow, 0, 0);
+        lv_obj_set_style_radius(_homeShadow, 26, 0);
+        lv_obj_set_style_pad_all(_homeShadow, 0, 0);
+        // Soft glow so the panel fades into the image instead of a hard box edge.
+        lv_obj_set_style_shadow_color(_homeShadow, lv_color_black(), 0);
+        lv_obj_set_style_shadow_width(_homeShadow, 48, 0);
+        lv_obj_set_style_shadow_opa(_homeShadow, LV_OPA_70, 0);
+        lv_obj_clear_flag(_homeShadow, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(_homeShadow, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(_homeShadow, LV_OBJ_FLAG_HIDDEN);
 
         LV_IMG_DECLARE(turbousd_logo);
         lv_obj_t* logo = lv_img_create(scr);
@@ -1449,6 +1577,32 @@ private:
         static lv_obj_t* sCard; sCard = card;
         static UiManager* sSelf; sSelf = self;
 
+        // "What's new" link BELOW the buttons — opens the changelog for this
+        // release (from the OTA metadata) with a BACK button that returns here.
+        lv_obj_t* whatsNew = lv_label_create(card);
+        lv_label_set_text(whatsNew, LV_SYMBOL_LIST "  What's new");
+        lv_obj_set_style_text_color(whatsNew, lv_color_hex(0x6ea8ff), 0);
+        lv_obj_set_style_text_font(whatsNew, &lv_font_montserrat_12, 0);
+        lv_obj_add_flag(whatsNew, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(whatsNew, 10);
+        lv_obj_add_event_cb(whatsNew, [](lv_event_t*) {
+            lv_obj_t* nc = openModal(lv_layer_top());
+            lv_obj_t* nt = lv_label_create(nc);
+            lv_label_set_text(nt, "WHAT'S NEW");
+            lv_obj_set_style_text_color(nt, lv_color_hex(0x3aff7a), 0);
+            lv_obj_t* nb = lv_label_create(nc);
+            lv_label_set_long_mode(nb, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(nb, 280);
+            lv_label_set_text(nb, sSelf->_otaNotes[0] ? sSelf->_otaNotes
+                                                      : "No changelog provided for this version.");
+            lv_obj_set_style_text_color(nb, lv_color_hex(0xc4c4cc), 0);
+            lv_obj_set_style_text_font(nb, &lv_font_montserrat_12, 0);
+            lv_obj_t* backBtn = addModalButton(nc, "BACK", true);
+            static lv_obj_t* sNotesCard; sNotesCard = nc;
+            lv_obj_add_event_cb(backBtn, [](lv_event_t*) { closeModal(sNotesCard); },
+                                LV_EVENT_CLICKED, nullptr);
+        }, LV_EVENT_CLICKED, nullptr);
+
         lv_obj_add_event_cb(cancelBtn, [](lv_event_t*) {
             closeModal(sCard);
         }, LV_EVENT_CLICKED, nullptr);
@@ -1487,6 +1641,8 @@ private:
 public:
     // Splash shown while the OTA image downloads (see the install button above).
     lv_obj_t* _otaSplash = nullptr;
+    // Changelog for the pending OTA release (shown by the dialog's "What's new").
+    char _otaNotes[512] = {};
     // Set by the install button; consumed in loop() to paint the splash before
     // the blocking download (the button can't paint — it runs inside the handler).
     bool _otaInstallPending = false;
@@ -1864,16 +2020,12 @@ private:
         lv_obj_set_style_text_align(btnInfo, LV_TEXT_ALIGN_CENTER, 0);
 
         // Diagnostics over WiFi (screen mirror + live logs) — at the very bottom.
-        // Works even when the USB serial console is unavailable. Shows the
-        // mDNS name and the raw IP (Android can't resolve .local → use the IP).
+        // Works even when the USB serial console is unavailable. mDNS is now
+        // re-announced on every WiFi (re)connect (see loop()), so the fixed
+        // turbousd.local name always resolves — we no longer show the raw IP
+        // (it changed on every DHCP lease and just added confusion).
         lv_obj_t* diagInfo = lv_label_create(card);
-        {
-            String ip = WiFi.localIP().toString();
-            String s = String("Logs & screen (same WiFi):\n")
-                     + "http://turbousd.local/logs\n"
-                     + "http://" + ip + "/logs";
-            lv_label_set_text(diagInfo, s.c_str());
-        }
+        lv_label_set_text(diagInfo, "Logs & screen (same WiFi):\nhttp://turbousd.local/logs");
         // Same muted tone as the URL under the QR (was bright green, which drew
         // the eye more than the setup URL above it).
         lv_obj_set_style_text_color(diagInfo, lv_color_hex(0x9a9a9e), 0);

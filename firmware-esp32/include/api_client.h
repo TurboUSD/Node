@@ -47,6 +47,24 @@ struct OhlcvCandle {
     double close = 0;
 };
 
+// Generic per-ticker stats for the "Ticker Stats" screen. The backend
+// ticker-stats edge function pre-formats every field into a display string so
+// the device just paints them into its 2×2 grid (up to 4 cells). circSupply,
+// when > 0, lets the device label the chart Y-axis as MARKET CAP.
+struct TickerStatField {
+    char label[16] = {};
+    char value[24] = {};
+};
+struct TickerStats {
+    char symbol[16]  = {};
+    char name[28]    = {};
+    char logoUrl[160] = {};   // DexScreener info.imageUrl (empty = no logo)
+    TickerStatField fields[4];
+    int  count       = 0;
+    double circSupply = 0;
+    bool valid       = false;
+};
+
 struct MiningFeedEntry {
     long blockNumber = 0;
     double rewardTusd = 0;
@@ -233,6 +251,13 @@ public:
             reqDoc["screen_carousel"]      = storage.getScreenCarousel();
             reqDoc["screen_carousel_secs"] = storage.getScreenCarouselSecs();
         }
+        // Ticker Stats selection changed ON THE DEVICE (footer picker) → push up.
+        bool tickerStatsWasDirty = storage.getTickerStatsDirty();
+        if (tickerStatsWasDirty) {
+            reqDoc["ticker_stats_pool"]   = storage.getTickerStatsPool();
+            reqDoc["ticker_stats_chain"]  = storage.getTickerStatsChain();
+            reqDoc["ticker_stats_symbol"] = storage.getTickerStatsSymbol();
+        }
 
         // Detected collections list changed → report it (feeds the web board).
         bool collsWereDirty = storage.getNftCollsDirty();
@@ -261,7 +286,8 @@ public:
             if (!cfg.isNull()) {
                 applyServerConfig(cfg, /*skipAlarm=*/alarmWasDirty,
                                   /*skipNftLists=*/nftListsWereDirty,
-                                  /*skipCarousel=*/carouselWasDirty);
+                                  /*skipCarousel=*/carouselWasDirty,
+                                  /*skipTickerStats=*/tickerStatsWasDirty);
             }
         }
         http.end();
@@ -269,6 +295,7 @@ public:
         if (nftListsWereDirty) storage.setNftListsDirty(false);
         if (collsWereDirty)    storage.setNftCollsDirty(false);
         if (carouselWasDirty)  storage.clearScreenCarouselDirty();
+        if (tickerStatsWasDirty) storage.clearTickerStatsDirty();
         return true;
     }
 
@@ -357,6 +384,39 @@ public:
         return result;
     }
 
+    // Generic per-ticker stats for the Ticker Stats screen. Calls the backend
+    // ticker-stats edge function (which owns all the per-token logic: ₸USD →
+    // treasury service, DRB/custom → its own source, everything else → a basic
+    // DexScreener read) and returns pre-formatted display fields. The device
+    // just paints them — no per-token knowledge lives here.
+    TickerStats fetchTickerStats(const String& chain, const String& pool, const String& symbol) {
+        TickerStats out;
+        if (!pool.length()) return out;
+        String url = String(ENDPOINT_TICKER_STATS) + "?chain=" + chain + "&pool=" + pool + "&symbol=" + symbol;
+        size_t len = 0;
+        uint8_t* body = _httpGetBody(url.c_str(), 12000, &len, /*auth=*/true);
+        if (!body) { Log.println("fetchTickerStats: fetch failed"); return out; }
+
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, body, len);
+        free(body);
+        if (err) { Log.printf("fetchTickerStats parse error: %s\n", err.c_str()); return out; }
+        if (!doc["fields"].is<JsonArray>()) { Log.println("fetchTickerStats: no fields"); return out; }
+
+        strncpy(out.symbol,  doc["symbol"]  | symbol.c_str(), sizeof(out.symbol)  - 1);
+        strncpy(out.name,    doc["name"]    | "",             sizeof(out.name)    - 1);
+        strncpy(out.logoUrl, doc["logoUrl"] | "",             sizeof(out.logoUrl) - 1);
+        out.circSupply = doc["circSupply"] | 0.0;
+        for (JsonObject f : doc["fields"].as<JsonArray>()) {
+            if (out.count >= 4) break;
+            strncpy(out.fields[out.count].label, f["label"] | "", sizeof(out.fields[0].label) - 1);
+            strncpy(out.fields[out.count].value, f["value"] | "", sizeof(out.fields[0].value) - 1);
+            out.count++;
+        }
+        out.valid = out.count > 0;
+        return out;
+    }
+
     // Live TUSD price in USD from a DEX aggregator: DexScreener first, then
     // GeckoTerminal as a fallback. Cached for TUSD_PRICE_CACHE_MS to avoid rate
     // limits; on total failure returns the last good value (0 if never fetched).
@@ -437,8 +497,29 @@ public:
     // groupDays: 1 = daily, 7 = weekly (default; served by our Supabase
     // cache), 30 = monthly. Non-weekly goes straight to GeckoTerminal with
     // client-side aggregation — the cache only stores weekly candles.
-    int fetchOhlcvHistory(OhlcvCandle* outCandles, int maxCandles, int groupDays = 7) {
-        if (groupDays != 7) return _fetchOhlcvGecko(outCandles, maxCandles, groupDays);
+    // DexScreener chain_id → GeckoTerminal network slug (they differ for some
+    // chains). Anything unlisted (base, solana, avax…) passes through unchanged.
+    static String _chainToGT(const String& chainId) {
+        if (chainId == "ethereum") return "eth";
+        if (chainId == "bsc")      return "bsc";
+        if (chainId == "polygon")  return "polygon_pos";
+        if (chainId == "arbitrum") return "arbitrum";
+        if (chainId == "optimism") return "optimism";
+        return chainId;
+    }
+
+    // Weekly OHLCV. For ₸USD (default pool) the Supabase cache is used when
+    // available; any OTHER pool — or a non-weekly grouping — goes straight to
+    // GeckoTerminal with the given chain+pool. pool/chain default to ₸USD so
+    // existing callers keep working unchanged.
+    int fetchOhlcvHistory(OhlcvCandle* outCandles, int maxCandles, int groupDays = 7,
+                          const char* pool = TUSD_POOL_ADDR, const char* chain = TUSD_CHAIN_SLUG) {
+        bool isTusd = (strcasecmp(pool, TUSD_POOL_ADDR) == 0);
+        // Only ₸USD weekly candles live in our Supabase cache. Everything else
+        // (custom/generic tickers, or non-weekly TF) comes from GeckoTerminal.
+        if (groupDays != 7 || !isTusd)
+            return _fetchOhlcvGecko(outCandles, maxCandles, groupDays, _chainToGT(chain).c_str(), pool);
+
         // auth=true → the Supabase Edge Function needs the anon key headers.
         size_t len = 0;
         uint8_t* body = _httpGetBody(ENDPOINT_OHLCV_HISTORY, 8000, &len, /*auth=*/true);
@@ -464,19 +545,21 @@ public:
         // sync never ran → HTTP 500, table empty…). Pull weekly candles for
         // the TUSD pool straight from GeckoTerminal so the chart still works.
         // Free tier returns ~6 months of history — same limit the cache has.
-        return _fetchOhlcvGecko(outCandles, maxCandles, 7);
+        return _fetchOhlcvGecko(outCandles, maxCandles, 7, TUSD_CHAIN_SLUG, TUSD_POOL_ADDR);
     }
 
-    // GeckoTerminal weekly OHLCV for the TUSD pool. GT's OHLCV endpoint only
+    // GeckoTerminal OHLCV for an arbitrary pool. GT's OHLCV endpoint only
     // accepts day/hour/minute timeframes (NOT week — it returns HTTP 400,
     // which is why this fallback used to yield an empty chart), so we fetch
-    // DAILY candles and aggregate 7 days per weekly candle here. ohlcv_list
+    // DAILY candles and aggregate `groupDays` days per candle here. ohlcv_list
     // rows are [ts, open, high, low, close, volume], NEWEST first.
-    int _fetchOhlcvGecko(OhlcvCandle* outCandles, int maxCandles, int groupDays) {
+    // gtChain must already be a GeckoTerminal slug (see _chainToGT).
+    int _fetchOhlcvGecko(OhlcvCandle* outCandles, int maxCandles, int groupDays,
+                         const char* gtChain = TUSD_CHAIN_SLUG, const char* pool = TUSD_POOL_ADDR) {
         HTTPClient http;
         http.useHTTP10(true);   // see header note
-        http.begin(String(ENDPOINT_GECKOTERMINAL_OHLCV) + TUSD_CHAIN_SLUG +
-                   "/pools/" + TUSD_POOL_ADDR +
+        http.begin(String(ENDPOINT_GECKOTERMINAL_OHLCV) + gtChain +
+                   "/pools/" + pool +
                    "/ohlcv/day?aggregate=1&limit=" + String(maxCandles * groupDays) + "&currency=usd&token=base");
         http.setTimeout(12000);
         http.addHeader("Accept", "application/json");
@@ -653,7 +736,7 @@ private:
     // skipAlarm: true while a device-side alarm change is being pushed up —
     // the server copy is (at best) what we just sent, and applying it back
     // could race/revert the local value.
-    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false, bool skipNftLists = false, bool skipCarousel = false) {
+    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false, bool skipNftLists = false, bool skipCarousel = false, bool skipTickerStats = false) {
         // Node identity (Node & Network screen headline)
         if (!cfg["display_name"].isNull())      storage.setDisplayName(cfg["display_name"].as<String>());
         if (!cfg["is_verified"].isNull())       storage.setIsVerified(cfg["is_verified"].as<bool>());
@@ -734,6 +817,16 @@ private:
             if (carChanged) storage.clearScreenCarouselDirty();
         }
 
+        // Ticker Stats selection (which pool the Ticker Stats screen shows).
+        // Skipped while a device-side pick is in flight so we don't clobber it.
+        if (!skipTickerStats) {
+            String tp   = cfg["ticker_stats_pool"].isNull()   ? "" : cfg["ticker_stats_pool"].as<String>();
+            String tc   = cfg["ticker_stats_chain"].isNull()  ? "" : cfg["ticker_stats_chain"].as<String>();
+            String tsym = cfg["ticker_stats_symbol"].isNull() ? "" : cfg["ticker_stats_symbol"].as<String>();
+            if (tp.length() || tc.length() || tsym.length())
+                storage.applyTickerStatsFromServer(tp, tc, tsym);
+        }
+
         // NFT Gallery settings
         if (!cfg["nft_wallet_address"].isNull()) storage.setNftWallet(cfg["nft_wallet_address"].as<String>());
         if (!cfg["nft_grid_size"].isNull())      storage.setNftGridSize(cfg["nft_grid_size"].as<uint8_t>());
@@ -749,6 +842,13 @@ private:
             String pl = cfg["nft_pinlist"].as<String>();
             Log.printf("CFG nft_pinlist from server: '%s'\n", pl.c_str());
             storage.setNftPinlist(pl);
+        }
+
+        // Home screen background image URL (web-set; server sends null to clear).
+        // Written only on change to avoid flash wear from the periodic heartbeat.
+        {
+            String hbg = cfg["home_bg_url"].isNull() ? String("") : cfg["home_bg_url"].as<String>();
+            if (hbg != storage.getHomeBgUrl()) storage.setHomeBgUrl(hbg);
         }
 
         // Screen order

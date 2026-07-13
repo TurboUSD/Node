@@ -86,12 +86,21 @@ async function handle(req: Request): Promise<Response> {
       // is_verified intentionally left untouched here -- a human reviews it next.
     })
     .eq('node_code', nodeCode)
-    .select('node_code, is_verified')
+    .select('id, node_code, is_verified')
     .single()
 
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 })
   }
+
+  // Append to the submission history so EVERY proof link is kept (the nodes row
+  // only holds the latest). Owners may re-submit a different post on another day.
+  await supabase.from('node_verification_submissions').insert({
+    node_id: (data as { id?: string })?.id ?? null,
+    node_code: nodeCode,
+    tweet_url: body.tweet_url,
+    wallet_address: wallet,
+  })
 
   // Best-effort email notification via Web3Forms (zero-config). The access key
   // is PUBLIC by design (these keys live in client-side HTML forms), so it's fine

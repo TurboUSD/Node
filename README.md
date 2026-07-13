@@ -62,12 +62,14 @@ The default screen. Displays:
 - **Alarm**: status shown below the time; tap to open the alarm picker (time, days of the week, on/off toggle, volume 1 to 5). The hour wheel follows the device's 12h/24h setting: in 12-hour mode it shows 1 to 12 plus an AM/PM wheel and stores the result back as 24h internally. When the alarm fires, the ESP32 sends a play-alarm command over UART2 (GPIO19/20) to the RP2040, which drives the buzzer at the chosen volume; the screen wakes itself even from sleep and shows a full-screen blinking STOP overlay. Tapping STOP, or a short press of the top button, silences it.
 - **Temperature & humidity**: ambient readings from the Grove AHT20 sensor on the RP2040, polled over UART (shows `--` until the RP2040 firmware is flashed and an AHT20 is connected)
 - **Weather**: current conditions fetched from the network
+- **Background image** (optional): set a custom image from the web setup page (a square 1:1 image works best). When set, the device paints it behind the clock and adds a soft shadow behind the clock/date/alarm so they stay legible. Leave it empty for plain black.
 
-### 2. TurboStats
-Live TurboUSD token data sourced from the Uniswap V3 TUSD/USDC pool on Base. Displays:
-- 2×2 stat grid: circulating supply, current price (with sub-cent subscript), total burned %, treasury balance (thousands-separated)
-- OHLCV candlestick chart with a **1D / 1W / 1M timeframe dropdown** (weekly candles come from the Supabase cache; daily/monthly are aggregated on-device from GeckoTerminal daily data)
-- Y-axis ticks show **market cap** (price × circulating supply), X-axis shows real dates
+### 2. Ticker Stats
+A generic **single-token stats page** for whichever token the node has selected — **₸USD by default**. The **backend computes the stats** (the `ticker-stats` Edge Function) and the device just paints them, so any token works without a firmware change.
+- Pick the token from the **web setup page** OR the **on-device footer picker** (a token search, shown to the right of "Network: N nodes"). The selection is saved to the backend and synced both ways.
+- **Default (uncustomized) tokens** show basic stats pulled from DexScreener: price, market cap, 24h volume, liquidity. **Custom tokens** get tailored fields (e.g. ₸USD shows supply / price / total burned / market cap; DRB shows its wallet's WETH, DRB and USDC holdings with USD equivalents). Custom tokens are added server-side, one small handler each.
+- The selected token's **logo** is shown in the centre of the 2×2 grid (₸USD intentionally has none).
+- OHLCV candlestick chart with a **1D / 1W / 1M timeframe dropdown** for the selected pool (₸USD weekly candles come from the Supabase cache; everything else, and daily/monthly, is aggregated on-device from GeckoTerminal). Y-axis ticks show **market cap** when the token's circulating supply is known, otherwise price.
 
 ### 3. Token Tickers
 A configurable live crypto price screener. Each node has its own ticker list stored in the backend and synced on load. Features:
@@ -311,7 +313,7 @@ pio run --target upload      # flash over USB-C
 pio device monitor           # serial logs
 ```
 
-CI automatically builds and publishes firmware releases when changes are pushed to `main` under `firmware-esp32/` or `firmware-rp2040/`. The ESP32 image then updates over the air (WiFi), no USB re-flashing needed: the device checks for a newer published version on a nightly window and whenever you tap **Check for updates** in its Settings popup, downloads it, verifies the SHA-256, and flashes the inactive partition (rollback-guarded). It is never applied silently mid-use. The web setup page's **Firmware & updates** section can also tell you when a newer version exists, but the install itself always happens from the device (the device pulls, the web can't push).
+CI automatically builds and publishes firmware releases when changes are pushed to `main` under `firmware-esp32/` or `firmware-rp2040/`. The ESP32 image then updates over the air (WiFi), no USB re-flashing needed: the device checks for a newer published version on a nightly window and whenever you tap **Check for updates** in its Settings popup, downloads it, verifies the SHA-256, and flashes the inactive partition (rollback-guarded). It is never applied silently mid-use. When an update is available, the device's install dialog shows a **"What's new"** changelog (the release notes for that version) and the web setup page's **Firmware & updates** section shows the same changelog for the newer version. The install itself always happens from the device (the device pulls, the web can't push). Version history lives in [`CHANGELOG.md`](CHANGELOG.md).
 
 Required GitHub repository secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
 

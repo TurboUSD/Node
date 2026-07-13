@@ -110,6 +110,12 @@ async function handle(req: Request): Promise<Response> {
     // NFT manual pinlist: comma-separated "chain:contract:tokenId" entries, max 20.
     // Takes priority over nft_wallet_address on the device. Pass null/'' to clear.
     nft_pinlist?:            string | null
+    // Ticker Stats screen selection: which DEX pool the screen shows stats for.
+    ticker_stats_pool?:      string
+    ticker_stats_chain?:     string
+    ticker_stats_symbol?:    string
+    // Home screen background image URL (empty/null clears it).
+    home_bg_url?:            string | null
   }
 
   try {
@@ -197,6 +203,22 @@ async function handle(req: Request): Promise<Response> {
     if (![1, 2].includes(body.ticker_cols))
       return new Response(JSON.stringify({ error: 'ticker_cols must be 1 or 2' }), { status: 400 })
     updates.ticker_cols = body.ticker_cols
+  }
+  // Ticker Stats selection (the DEX pool the Ticker Stats screen paints).
+  // Stored as-is; the ticker-stats edge function resolves it to display fields.
+  if (body.ticker_stats_pool !== undefined) {
+    const pool = (body.ticker_stats_pool ?? '').trim()
+    if (pool.length > 80)
+      return new Response(JSON.stringify({ error: 'ticker_stats_pool too long' }), { status: 400 })
+    updates.ticker_stats_pool = pool || null
+  }
+  if (body.ticker_stats_chain  !== undefined) updates.ticker_stats_chain  = (body.ticker_stats_chain  ?? '').trim().slice(0, 24) || null
+  if (body.ticker_stats_symbol !== undefined) updates.ticker_stats_symbol = (body.ticker_stats_symbol ?? '').trim().slice(0, 16) || null
+  if (body.home_bg_url !== undefined) {
+    const u = (body.home_bg_url ?? '').trim()
+    if (u && !/^https?:\/\//i.test(u))
+      return new Response(JSON.stringify({ error: 'home_bg_url must be an http(s) URL' }), { status: 400 })
+    updates.home_bg_url = u.slice(0, 400) || null
   }
   if (body.nft_show_data   !== undefined) updates.nft_show_data   = !!body.nft_show_data
   if (body.nft_coll_order  !== undefined) updates.nft_coll_order  = (body.nft_coll_order  ?? '').slice(0, 500)
@@ -294,7 +316,7 @@ async function handle(req: Request): Promise<Response> {
     .from('nodes')
     .update(updates)
     .eq('node_code', body.node_code.toUpperCase())
-    .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume, screen_brightness, screen_always_on, screen_timeout_mins, nft_wallet_address, nft_grid_size, nft_carousel_enabled, nft_slideshow_secs, nft_pinlist, screen_order, screen_hidden, nft_show_data, nft_coll_order, nft_coll_hidden, nft_collections, ticker_cols, screen_carousel, screen_carousel_secs')
+    .select('node_code, display_name, bio, wallet_address, twitter_handle, country, city, temp_unit, date_format, time_format, alarm_hour, alarm_minute, alarm_enabled, alarm_volume, screen_brightness, screen_always_on, screen_timeout_mins, nft_wallet_address, nft_grid_size, nft_carousel_enabled, nft_slideshow_secs, nft_pinlist, screen_order, screen_hidden, nft_show_data, nft_coll_order, nft_coll_hidden, nft_collections, ticker_cols, screen_carousel, screen_carousel_secs, ticker_stats_pool, ticker_stats_chain, ticker_stats_symbol, home_bg_url')
     .single()
 
   if (error) {

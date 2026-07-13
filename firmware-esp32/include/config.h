@@ -33,6 +33,7 @@
 #define ENDPOINT_NODE_DIRECTORY     SUPABASE_REST_BASE_URL "/public_node_directory"
 #define ENDPOINT_DEBT_HISTORY       SUPABASE_FUNCTIONS_BASE_URL "/debt-history"
 #define ENDPOINT_OHLCV_HISTORY      SUPABASE_FUNCTIONS_BASE_URL "/ohlcv-history"
+#define ENDPOINT_TICKER_STATS       SUPABASE_FUNCTIONS_BASE_URL "/ticker-stats"
 #define ENDPOINT_TICKER_CONFIG      SUPABASE_REST_BASE_URL "/node_ticker_config?select=pool_address,chain_id,base_symbol,base_name,quote_symbol,display_order&node_code=eq."
 #define ENDPOINT_SEARCH_TOKENS      SUPABASE_FUNCTIONS_BASE_URL "/search-tokens"
 #define ENDPOINT_ADD_TICKER         SUPABASE_FUNCTIONS_BASE_URL "/add-node-ticker"

@@ -80,7 +80,9 @@ Deno.serve(async (req: Request) => {
       nft_wallet_address, nft_grid_size, nft_carousel_enabled, nft_slideshow_secs,
       nft_pinlist, screen_order, screen_hidden,
       nft_show_data, nft_coll_order, nft_coll_hidden, ticker_cols,
-      screen_carousel, screen_carousel_secs
+      screen_carousel, screen_carousel_secs,
+      ticker_stats_pool, ticker_stats_chain, ticker_stats_symbol,
+      home_bg_url
     `)
     .eq('mac_address', macAddress)
     .maybeSingle()
@@ -132,6 +134,19 @@ Deno.serve(async (req: Request) => {
     if (Object.keys(carUpd).length > 0) {
       await supabase.from('nodes').update(carUpd).eq('id', node.id)
       Object.assign(node as Record<string, unknown>, carUpd)
+    }
+  }
+
+  // Device-pushed Ticker Stats selection (footer picker on the Ticker Stats
+  // screen). Persists the chosen DEX pool so the web and device stay in sync.
+  {
+    const tsUpd: Record<string, unknown> = {}
+    if (body.ticker_stats_pool   !== undefined) tsUpd.ticker_stats_pool   = body.ticker_stats_pool
+    if (body.ticker_stats_chain  !== undefined) tsUpd.ticker_stats_chain  = body.ticker_stats_chain
+    if (body.ticker_stats_symbol !== undefined) tsUpd.ticker_stats_symbol = body.ticker_stats_symbol
+    if (Object.keys(tsUpd).length > 0) {
+      await supabase.from('nodes').update(tsUpd).eq('id', node.id)
+      Object.assign(node as Record<string, unknown>, tsUpd)
     }
   }
 
@@ -246,6 +261,10 @@ Deno.serve(async (req: Request) => {
     screen_order:          node.screen_order          ?? null,
     screen_carousel:       node.screen_carousel       ?? null,
     screen_carousel_secs:  node.screen_carousel_secs  ?? null,
+    ticker_stats_pool:     node.ticker_stats_pool     ?? null,
+    ticker_stats_chain:    node.ticker_stats_chain    ?? null,
+    ticker_stats_symbol:   node.ticker_stats_symbol   ?? null,
+    home_bg_url:           node.home_bg_url           ?? null,
   }
 
   return new Response(JSON.stringify({ ok: true, config }), {

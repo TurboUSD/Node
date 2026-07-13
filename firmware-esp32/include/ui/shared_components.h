@@ -43,6 +43,11 @@ struct SharedFooterRefs {
     lv_coord_t controlsGap = 12;        // gap between the separator and the controls
     lv_coord_t nameMaxW = 0;            // >0: cap the node name to this width and marquee if longer
                                         // (set by screens that host controls). 0 = unconstrained.
+    // "after count" mode: keep the "Network: N nodes" text and place the controls
+    // to its RIGHT behind a second "|" (used by the Ticker Stats screen, which
+    // has room to spare). controlsSep2 is that second separator.
+    bool       controlsAfterCount = false;
+    lv_obj_t*  controlsSep2 = nullptr;
 };
 
 // Replace ONLY the "Network: N nodes" count with a screen's own controls (which
@@ -72,6 +77,26 @@ inline void layoutFooterControls(SharedFooterRefs& f, lv_obj_t* controls, lv_coo
     f.nameMaxW = maxW;
     if (f.nodeSepLabel)                                  // initial placement (refined on name update)
         lv_obj_align_to(controls, f.nodeSepLabel, LV_ALIGN_OUT_RIGHT_MID, gap, 0);
+}
+
+// Like layoutFooterControls, but keeps the "Network: N nodes" count and places
+// the controls to its RIGHT behind a second grey "|". For screens with spare
+// footer room (Ticker Stats). Does NOT cap the node name. Call AFTER the
+// controls container is built and populated.
+inline void layoutFooterControlsAfterCount(SharedFooterRefs& f, lv_obj_t* controls, lv_coord_t gap) {
+    if (!f.bar || !controls || !f.nodeCountLabel) return;
+    f.controls           = controls;
+    f.controlsGap        = gap;
+    f.controlsAfterCount = true;
+    f.nameMaxW           = 0;   // plenty of space — never cap/marquee the name here
+    // Second separator, same style as the first.
+    f.controlsSep2 = lv_label_create(f.bar);
+    lv_label_set_text(f.controlsSep2, "|");
+    lv_obj_set_style_text_color(f.controlsSep2, lv_color_hex(0x6e7280), 0);
+    lv_obj_set_style_text_font(f.controlsSep2, &lv_font_montserrat_12, 0);
+    lv_obj_update_layout(f.bar);
+    lv_obj_align_to(f.controlsSep2, f.nodeCountLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+    lv_obj_align_to(controls, f.controlsSep2, LV_ALIGN_OUT_RIGHT_MID, gap, 0);
 }
 
 // Builds the top bar used on every screen except Clock (which has its own
@@ -342,9 +367,15 @@ inline void refreshSharedFooter(SharedFooterRefs& refs, const String& nodeName, 
             lv_obj_align_to(refs.nodeCountLabel, refs.nodeSepLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
         }
     }
-    // Keep a screen's control row pinned right after the (re-aligned) "|" separator,
-    // so it follows the node name as it grows/shrinks instead of overlapping it.
-    if (refs.controls && refs.nodeSepLabel) {
+    // Keep a screen's control row pinned right after the (re-aligned) separator,
+    // so it follows the node name/count as they grow/shrink instead of overlapping.
+    if (refs.controls && refs.controlsAfterCount && refs.controlsSep2 && refs.nodeCountLabel) {
+        // After-count mode: pin the 2nd "|" after the count, then the controls.
+        lv_obj_update_layout(refs.nodeCountLabel);
+        lv_obj_align_to(refs.controlsSep2, refs.nodeCountLabel, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+        lv_obj_update_layout(refs.controlsSep2);
+        lv_obj_align_to(refs.controls, refs.controlsSep2, LV_ALIGN_OUT_RIGHT_MID, refs.controlsGap, 0);
+    } else if (refs.controls && refs.nodeSepLabel) {
         lv_obj_update_layout(refs.nodeSepLabel);
         lv_obj_align_to(refs.controls, refs.nodeSepLabel, LV_ALIGN_OUT_RIGHT_MID, refs.controlsGap, 0);
     }

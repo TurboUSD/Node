@@ -124,6 +124,32 @@ public:
     bool    getScreenCarouselDirty()        { return prefs.getBool("scr_carou_d", false); }
     void    clearScreenCarouselDirty()      { prefs.putBool("scr_carou_d", false); }
 
+    // Ticker Stats screen: which DEX pool the screen shows stats for. Chosen via
+    // the footer picker on-device OR the web setting; the backend ticker-stats
+    // function resolves it to display fields. Defaults to ₸USD (its own pool).
+    // A device-side change marks it dirty so the next heartbeat pushes it up
+    // (same bidirectional pattern as the carousel/alarm settings).
+    String  getTickerStatsPool()            { return prefs.getString("ts_pool",   TUSD_POOL_ADDR); }
+    String  getTickerStatsChain()           { return prefs.getString("ts_chain",  TUSD_CHAIN_SLUG); }
+    String  getTickerStatsSymbol()          { return prefs.getString("ts_sym",    "TUSD"); }
+    void    setTickerStatsPool(const String& v)   { prefs.putString("ts_pool",  v); prefs.putBool("ts_dirty", true); }
+    void    setTickerStatsChain(const String& v)  { prefs.putString("ts_chain", v); prefs.putBool("ts_dirty", true); }
+    void    setTickerStatsSymbol(const String& v) { prefs.putString("ts_sym",   v); prefs.putBool("ts_dirty", true); }
+    // Server-originated apply (no dirty flag — nothing to push back).
+    void    applyTickerStatsFromServer(const String& pool, const String& chain, const String& sym) {
+        if (pool.length())  prefs.putString("ts_pool",  pool);
+        if (chain.length()) prefs.putString("ts_chain", chain);
+        if (sym.length())   prefs.putString("ts_sym",   sym);
+    }
+    bool    getTickerStatsDirty()           { return prefs.getBool("ts_dirty", false); }
+    void    clearTickerStatsDirty()         { prefs.putBool("ts_dirty", false); }
+
+    // Home (first screen) background image URL. Set from the web only; empty =
+    // plain black background (default). The device downloads + paints it and
+    // draws a shadow behind the clock/alarm box for legibility.
+    String  getHomeBgUrl()                  { return prefs.getString("home_bg", ""); }
+    void    setHomeBgUrl(const String& v)   { prefs.putString("home_bg", v); }
+
     // Bitmask of active alarm days: bit0=Mon, bit1=Tue, …, bit6=Sun (ISO order).
     // Default 0x7F = all seven days active.
     uint8_t getAlarmDays() { return prefs.getUChar(NVS_KEY_ALARM_DAYS, 0x7F); }

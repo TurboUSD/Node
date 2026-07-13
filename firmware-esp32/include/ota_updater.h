@@ -39,7 +39,7 @@ public:
     // Queries the backend for the latest release. Returns true and populates
     // outVersion / outUrl / outSha256 if a newer version exists. Returns false
     // if already up to date or the check fails. Does NOT download anything.
-    bool checkNewVersion(String& outVersion, String& outUrl, String& outSha256) {
+    bool checkNewVersion(String& outVersion, String& outUrl, String& outSha256, String& outNotes) {
         JsonDocument release;
         if (!fetchLatestReleaseInfo(release)) return false;
 
@@ -52,6 +52,7 @@ public:
         outVersion = latestVersion;
         outUrl     = release["binary_url"].as<String>();
         outSha256  = release["sha256"].as<String>();
+        outNotes   = release["release_notes"].as<String>();   // changelog for this release (may be empty)
         Log.printf("OTA: new version available %s -> %s\n",
                       FIRMWARE_VERSION, latestVersion.c_str());
         return true;
@@ -66,8 +67,8 @@ public:
 
     // Legacy: silent check + immediate apply in one call (kept for CI/testing).
     bool checkAndApply() {
-        String ver, url, sha;
-        if (!checkNewVersion(ver, url, sha)) return false;
+        String ver, url, sha, notes;
+        if (!checkNewVersion(ver, url, sha, notes)) return false;
         return applyPendingUpdate(url, sha);
     }
 
