@@ -1642,6 +1642,11 @@ private:
             lv_obj_set_style_text_color(nb, lv_color_hex(0xc4c4cc), 0);
             lv_obj_set_style_text_font(nb, &lv_font_montserrat_12, 0);
             lv_obj_t* backBtn = addModalButton(nc, "BACK", true);
+            // addModalButton flex-grows for buttons that share a ROW; this one is
+            // alone in the COLUMN card, so grow=1 stretched it to fill the whole
+            // height. Pin it to a normal button size instead.
+            lv_obj_set_flex_grow(backBtn, 0);
+            lv_obj_set_size(backBtn, 140, 44);
             static lv_obj_t* sNotesCard; sNotesCard = nc;
             lv_obj_add_event_cb(backBtn, [](lv_event_t*) { closeModal(sNotesCard); },
                                 LV_EVENT_CLICKED, nullptr);
