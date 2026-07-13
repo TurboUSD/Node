@@ -733,12 +733,12 @@ private:
         netLock();
         uint16_t w = 0, h = 0;
         // Fit within the 480×480 home area; 1:1 images fill it edge to edge.
-        bool unsupported = false;
-        uint8_t* px = imgdec::fetchRgb565(url, 480, 480, "homebg", url, &w, &h, 0x000000, &unsupported);
-        if (!px && unsupported) {
-            // Not a PNG/JPEG (e.g. WEBP → magic "RIFF"/0x5249). Transcode to PNG
-            // via the wsrv.nl image proxy and retry. Cache the PNG under the
-            // ORIGINAL url so next boot decodes straight from flash (no proxy).
+        uint8_t* px = imgdec::fetchRgb565(url, 480, 480, "homebg", url, &w, &h);
+        if (!px) {
+            // Raw fetch/decode failed — WEBP (magic "RIFF"/0x5249), or a valid
+            // PNG/JPEG that's too big to decode on-device. The wsrv.nl proxy
+            // resizes to 480px + transcodes to PNG server-side. Cache the PNG
+            // under the ORIGINAL url so next boot decodes straight from flash.
             String prox = "https://wsrv.nl/?url=" + _encodeUrl(url) + "&w=480&output=png";
             px = imgdec::fetchRgb565(prox.c_str(), 480, 480, "homebg", url, &w, &h);
         }

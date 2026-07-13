@@ -66,6 +66,7 @@ struct TickerStats {
     // multi-line block (lines separated by '\n'). hasExtra == false → not shown.
     char extraTitle[24]  = {};
     char extraValue[224] = {};
+    char extraTotal[40]  = {};   // e.g. "Total: $376,204" — shown bigger + accent
     bool hasExtra    = false;
     bool valid       = false;
 };
@@ -430,6 +431,7 @@ public:
         if (doc["extra"].is<JsonObject>()) {
             strncpy(out.extraTitle, doc["extra"]["title"] | "", sizeof(out.extraTitle) - 1);
             strncpy(out.extraValue, doc["extra"]["value"] | "", sizeof(out.extraValue) - 1);
+            strncpy(out.extraTotal, doc["extra"]["total"] | "", sizeof(out.extraTotal) - 1);
             out.hasExtra = out.extraValue[0] != '\0';
         }
         for (JsonObject f : doc["fields"].as<JsonArray>()) {

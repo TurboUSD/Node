@@ -116,19 +116,22 @@ public:
         makeStatCell(row2, 2, lv_color_hex(kColors[2]), kSides[2]);
         makeStatCell(row2, 3, lv_color_hex(kColors[3]), kSides[3]);
 
-        // Extra 3rd-column cell — a single tall cell with a title + multi-line
-        // body (e.g. "Grok wallet" + DRB/WETH/ETH/USDC + total). Hidden until the
-        // backend sends `extra`; when shown, the flex row shrinks the 2×2 left.
+        // Extra 3rd-column cell — a single tall cell: title (like the other cell
+        // titles), the wallet balances (spread over the height), and the total
+        // (bigger + accent). Hidden until the backend sends `extra`; when shown,
+        // the flex row shrinks the 2×2 to the left. SPACE_BETWEEN distributes the
+        // three blocks over the full height; everything is centred.
         _extraCell = lv_obj_create(gridRow);
         lv_obj_set_size(_extraCell, kExtraW, LV_PCT(100));
         lv_obj_set_style_bg_opa(_extraCell, LV_OPA_0, 0);
         lv_obj_set_style_border_color(_extraCell, lv_color_hex(0x2e2e34), 0);
         lv_obj_set_style_border_width(_extraCell, 1, 0);
         lv_obj_set_style_border_side(_extraCell, LV_BORDER_SIDE_LEFT, 0);
-        lv_obj_set_style_pad_hor(_extraCell, 8, 0);
-        lv_obj_set_style_pad_ver(_extraCell, 5, 0);
-        lv_obj_set_style_pad_row(_extraCell, 3, 0);
+        lv_obj_set_style_pad_hor(_extraCell, 6, 0);
+        lv_obj_set_style_pad_ver(_extraCell, 6, 0);
+        lv_obj_set_style_pad_row(_extraCell, 0, 0);
         lv_obj_set_flex_flow(_extraCell, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(_extraCell, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(_extraCell, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(_extraCell, LV_OBJ_FLAG_HIDDEN);
 
@@ -136,13 +139,22 @@ public:
         lv_label_set_text(_extraTitle, "");
         lv_obj_set_style_text_color(_extraTitle, lv_color_hex(0x9a9a9e), 0);
         lv_obj_set_style_text_font(_extraTitle, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_align(_extraTitle, LV_TEXT_ALIGN_CENTER, 0);
 
         _extraValue = lv_label_create(_extraCell);
         lv_label_set_text(_extraValue, "");
         lv_obj_set_style_text_color(_extraValue, lv_color_hex(0xd8d8dc), 0);
         lv_obj_set_style_text_font(_extraValue, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_align(_extraValue, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_line_space(_extraValue, 5, 0);   // spread the balance rows
         lv_label_set_long_mode(_extraValue, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(_extraValue, LV_PCT(100));
+
+        _extraTotal = lv_label_create(_extraCell);
+        lv_label_set_text(_extraTotal, "");
+        lv_obj_set_style_text_color(_extraTotal, lv_color_hex(0x3aff7a), 0);   // accent
+        lv_obj_set_style_text_font(_extraTotal, &lv_font_montserrat_12, 0);    // a bit bigger
+        lv_obj_set_style_text_align(_extraTotal, LV_TEXT_ALIGN_CENTER, 0);
 
         // Wrapper with pad_left: LVGL 8 draws Y tick labels OUTSIDE the chart's
         // left edge, so they need reserved space in the parent.
@@ -277,6 +289,9 @@ public:
             if (s.hasExtra) {
                 lv_label_set_text(_extraTitle, s.extraTitle[0] ? s.extraTitle : "");
                 lv_label_set_text(_extraValue, s.extraValue);
+                lv_label_set_text(_extraTotal, s.extraTotal);
+                if (s.extraTotal[0]) lv_obj_clear_flag(_extraTotal, LV_OBJ_FLAG_HIDDEN);
+                else                 lv_obj_add_flag(_extraTotal, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_clear_flag(_extraCell, LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_add_flag(_extraCell, LV_OBJ_FLAG_HIDDEN);
@@ -392,6 +407,7 @@ private:
     lv_obj_t* _extraCell  = nullptr;   // 3rd column (hidden unless `extra`)
     lv_obj_t* _extraTitle = nullptr;
     lv_obj_t* _extraValue = nullptr;
+    lv_obj_t* _extraTotal = nullptr;
     static constexpr int kExtraW = 176;   // width of the extra 3rd column (px)
 
     // Footer picker.
@@ -432,11 +448,13 @@ private:
         if (netWaitTlsRam(3000)) { /* headroom */ }
         netLock();
         uint16_t w = 0, h = 0;
-        bool unsupported = false;
-        uint8_t* px = imgdec::fetchRgb565(url, kLogo, kLogo, "tstats", url, &w, &h, 0x000000, &unsupported);
-        if (!px && unsupported) {
-            // WEBP/SVG logo → transcode to PNG via the wsrv.nl proxy; cache the
-            // PNG under the original url so next boot decodes straight from flash.
+        uint8_t* px = imgdec::fetchRgb565(url, kLogo, kLogo, "tstats", url, &w, &h);
+        if (!px) {
+            // Raw fetch/decode failed — WEBP/SVG, OR a valid PNG that's too big to
+            // decode on-device (DexScreener logos are often 800×800). The wsrv.nl
+            // proxy resizes to kLogo px + transcodes to PNG server-side, so the
+            // device only decodes a tiny image. Cache under the original url so
+            // next boot decodes straight from flash.
             String prox = "https://wsrv.nl/?url=" + _encodeUrl(url) + "&w=" + String(kLogo) + "&output=png";
             px = imgdec::fetchRgb565(prox.c_str(), kLogo, kLogo, "tstats", url, &w, &h);
         }
