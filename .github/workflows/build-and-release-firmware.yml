@@ -285,6 +285,7 @@ jobs:
     if: ${{ !cancelled() && (needs.build-esp32.result == 'success' || needs.build-rp2040.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4   # needed to read CHANGELOG.md for release notes
       - name: Download ESP32 artifacts
         if: needs.build-esp32.result == 'success'
         uses: actions/download-artifact@v4
@@ -335,11 +336,24 @@ jobs:
         run: |
           ESP32_SHA=$(cat artifacts/esp32s3-sha256.txt)
           ESP32_URL=$(ls artifacts/esp32s3-*.bin | xargs -I{} basename {})
+          VERSION="${{ needs.build-esp32.outputs.version }}"
+          BINARY_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.name }}/$ESP32_URL"
+          # Release notes shown in the device's OTA "What's new" popup + on the
+          # web. Pull this version's section from CHANGELOG.md; fall back to a
+          # generic note so the popup never shows "null".
+          NOTES=""
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(awk -v v="$VERSION" 'index($0,"## " v)==1{f=1;next} f&&/^## /{exit} f{print}' CHANGELOG.md | sed '/^[[:space:]]*$/d' | head -c 480)
+          fi
+          [ -z "$NOTES" ] && NOTES="Minor fixes and improvements."
+          # Build the JSON with jq so quotes/newlines in the notes are escaped safely.
+          PAYLOAD=$(jq -n --arg t esp32s3 --arg v "$VERSION" --arg u "$BINARY_URL" --arg s "$ESP32_SHA" --arg n "$NOTES" \
+            '{target:$t, version:$v, binary_url:$u, sha256:$s, release_notes:$n}')
           curl -s -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/firmware_releases" \
             -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"target\":\"esp32s3\",\"version\":\"${{ needs.build-esp32.outputs.version }}\",\"binary_url\":\"https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.name }}/$ESP32_URL\",\"sha256\":\"$ESP32_SHA\"}"
+            -d "$PAYLOAD"
 
       - name: Register RP2040 release with Supabase
         if: needs.build-rp2040.result == 'success'
