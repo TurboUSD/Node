@@ -619,9 +619,8 @@ private:
     uint32_t lastClockRedrawSecond = 255;
     SharedFooterRefs clockFooterRefs;
 
-    // ── Home background image (web-set) + legibility shadow ─────────────────
+    // ── Home background image (web-set) + per-element legibility plates ──────
     lv_obj_t*    _homeBgImg   = nullptr;
-    lv_obj_t*    _homeShadow  = nullptr;
     lv_img_dsc_t _homeBgDsc   = {};
     uint8_t*     _homeBgPx    = nullptr;   // live bitmap (freed on replace)
     uint8_t*     _homeBgNewPx = nullptr;   // bg task → UI handoff
@@ -632,6 +631,35 @@ private:
     volatile TaskHandle_t _homeBgTask = nullptr;
     uint32_t     _homeBgNextTry = 0;            // retry gate after a failed fetch
     uint32_t     _homeBgCheckAt = 0;            // throttle the NVS URL poll (~3 s)
+
+    // Subtle per-element legibility backing for the Home screen when a
+    // background image is active: a small rounded translucent plate + soft
+    // shadow behind the DATE and the TIME (each sized to its own text + a little
+    // padding), and a matching fill for the alarm pill (it already has a
+    // border/radius). `on=false` removes it (plain text on black).
+    void _setHomePlates(bool on) {
+        lv_obj_t* plated[2] = { clockDateLabel, clockTimeLabel };
+        for (int i = 0; i < 2; i++) {
+            lv_obj_t* l = plated[i];
+            if (!l) continue;
+            lv_obj_set_style_bg_color(l, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(l, on ? LV_OPA_50 : LV_OPA_TRANSP, 0);
+            lv_obj_set_style_radius(l, 10, 0);
+            lv_obj_set_style_pad_hor(l, on ? 12 : 0, 0);
+            lv_obj_set_style_pad_ver(l, on ? 5  : 0, 0);
+            lv_obj_set_style_shadow_color(l, lv_color_black(), 0);
+            lv_obj_set_style_shadow_width(l, on ? 14 : 0, 0);
+            lv_obj_set_style_shadow_opa(l, on ? LV_OPA_50 : LV_OPA_TRANSP, 0);
+        }
+        // Alarm pill keeps its own border/radius/padding — just tint + soften it.
+        if (clockAlarmLabel) {
+            lv_obj_set_style_bg_color(clockAlarmLabel, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(clockAlarmLabel, on ? LV_OPA_50 : LV_OPA_TRANSP, 0);
+            lv_obj_set_style_shadow_color(clockAlarmLabel, lv_color_black(), 0);
+            lv_obj_set_style_shadow_width(clockAlarmLabel, on ? 14 : 0, 0);
+            lv_obj_set_style_shadow_opa(clockAlarmLabel, on ? LV_OPA_50 : LV_OPA_TRANSP, 0);
+        }
+    }
 
     // Runs every loop tick: applies a decoded background, notices a URL change
     // from the config sync, and spawns the download on a bg task (core 0).
@@ -652,7 +680,7 @@ private:
                 lv_img_set_src(_homeBgImg, &_homeBgDsc);
                 lv_obj_align(_homeBgImg, LV_ALIGN_CENTER, 0, 0);
                 lv_obj_clear_flag(_homeBgImg, LV_OBJ_FLAG_HIDDEN);
-                if (_homeShadow) lv_obj_clear_flag(_homeShadow, LV_OBJ_FLAG_HIDDEN);
+                _setHomePlates(true);   // legibility plates behind date/time/alarm
             }
         }
 
@@ -663,11 +691,11 @@ private:
         _homeBgCheckAt = millis();
         String url = storage.getHomeBgUrl();
         if (url != _homeBgAppliedUrl && url != _homeBgWantUrl) {
-            if (url.length() == 0) {   // cleared on the web → hide bg + shadow
+            if (url.length() == 0) {   // cleared on the web → hide bg + plates
                 _homeBgAppliedUrl[0] = '\0';
                 _homeBgWantUrl[0]    = '\0';
                 lv_obj_add_flag(_homeBgImg, LV_OBJ_FLAG_HIDDEN);
-                if (_homeShadow) lv_obj_add_flag(_homeShadow, LV_OBJ_FLAG_HIDDEN);
+                _setHomePlates(false);
             } else {
                 strncpy(_homeBgWantUrl, url.c_str(), sizeof(_homeBgWantUrl) - 1);
                 _homeBgNextTry = 0;   // fetch asap
@@ -1368,23 +1396,10 @@ private:
         lv_obj_clear_flag(_homeBgImg, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(_homeBgImg, LV_OBJ_FLAG_HIDDEN);
 
-        // Tall enough to sit behind the whole cluster — the DATE (top), the time,
-        // and the alarm pill — so all three stay legible over a busy image.
-        _homeShadow = lv_obj_create(scr);
-        lv_obj_set_size(_homeShadow, 340, 262);
-        lv_obj_align(_homeShadow, LV_ALIGN_CENTER, 0, -12);
-        lv_obj_set_style_bg_color(_homeShadow, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(_homeShadow, LV_OPA_60, 0);
-        lv_obj_set_style_border_width(_homeShadow, 0, 0);
-        lv_obj_set_style_radius(_homeShadow, 26, 0);
-        lv_obj_set_style_pad_all(_homeShadow, 0, 0);
-        // Soft glow so the panel fades into the image instead of a hard box edge.
-        lv_obj_set_style_shadow_color(_homeShadow, lv_color_black(), 0);
-        lv_obj_set_style_shadow_width(_homeShadow, 48, 0);
-        lv_obj_set_style_shadow_opa(_homeShadow, LV_OPA_70, 0);
-        lv_obj_clear_flag(_homeShadow, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_clear_flag(_homeShadow, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_flag(_homeShadow, LV_OBJ_FLAG_HIDDEN);
+        // Legibility over a background image is handled PER ELEMENT (a subtle
+        // rounded plate + soft shadow behind the date, the time and the alarm),
+        // toggled by _setHomePlates() when a background is applied — NOT one big
+        // panel over the whole cluster.
 
         LV_IMG_DECLARE(turbousd_logo);
         lv_obj_t* logo = lv_img_create(scr);
