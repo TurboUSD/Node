@@ -293,9 +293,13 @@ void setup() {
     // (9), etc. — invaluable for diagnosing in the field.
     esp_reset_reason_t rr = esp_reset_reason();
     static const char* RR_NAMES[] = {"UNKNOWN","POWERON","EXT","SW","PANIC","INT_WDT",
-                                     "TASK_WDT","WDT","DEEPSLEEP","BROWNOUT","SDIO"};
+                                     "TASK_WDT","WDT","DEEPSLEEP","BROWNOUT","SDIO",
+                                     // 11+ (IDF 5.x): without these a power-glitch or
+                                     // CPU-lockup reset logged as "?" — useless when
+                                     // hunting "random" reboots in the field.
+                                     "USB","JTAG","EFUSE","PWR_GLITCH","CPU_LOCKUP"};
     Log.printf("Reset reason: %d (%s)\n", (int)rr,
-                  (rr >= 0 && rr <= 10) ? RR_NAMES[rr] : "?");
+                  (rr >= 0 && rr <= 15) ? RR_NAMES[rr] : "?");
 
     pinMode(BTN_USER_GPIO, INPUT_PULLUP);  // top user button, active LOW
 

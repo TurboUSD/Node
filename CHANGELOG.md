@@ -5,6 +5,21 @@ and its companion web + backend. The ESP32 image version lives in
 `firmware-esp32/platformio.ini` (`FIRMWARE_VERSION`) and is what OTA compares
 against. Older lines are summarized; from here on, entries are detailed.
 
+## 0.3.6 — July 2026
+
+Stability optimization:
+- Fixes occasional spontaneous reboots under heavy load: image decoding and disk-cache cleanup now yield CPU time, and the task watchdog is more tolerant.
+- Internal hardening: larger worker stacks, safer cross-core data handling, JSON parsing moved to PSRAM.
+
+## 0.3.5 — July 2026
+
+Minor fixes and polish:
+- DRB: "Grok Wallet" column (balances + total), token logo in the header, and a
+  market-cap chart axis for all tickers.
+- Home background now accepts WEBP and oversized images (via image proxy);
+  legibility shadows sit behind each of the clock, date and alarm.
+- ₸USD stats restored (supply / price / burned % / treasury).
+
 ## 0.3.4 — July 2026
 
 - **Ticker Stats screen** (formerly "TurboUSD Stats"): now a generic single-token

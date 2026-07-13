@@ -136,6 +136,7 @@ inline void _evictUntil(size_t need) {
         }
         dir.close();
     }
+    int evicted = 0;
     while (_freeBytes() < need) {
         int oldest = -1;
         for (int i = 0; i < cnt; i++) {
@@ -145,6 +146,14 @@ inline void _evictUntil(size_t need) {
         if (oldest < 0) break;   // nothing left to evict
         LittleFS.remove(String(ents[oldest].path));
         ents[oldest].path[0] = 0;
+        // BREATHE between deletes: each remove() is a flash erase (tens of ms)
+        // and this loop runs with the cache mutex held. On an 83%-full
+        // partition a burst of evictions monopolised the CPU long enough to
+        // starve IDLE0 and trip the Task WDT ("Reset reason: 6" reboots).
+        vTaskDelay(pdMS_TO_TICKS(5));
+        // Hard cap per pass: better to fail ONE cache write (the caller just
+        // skips persisting that blob) than to block until free space wins.
+        if (++evicted >= 24) break;
     }
     free(ents);
 }

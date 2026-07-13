@@ -52,7 +52,7 @@ public:
         outVersion = latestVersion;
         outUrl     = release["binary_url"].as<String>();
         outSha256  = release["sha256"].as<String>();
-        outNotes   = release["release_notes"].as<String>();   // changelog for this release (may be empty)
+        outNotes   = release["release_notes"] | "";   // changelog ("" when the DB column is null, so the popup never shows "null")
         Log.printf("OTA: new version available %s -> %s\n",
                       FIRMWARE_VERSION, latestVersion.c_str());
         return true;

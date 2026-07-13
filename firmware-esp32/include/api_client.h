@@ -21,6 +21,8 @@
 #include <ArduinoJson.h>
 #include "config.h"
 #include "storage.h"
+#include "psram_alloc.h"   // PSRAM-backed JsonDocuments — every parse below used to
+                           // spike the INTERNAL heap (the one WiFi/mbedTLS need)
 
 struct TreasuryData {
     double tusdSupplyNum = 0;
@@ -135,7 +137,7 @@ public:
         int code = http.GET();
         if (code != 200) { http.end(); return false; }
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, http.getStream());
         http.end();
         if (err) return false;
@@ -189,7 +191,7 @@ public:
         http.addHeader("Content-Type", "application/json");
         http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         doc["mac_address"] = getMacAddress();
         doc["firmware_version"] = FIRMWARE_VERSION;
         doc["setup_token"] = storage.getSetupToken();   // owner-only web setup — see storage.h
@@ -373,7 +375,7 @@ public:
         filter["tusdPriceUsd"]   = true;
         filter["totalManagedUsd"] = true;
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, body, len,
                                                    DeserializationOption::Filter(filter));
         free(body);
@@ -418,7 +420,7 @@ public:
         uint8_t* body = _httpGetBody(url.c_str(), 12000, &len, /*auth=*/true);
         if (!body) { Log.println("fetchTickerStats: fetch failed"); return out; }
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, body, len);
         free(body);
         if (err) { Log.printf("fetchTickerStats parse error: %s\n", err.c_str()); return out; }
@@ -464,7 +466,7 @@ public:
         uint8_t* body = _httpGetBody(ENDPOINT_US_DEBT, 8000, &len);
         if (!body) { Log.println("fetchUsDebt: fetch failed"); return result; }
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, body, len);
         free(body);
         if (err) return result;
@@ -491,7 +493,7 @@ public:
             9000, &len);
         if (!body) { Log.println("fetchDebtHistory: fetch failed"); return 0; }
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, body, len);
         free(body);
         if (err) return 0;
@@ -552,7 +554,7 @@ public:
         uint8_t* body = _httpGetBody(ENDPOINT_OHLCV_HISTORY, 8000, &len, /*auth=*/true);
         int count = 0;
         if (body) {
-            JsonDocument doc;
+            JsonDocument doc(psramJsonAlloc());
             DeserializationError err = deserializeJson(doc, body, len);
             free(body);
             if (!err) {
@@ -592,7 +594,7 @@ public:
         http.addHeader("Accept", "application/json");
         if (http.GET() != 200) { http.end(); return 0; }
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, http.getStream());
         http.end();
         if (err) return 0;
@@ -636,7 +638,7 @@ public:
         http.addHeader("apikey", SUPABASE_ANON_KEY);
         if (http.GET() != 200) { http.end(); return 0; }
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, http.getStream());
         http.end();
         if (err) return 0;
@@ -678,7 +680,7 @@ public:
             return 0;
         }
 
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError ferr = deserializeJson(doc, http.getStream());
         http.end();
         if (ferr) { Log.printf("miningFeed: parse %s\n", ferr.c_str()); return 0; }
@@ -720,7 +722,7 @@ private:
         http.begin(String(ENDPOINT_DEXSCREENER_TOKENS) + TUSD_CONTRACT_ADDR);
         http.setTimeout(8000);
         if (http.GET() != 200) { http.end(); return 0; }
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, http.getStream());
         http.end();
         if (err) return 0;
@@ -741,7 +743,7 @@ private:
         http.begin(String(ENDPOINT_GECKOTERMINAL_OHLCV) + TUSD_CHAIN_SLUG + "/pools/" + TUSD_POOL_ADDR);
         http.setTimeout(8000);
         if (http.GET() != 200) { http.end(); return 0; }
-        JsonDocument doc;
+        JsonDocument doc(psramJsonAlloc());
         DeserializationError err = deserializeJson(doc, http.getStream());
         http.end();
         if (err) return 0;

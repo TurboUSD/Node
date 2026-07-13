@@ -406,7 +406,13 @@ public:
     void onShow() {
         // Instant display from the disk snapshot on the first show after boot
         // (images come from the LittleFS art cache); a live refresh follows.
-        if (_nftCache.empty() && (storage.hasNftPinlist() || storage.hasNftWallet())) {
+        // Snapshot restore is gated on NO worker being alive: _loadSnapshot()
+        // clears/rebuilds the _nftCache vector on core 1, and _bgFetchFn can be
+        // iterating that same vector on core 0 (the walletScanFailed carry-over)
+        // — a concurrent restructure is a use-after-free. The snapshot is only
+        // a boot-time nicety; with a fetch in flight the fetch populates anyway.
+        if (_nftCache.empty() && !_bgTask && !_imgTask &&
+            (storage.hasNftPinlist() || storage.hasNftWallet())) {
             if (_loadSnapshot()) _rebuildGrid();
         }
 
@@ -539,8 +545,13 @@ private:
     // Resolve which cache index a cell shows at carousel position `cur`. Honours
     // an explicit nftOrder list (1x1) or the contiguous [nftStart, +count) range.
     int _cellNftIdx(const CellWidgets& cw, int cur) const {
-        if (cw.nftCount <= 0) return cw.nftStart;
-        int off = ((cur % cw.nftCount) + cw.nftCount) % cw.nftCount;
+        // SNAPSHOT nftCount into a local: this runs on BOTH cores (UI + the
+        // image worker) while _rebuildGrid on the other core can zero it
+        // between the guard and the modulo — a cross-core divide-by-zero
+        // panic that presents as a "random reboot".
+        int n = cw.nftCount;
+        if (n <= 0) return cw.nftStart;
+        int off = ((cur % n) + n) % n;
         return cw.nftOrder ? cw.nftOrder[off] : (cw.nftStart + off);
     }
 
@@ -1215,6 +1226,11 @@ private:
         // so a periodic list refresh doesn't blank every cell and re-decode.
         std::vector<NftItem, PsramAlloc<NftItem>> oldCache;
         oldCache.swap(_nftCache);
+        // Re-reserve AFTER the swap (swap moves the capacity out too): with a
+        // no-exceptions build, a vector GROWTH whose PSRAM allocation fails is
+        // undefined behaviour (write near NULL → StoreProhibited). One up-front
+        // reservation makes every push_back below allocation-free.
+        _nftCache.reserve(NFT_MAX_ITEMS);
         for (int i = 0; i < _pendingResult.count; i++) {
             NftItem it = _pendingResult.items[i];
             for (auto& prev : oldCache) {
@@ -1340,6 +1356,7 @@ private:
         if (n == 0 || n > NFT_MAX_ITEMS || len != 4 + n * sizeof(NftSnapRec)) { free(buf); return false; }
         NftSnapRec* r = (NftSnapRec*)(buf + 4);
         _nftCache.clear();
+        _nftCache.reserve(NFT_MAX_ITEMS);   // one up-front alloc — see the absorb step
         for (uint32_t i = 0; i < n; i++) {
             NftItem it;
             strncpy(it.name,       r[i].name,       sizeof(it.name) - 1);
@@ -2507,8 +2524,13 @@ private:
                             }
                         }
                     }
-                    // Rate-limit only real CDN hits — disk-cache re-decodes fly.
+                    // Rate-limit only real CDN hits — disk-cache re-decodes fly…
                     if (!fromDisk) delay(NFT_RATELIMIT_DELAY_MS);
+                    // …but never with ZERO yields: after a reboot the whole
+                    // gallery re-decodes from flash back-to-back, and lodepng/
+                    // tjpgd have no internal yields — a 17-image burst on core 0
+                    // starved IDLE0 into the Task WDT ("Reset reason: 6").
+                    else vTaskDelay(pdMS_TO_TICKS(25));
                 }
             }
         }
@@ -2889,8 +2911,22 @@ private:
         // wiped here, leaving only the pins (the "wallet NFTs disappeared" bug).
         if (walletScanFailed) {
             for (auto& it : self->_nftCache)
-                if (!it.pinned && _pendingResult.count < NFT_MAX_ITEMS)
-                    _pendingResult.items[_pendingResult.count++] = it;
+                if (!it.pinned && _pendingResult.count < NFT_MAX_ITEMS) {
+                    NftItem& dst = _pendingResult.items[_pendingResult.count++];
+                    dst = it;
+                    // STRIP the live bitmap pointers from the copy: they alias
+                    // the cache's px[] buffers, which core 1 can free (window
+                    // prune / class purge) while this snapshot sits in
+                    // _pendingResult — and the absorb step re-steals decoded
+                    // art from the old cache by URL match anyway. An aliased
+                    // pointer here risked a dangling blit or a double free.
+                    for (int c = 0; c < 3; c++) {
+                        dst.px[c] = nullptr;
+                        dst.pw[c] = dst.ph[c] = 0;
+                        dst.tried[c] = false;
+                        dst.failCnt[c] = 0;
+                    }
+                }
         }
         for (int ri = 0; ri < rawCount && _pendingResult.count < NFT_MAX_ITEMS; ri++) {
             // Find this item's collection floor price

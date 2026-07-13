@@ -1373,7 +1373,11 @@ private:
         }
 
         xTaskCreatePinnedToCore(
-            _bgTaskFn, "ticker_bg", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0
+            // 16 K, not 8: main.cpp documents that 8 KB is unsafe for mbedTLS
+            // handshakes (the loop task was raised for exactly that); these
+            // workers do the same TLS + JSON + logo-decode work. A stack-canary
+            // panic here looks like a "random reboot".
+            _bgTaskFn, "ticker_bg", 16384, payload, 1, (TaskHandle_t*)&_bgTask, 0
         );
     }
 
@@ -1386,7 +1390,7 @@ private:
         payload->type    = TT_ADD;
         strncpy(payload->node_code, _nodeCode, sizeof(payload->node_code) - 1);
         payload->to_add  = e;
-        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_add", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
+        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_add", 16384, payload, 1, (TaskHandle_t*)&_bgTask, 0);   // 16 K — TLS (see ticker_bg)
     }
 
     // Persists the current on-screen order to the backend (fire-and-forget:
@@ -1400,7 +1404,7 @@ private:
         payload->pools_count = _tickerCount;
         for (int i = 0; i < _tickerCount && i < TICKER_MAX; i++)
             strncpy(payload->pools_ordered[i], _tickers[i].pool_address, sizeof(payload->pools_ordered[i]) - 1);
-        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_ord", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
+        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_ord", 16384, payload, 1, (TaskHandle_t*)&_bgTask, 0);   // 16 K — TLS (see ticker_bg)
     }
 
     void _dispatchRemove(int tickerIdx) {
@@ -1417,7 +1421,7 @@ private:
         payload->type         = TT_REMOVE;
         strncpy(payload->node_code,       _nodeCode, sizeof(payload->node_code) - 1);
         strncpy(payload->pool_to_remove,  pool,      sizeof(payload->pool_to_remove) - 1);
-        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_rm", 8192, payload, 1, (TaskHandle_t*)&_bgTask, 0);
+        xTaskCreatePinnedToCore(_bgTaskFn, "ticker_rm", 16384, payload, 1, (TaskHandle_t*)&_bgTask, 0);   // 16 K — TLS (see ticker_bg)
     }
 
     // ── Static FreeRTOS task ──────────────────────────────────────────────────
@@ -1477,30 +1481,36 @@ private:
                     int n = 0;
                     for (JsonObject obj : arr) {
                         if (n >= TICKER_MAX) break;
-                        TickerEntry& te = self->_tickers[n];
-                        memset(&te, 0, sizeof(te));
+                        // Build into a LOCAL entry, publish with ONE assignment at
+                        // the end. The old memset + field-by-field rewrite left the
+                        // LIVE _tickers[n] — whose logo_dsc the on-screen lv_img may
+                        // be rendering from on core 1 — zeroed/half-written for the
+                        // whole iteration; a repaint landing in that window drew
+                        // from a wiped descriptor (a "random reboot" candidate).
+                        TickerEntry fresh{};
                         const char* pool = obj["pool_address"] | "";
                         // Carry over the cached entry for this pool, if any.
                         for (int j = 0; j < oldCount; j++) {
                             if (strcasecmp(oldEntries[j].pool_address, pool) == 0) {
-                                te = oldEntries[j];   // keeps is_expanded too —
+                                fresh = oldEntries[j];   // keeps is_expanded too —
                                 // several charts may stay open at once now
                                 break;
                             }
                         }
-                        strncpy(te.pool_address, pool,                       sizeof(te.pool_address)-1);
-                        strncpy(te.chain_id,     obj["chain_id"]     | "",   sizeof(te.chain_id)-1);
-                        strncpy(te.base_symbol,  obj["base_symbol"]  | "",   sizeof(te.base_symbol)-1);
-                        strncpy(te.base_name,    obj["base_name"]    | "",   sizeof(te.base_name)-1);
-                        strncpy(te.quote_symbol, obj["quote_symbol"] | "USD", sizeof(te.quote_symbol)-1);
-                        te.logo_applied = false;   // new cards → re-attach
+                        strncpy(fresh.pool_address, pool,                       sizeof(fresh.pool_address)-1);
+                        strncpy(fresh.chain_id,     obj["chain_id"]     | "",   sizeof(fresh.chain_id)-1);
+                        strncpy(fresh.base_symbol,  obj["base_symbol"]  | "",   sizeof(fresh.base_symbol)-1);
+                        strncpy(fresh.base_name,    obj["base_name"]    | "",   sizeof(fresh.base_name)-1);
+                        strncpy(fresh.quote_symbol, obj["quote_symbol"] | "USD", sizeof(fresh.quote_symbol)-1);
+                        fresh.logo_applied = false;   // new cards → re-attach
                         // Expansion = the pool-matched CARRY-OVER (line above kept
-                        // te.is_expanded from the old snapshot) OR the pool-keyed
+                        // fresh.is_expanded from the old snapshot) OR the pool-keyed
                         // set. Using ONLY the set overwrote a correctly-carried-over
                         // TRUE with a stale/empty set → open charts collapsed on a
                         // background reload (log: expanded=[..E...] → [......]).
                         // OR-ing both keeps a chart open if EITHER source says so.
-                        te.is_expanded = te.is_expanded || self->_isExpandedPool(pool);
+                        fresh.is_expanded = fresh.is_expanded || self->_isExpandedPool(pool);
+                        self->_tickers[n] = fresh;
                         n++;
                     }
                     self->_tickerCount = n;
