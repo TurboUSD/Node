@@ -631,6 +631,7 @@ private:
     volatile bool _homeBgReady = false;
     volatile TaskHandle_t _homeBgTask = nullptr;
     uint32_t     _homeBgNextTry = 0;            // retry gate after a failed fetch
+    uint32_t     _homeBgCheckAt = 0;            // throttle the NVS URL poll (~3 s)
 
     // Runs every loop tick: applies a decoded background, notices a URL change
     // from the config sync, and spawns the download on a bg task (core 0).
@@ -655,7 +656,11 @@ private:
             }
         }
 
-        // React to a URL change pushed down by the heartbeat config sync.
+        // React to a URL change pushed down by the heartbeat config sync. The
+        // NVS read + String alloc is throttled (~3 s) so it doesn't run on every
+        // loop tick — the config only changes on a heartbeat anyway.
+        if (millis() - _homeBgCheckAt < 3000) return;
+        _homeBgCheckAt = millis();
         String url = storage.getHomeBgUrl();
         if (url != _homeBgAppliedUrl && url != _homeBgWantUrl) {
             if (url.length() == 0) {   // cleared on the web → hide bg + shadow
@@ -672,9 +677,23 @@ private:
         if (_homeBgWantUrl[0] && strcmp(_homeBgWantUrl, _homeBgAppliedUrl) != 0 &&
             !_homeBgTask && g_displayAwake() && netTlsRamOk() && millis() >= _homeBgNextTry) {
             _homeBgNextTry = millis() + 30000;   // if the fetch fails, retry in 30 s
-            xTaskCreatePinnedToCore(_homeBgTaskFn, "home_bg", 6144, this, 1,
+            // 16 KB: TLS handshake + image decode is stack-hungry (matches the
+            // NFT image worker; 6 KB risks a stack-overflow reboot).
+            xTaskCreatePinnedToCore(_homeBgTaskFn, "home_bg", 16384, this, 1,
                                     (TaskHandle_t*)&_homeBgTask, 0);
         }
+    }
+
+    // Percent-encode a URL for use as the wsrv.nl ?url= parameter.
+    static String _encodeUrl(const char* s) {
+        static const char* hex = "0123456789ABCDEF";
+        String out;
+        for (const char* p = s; *p; p++) {
+            char c = *p;
+            if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') out += c;
+            else { out += '%'; out += hex[(c >> 4) & 0xF]; out += hex[c & 0xF]; }
+        }
+        return out;
     }
 
     static void _homeBgTaskFn(void* arg) {
@@ -686,7 +705,15 @@ private:
         netLock();
         uint16_t w = 0, h = 0;
         // Fit within the 480×480 home area; 1:1 images fill it edge to edge.
-        uint8_t* px = imgdec::fetchRgb565(url, 480, 480, "homebg", url, &w, &h);
+        bool unsupported = false;
+        uint8_t* px = imgdec::fetchRgb565(url, 480, 480, "homebg", url, &w, &h, 0x000000, &unsupported);
+        if (!px && unsupported) {
+            // Not a PNG/JPEG (e.g. WEBP → magic "RIFF"/0x5249). Transcode to PNG
+            // via the wsrv.nl image proxy and retry. Cache the PNG under the
+            // ORIGINAL url so next boot decodes straight from flash (no proxy).
+            String prox = "https://wsrv.nl/?url=" + _encodeUrl(url) + "&w=480&output=png";
+            px = imgdec::fetchRgb565(prox.c_str(), 480, 480, "homebg", url, &w, &h);
+        }
         netUnlock();
         if (px) {
             self->_homeBgNewPx = px;
@@ -1341,11 +1368,13 @@ private:
         lv_obj_clear_flag(_homeBgImg, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(_homeBgImg, LV_OBJ_FLAG_HIDDEN);
 
+        // Tall enough to sit behind the whole cluster — the DATE (top), the time,
+        // and the alarm pill — so all three stay legible over a busy image.
         _homeShadow = lv_obj_create(scr);
-        lv_obj_set_size(_homeShadow, 320, 240);
-        lv_obj_align(_homeShadow, LV_ALIGN_CENTER, 0, -6);
+        lv_obj_set_size(_homeShadow, 340, 262);
+        lv_obj_align(_homeShadow, LV_ALIGN_CENTER, 0, -12);
         lv_obj_set_style_bg_color(_homeShadow, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(_homeShadow, LV_OPA_50, 0);
+        lv_obj_set_style_bg_opa(_homeShadow, LV_OPA_60, 0);
         lv_obj_set_style_border_width(_homeShadow, 0, 0);
         lv_obj_set_style_radius(_homeShadow, 26, 0);
         lv_obj_set_style_pad_all(_homeShadow, 0, 0);

@@ -26,6 +26,7 @@
 #include "img_decode.h"
 #include "net_lock.h"
 #include "ui/shared_components.h"
+#include "ui/font_tenge.h"   // real ₸ glyph (Montserrat has no U+20B8)
 
 class TurboScreen {
 public:
@@ -77,10 +78,11 @@ public:
         lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
         lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
 
-        // 2×2 stat grid drawn with SINGLE separator lines (no doubled borders):
-        // right-column cells draw only their LEFT edge, second-row cells only
-        // their TOP edge. Cells are GENERIC now — labels + values come from the
-        // backend (applyStats), not hardcoded here.
+        // The 2×2 stat grid sits in the LEFT part of a row; an optional wide
+        // "extra" cell (e.g. DRB's Grok wallet) takes a 3rd column on the right.
+        // With no extra, the 2×2 fills the full width. Cells are GENERIC — labels
+        // + values come from the backend (applyStats). Single separator lines:
+        // right-column cells draw only their LEFT edge, row-2 cells only their TOP.
         static const uint32_t kColors[4] = { 0x3a8ade, 0x3aff7a, 0xff4d4d, 0xe8b339 };
         static const lv_border_side_t kSides[4] = {
             LV_BORDER_SIDE_NONE,
@@ -88,30 +90,59 @@ public:
             LV_BORDER_SIDE_TOP,
             (lv_border_side_t)(LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT),
         };
-        lv_obj_t* row1 = makeStatRow(body);
+        lv_obj_t* gridRow = lv_obj_create(body);
+        lv_obj_set_size(gridRow, LV_PCT(100), 112);
+        lv_obj_set_style_bg_opa(gridRow, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(gridRow, 0, 0);
+        lv_obj_set_style_pad_all(gridRow, 0, 0);
+        lv_obj_set_style_pad_column(gridRow, 0, 0);
+        lv_obj_set_flex_flow(gridRow, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(gridRow, LV_OBJ_FLAG_SCROLLABLE);
+
+        _gridLeft = lv_obj_create(gridRow);
+        lv_obj_set_height(_gridLeft, LV_PCT(100));
+        lv_obj_set_flex_grow(_gridLeft, 1);   // fills the row (minus the extra cell if shown)
+        lv_obj_set_style_bg_opa(_gridLeft, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(_gridLeft, 0, 0);
+        lv_obj_set_style_pad_all(_gridLeft, 0, 0);
+        lv_obj_set_style_pad_row(_gridLeft, 0, 0);
+        lv_obj_set_flex_flow(_gridLeft, LV_FLEX_FLOW_COLUMN);
+        lv_obj_clear_flag(_gridLeft, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t* row1 = makeStatRow(_gridLeft);
         makeStatCell(row1, 0, lv_color_hex(kColors[0]), kSides[0]);
         makeStatCell(row1, 1, lv_color_hex(kColors[1]), kSides[1]);
-        lv_obj_t* row2 = makeStatRow(body);
+        lv_obj_t* row2 = makeStatRow(_gridLeft);
         makeStatCell(row2, 2, lv_color_hex(kColors[2]), kSides[2]);
         makeStatCell(row2, 3, lv_color_hex(kColors[3]), kSides[3]);
 
-        // Centre logo medallion — floats over the grid crossing point (grid is
-        // 56+56 px tall, so its centre is 56 px down from the body top). Ignored
-        // by the flex layout; positioned by align. Hidden until a logo loads.
-        _logoBox = lv_obj_create(body);
-        lv_obj_add_flag(_logoBox, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_obj_set_size(_logoBox, kLogoBox, kLogoBox);
-        lv_obj_align(_logoBox, LV_ALIGN_TOP_MID, 0, 56 - kLogoBox / 2);
-        lv_obj_set_style_bg_color(_logoBox, lv_color_hex(0x000000), 0);
-        lv_obj_set_style_bg_opa(_logoBox, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_color(_logoBox, lv_color_hex(0x2e2e34), 0);
-        lv_obj_set_style_border_width(_logoBox, 1, 0);
-        lv_obj_set_style_radius(_logoBox, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_clip_corner(_logoBox, true, 0);
-        lv_obj_set_style_pad_all(_logoBox, 0, 0);
-        lv_obj_clear_flag(_logoBox, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_clear_flag(_logoBox, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_flag(_logoBox, LV_OBJ_FLAG_HIDDEN);
+        // Extra 3rd-column cell — a single tall cell with a title + multi-line
+        // body (e.g. "Grok wallet" + DRB/WETH/ETH/USDC + total). Hidden until the
+        // backend sends `extra`; when shown, the flex row shrinks the 2×2 left.
+        _extraCell = lv_obj_create(gridRow);
+        lv_obj_set_size(_extraCell, kExtraW, LV_PCT(100));
+        lv_obj_set_style_bg_opa(_extraCell, LV_OPA_0, 0);
+        lv_obj_set_style_border_color(_extraCell, lv_color_hex(0x2e2e34), 0);
+        lv_obj_set_style_border_width(_extraCell, 1, 0);
+        lv_obj_set_style_border_side(_extraCell, LV_BORDER_SIDE_LEFT, 0);
+        lv_obj_set_style_pad_hor(_extraCell, 8, 0);
+        lv_obj_set_style_pad_ver(_extraCell, 5, 0);
+        lv_obj_set_style_pad_row(_extraCell, 3, 0);
+        lv_obj_set_flex_flow(_extraCell, LV_FLEX_FLOW_COLUMN);
+        lv_obj_clear_flag(_extraCell, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(_extraCell, LV_OBJ_FLAG_HIDDEN);
+
+        _extraTitle = lv_label_create(_extraCell);
+        lv_label_set_text(_extraTitle, "");
+        lv_obj_set_style_text_color(_extraTitle, lv_color_hex(0x9a9a9e), 0);
+        lv_obj_set_style_text_font(_extraTitle, &lv_font_montserrat_10, 0);
+
+        _extraValue = lv_label_create(_extraCell);
+        lv_label_set_text(_extraValue, "");
+        lv_obj_set_style_text_color(_extraValue, lv_color_hex(0xd8d8dc), 0);
+        lv_obj_set_style_text_font(_extraValue, &lv_font_montserrat_10, 0);
+        lv_label_set_long_mode(_extraValue, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(_extraValue, LV_PCT(100));
 
         // Wrapper with pad_left: LVGL 8 draws Y tick labels OUTSIDE the chart's
         // left edge, so they need reserved space in the parent.
@@ -212,9 +243,22 @@ public:
             }
         }
         _circSupply = s.circSupply;
-        if (_symbolLabel) lv_label_set_text(_symbolLabel, s.symbol[0] ? s.symbol : "Ticker");
+        // Footer symbol: render ₸USD with the tenge glyph (the backend sends the
+        // ASCII "TUSD"); any other token uses its plain symbol in Montserrat.
+        if (_symbolLabel) {
+            if (strcmp(s.symbol, "TUSD") == 0) {
+                lv_label_set_text(_symbolLabel, "\xE2\x82\xB8USD");   // ₸USD
+                lv_obj_set_style_text_font(_symbolLabel, tengeFont12(), 0);
+            } else {
+                lv_label_set_text(_symbolLabel, s.symbol[0] ? s.symbol : "Ticker");
+                lv_obj_set_style_text_font(_symbolLabel, &lv_font_montserrat_12, 0);
+            }
+        }
 
-        // Logo: request a (re)download only when the URL actually changed.
+        // Logo: the selected token's logo REPLACES the TurboUSD logo in this
+        // screen's header (same size — the header keeps its zoom). Request a
+        // (re)download only when the URL changed; with none (₸USD), restore the
+        // TurboUSD logo.
         if (s.logoUrl[0]) {
             if (strncmp(s.logoUrl, _logoWantUrl, sizeof(_logoWantUrl)) != 0 &&
                 strncmp(s.logoUrl, _logoUrl,     sizeof(_logoUrl))     != 0) {
@@ -222,11 +266,21 @@ public:
                 _logoWant = true;
             }
         } else {
-            // No logo (e.g. ₸USD): hide the medallion and forget any prior one.
             _logoWantUrl[0] = '\0';
             _logoUrl[0]     = '\0';
             _logoWant       = false;
-            if (_logoBox) lv_obj_add_flag(_logoBox, LV_OBJ_FLAG_HIDDEN);
+            if (header.logo) lv_img_set_src(header.logo, &turbousd_logo);
+        }
+
+        // Extra 3rd-column cell (e.g. DRB's Grok wallet): show + fill, else hide.
+        if (_extraCell) {
+            if (s.hasExtra) {
+                lv_label_set_text(_extraTitle, s.extraTitle[0] ? s.extraTitle : "");
+                lv_label_set_text(_extraValue, s.extraValue);
+                lv_obj_clear_flag(_extraCell, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(_extraCell, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 
@@ -278,7 +332,9 @@ public:
         TurboScreen* self = (TurboScreen*)t->user_data;
         if (!self) return;
 
-        // Apply a freshly decoded bitmap (bg task → UI handoff).
+        // Apply a freshly decoded bitmap (bg task → UI handoff): swap it into the
+        // header's logo slot. It's decoded at the TurboUSD asset's size so the
+        // header's existing zoom renders it identically — no header resize.
         if (self->_logoReady) {
             self->_logoReady = false;
             if (self->_logoNewPx) {
@@ -291,13 +347,7 @@ public:
                 self->_logoDsc.header.h  = self->_logoH;
                 self->_logoDsc.data_size = (uint32_t)self->_logoW * self->_logoH * 2;
                 self->_logoDsc.data      = self->_logoPx;
-                if (!self->_logoImg) {
-                    self->_logoImg = lv_img_create(self->_logoBox);
-                    lv_obj_center(self->_logoImg);
-                }
-                lv_img_set_src(self->_logoImg, &self->_logoDsc);
-                lv_obj_center(self->_logoImg);
-                lv_obj_clear_flag(self->_logoBox, LV_OBJ_FLAG_HIDDEN);
+                if (self->header.logo) lv_img_set_src(self->header.logo, &self->_logoDsc);
             }
         }
 
@@ -305,7 +355,9 @@ public:
         // TLS RAM headroom (same gate the ticker/NFT bg tasks use).
         if (self->_logoWant && !self->_logoTask && netTlsRamOk()) {
             self->_logoWant = false;
-            xTaskCreatePinnedToCore(_logoTaskFn, "tstats_logo", 6144, self, 1,
+            // 16 KB: the fetch does a full mbedTLS handshake + PNG/JPEG decode,
+            // which is very stack-hungry — the NFT image worker uses the same.
+            xTaskCreatePinnedToCore(_logoTaskFn, "tstats_logo", 16384, self, 1,
                                     (TaskHandle_t*)&self->_logoTask, 0);
         }
     }
@@ -333,9 +385,14 @@ private:
     lv_obj_t* _xDateLabels[3] = { nullptr };
     int _groupDays = 7;
 
-    // Generic 2×2 grid cells.
+    // Generic 2×2 grid cells + the optional 3rd-column "extra" cell.
     lv_obj_t* _cellTitle[4] = { nullptr };
     lv_obj_t* _cellValue[4] = { nullptr };
+    lv_obj_t* _gridLeft   = nullptr;   // holds the 2×2 (flex-grows to fill)
+    lv_obj_t* _extraCell  = nullptr;   // 3rd column (hidden unless `extra`)
+    lv_obj_t* _extraTitle = nullptr;
+    lv_obj_t* _extraValue = nullptr;
+    static constexpr int kExtraW = 176;   // width of the extra 3rd column (px)
 
     // Footer picker.
     lv_obj_t* _selBtn      = nullptr;
@@ -343,11 +400,9 @@ private:
     void (*_pickCb)(void*) = nullptr;
     void*  _pickUd         = nullptr;
 
-    // Centre logo.
-    static constexpr int kLogo    = 46;   // decoded bitmap size (px)
-    static constexpr int kLogoBox = 52;   // medallion diameter (px)
-    lv_obj_t* _logoBox = nullptr;
-    lv_obj_t* _logoImg = nullptr;
+    // Token logo — decoded at the TurboUSD asset size and swapped into the
+    // header's logo slot (replaces the ₸ logo on this screen only).
+    static constexpr int kLogo = 48;   // decoded bitmap size (px), matches the header asset
     char      _logoUrl[160]     = {};   // currently-applied URL
     char      _logoWantUrl[160] = {};   // URL to fetch next
     volatile bool _logoWant  = false;
@@ -358,6 +413,17 @@ private:
     uint16_t  _logoW = 0, _logoH = 0;
     lv_img_dsc_t _logoDsc = {};
 
+    static String _encodeUrl(const char* s) {
+        static const char* hex = "0123456789ABCDEF";
+        String out;
+        for (const char* p = s; *p; p++) {
+            char c = *p;
+            if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') out += c;
+            else { out += '%'; out += hex[(c >> 4) & 0xF]; out += hex[c & 0xF]; }
+        }
+        return out;
+    }
+
     static void _logoTaskFn(void* arg) {
         TurboScreen* self = (TurboScreen*)arg;
         if (!self) { vTaskDelete(nullptr); return; }
@@ -366,7 +432,14 @@ private:
         if (netWaitTlsRam(3000)) { /* headroom */ }
         netLock();
         uint16_t w = 0, h = 0;
-        uint8_t* px = imgdec::fetchRgb565(url, kLogo, kLogo, "tstats", url, &w, &h);
+        bool unsupported = false;
+        uint8_t* px = imgdec::fetchRgb565(url, kLogo, kLogo, "tstats", url, &w, &h, 0x000000, &unsupported);
+        if (!px && unsupported) {
+            // WEBP/SVG logo → transcode to PNG via the wsrv.nl proxy; cache the
+            // PNG under the original url so next boot decodes straight from flash.
+            String prox = "https://wsrv.nl/?url=" + _encodeUrl(url) + "&w=" + String(kLogo) + "&output=png";
+            px = imgdec::fetchRgb565(prox.c_str(), kLogo, kLogo, "tstats", url, &w, &h);
+        }
         netUnlock();
         if (px) {
             self->_logoNewPx = px;

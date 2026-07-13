@@ -432,15 +432,23 @@ void loop() {
 
     // Ticker Stats: the backend ticker-stats function computes the display
     // fields for whichever pool the node has selected (₸USD by default) — the
-    // device just paints them. Refetch on the periodic window OR immediately
-    // after a device-side ticker pick (tickerStatsConsumeDirty).
-    if (lastTreasuryRefreshAt == 0 || now - lastTreasuryRefreshAt > TREASURY_DATA_REFRESH_MS
-        || uiManager.tickerStatsConsumeDirty()) {
-        TickerStats ts = apiClient.fetchTickerStats(storage.getTickerStatsChain(),
-                                                    storage.getTickerStatsPool(),
-                                                    storage.getTickerStatsSymbol());
-        if (ts.valid) uiManager.updateTickerStats(ts);
-        lastTreasuryRefreshAt = now;
+    // device just paints them. Refetch on the periodic window, after a device
+    // pick (tickerStatsConsumeDirty), OR as soon as the selected pool CHANGES —
+    // the latter is what makes a WEB change (synced down via the heartbeat
+    // config) show up on the device immediately instead of only on the timer.
+    {
+        static String s_lastTsPool;
+        String tsPool = storage.getTickerStatsPool();
+        bool poolChanged = (tsPool != s_lastTsPool);
+        if (lastTreasuryRefreshAt == 0 || now - lastTreasuryRefreshAt > TREASURY_DATA_REFRESH_MS
+            || uiManager.tickerStatsConsumeDirty() || poolChanged) {
+            s_lastTsPool = tsPool;
+            TickerStats ts = apiClient.fetchTickerStats(storage.getTickerStatsChain(),
+                                                        tsPool,
+                                                        storage.getTickerStatsSymbol());
+            if (ts.valid) uiManager.updateTickerStats(ts);
+            lastTreasuryRefreshAt = now;
+        }
     }
 
     // Until the first SUCCESSFUL debt fetch, retry every minute — a failed
@@ -464,16 +472,22 @@ void loop() {
         uiManager.retryDebtHistory();
     }
 
-    if (lastOhlcvRefreshAt == 0 || now - lastOhlcvRefreshAt > OHLCV_CHART_REFRESH_MS
-        || uiManager.turboTfConsumeDirty()) {   // 1D/1W/1M dropdown OR ticker changed
-        OhlcvCandle candles[26];
+    {
+        static String s_lastOhlcvPool;
         String tsPool  = storage.getTickerStatsPool();
         String tsChain = storage.getTickerStatsChain();
-        int count = apiClient.fetchOhlcvHistory(candles, uiManager.turboBars(),
-                                                uiManager.turboGroupDays(),
-                                                tsPool.c_str(), tsChain.c_str());
-        if (count > 0) uiManager.loadOhlcvChart(candles, count);
-        lastOhlcvRefreshAt = now;
+        bool ohlcvPoolChanged = (tsPool != s_lastOhlcvPool);
+        if (lastOhlcvRefreshAt == 0 || now - lastOhlcvRefreshAt > OHLCV_CHART_REFRESH_MS
+            || uiManager.turboTfConsumeDirty()   // 1D/1W/1M dropdown OR device pick
+            || ohlcvPoolChanged) {               // web-synced pool change → refetch chart now
+            s_lastOhlcvPool = tsPool;
+            OhlcvCandle candles[26];
+            int count = apiClient.fetchOhlcvHistory(candles, uiManager.turboBars(),
+                                                    uiManager.turboGroupDays(),
+                                                    tsPool.c_str(), tsChain.c_str());
+            if (count > 0) uiManager.loadOhlcvChart(candles, count);
+            lastOhlcvRefreshAt = now;
+        }
     }
 
     if (uiManager.isOnNodeScreen() && uiManager.miningFeedNeedsRefresh()) {

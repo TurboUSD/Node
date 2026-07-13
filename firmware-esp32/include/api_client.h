@@ -62,6 +62,11 @@ struct TickerStats {
     TickerStatField fields[4];
     int  count       = 0;
     double circSupply = 0;
+    // Optional wide "3rd column" cell (e.g. DRB's Grok wallet). extraValue is a
+    // multi-line block (lines separated by '\n'). hasExtra == false → not shown.
+    char extraTitle[24]  = {};
+    char extraValue[224] = {};
+    bool hasExtra    = false;
     bool valid       = false;
 };
 
@@ -389,10 +394,25 @@ public:
     // treasury service, DRB/custom → its own source, everything else → a basic
     // DexScreener read) and returns pre-formatted display fields. The device
     // just paints them — no per-token knowledge lives here.
+    // Minimal percent-encoder: keeps unreserved chars, encodes the rest. Used
+    // for the symbol query param (a token like "TUSD" is safe, but a name with a
+    // space/&/# would otherwise malform the request).
+    static String _urlEncode(const String& s) {
+        static const char* hex = "0123456789ABCDEF";
+        String out;
+        for (size_t i = 0; i < s.length(); i++) {
+            char c = s[i];
+            if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') out += c;
+            else { out += '%'; out += hex[(c >> 4) & 0xF]; out += hex[c & 0xF]; }
+        }
+        return out;
+    }
+
     TickerStats fetchTickerStats(const String& chain, const String& pool, const String& symbol) {
         TickerStats out;
         if (!pool.length()) return out;
-        String url = String(ENDPOINT_TICKER_STATS) + "?chain=" + chain + "&pool=" + pool + "&symbol=" + symbol;
+        String url = String(ENDPOINT_TICKER_STATS) + "?chain=" + _urlEncode(chain) +
+                     "&pool=" + _urlEncode(pool) + "&symbol=" + _urlEncode(symbol);
         size_t len = 0;
         uint8_t* body = _httpGetBody(url.c_str(), 12000, &len, /*auth=*/true);
         if (!body) { Log.println("fetchTickerStats: fetch failed"); return out; }
@@ -407,6 +427,11 @@ public:
         strncpy(out.name,    doc["name"]    | "",             sizeof(out.name)    - 1);
         strncpy(out.logoUrl, doc["logoUrl"] | "",             sizeof(out.logoUrl) - 1);
         out.circSupply = doc["circSupply"] | 0.0;
+        if (doc["extra"].is<JsonObject>()) {
+            strncpy(out.extraTitle, doc["extra"]["title"] | "", sizeof(out.extraTitle) - 1);
+            strncpy(out.extraValue, doc["extra"]["value"] | "", sizeof(out.extraValue) - 1);
+            out.hasExtra = out.extraValue[0] != '\0';
+        }
         for (JsonObject f : doc["fields"].as<JsonArray>()) {
             if (out.count >= 4) break;
             strncpy(out.fields[out.count].label, f["label"] | "", sizeof(out.fields[0].label) - 1);
