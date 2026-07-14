@@ -222,6 +222,7 @@ function CandlestickChart({ candles, width = 360, height = 160 }: { candles: Can
 // ── Compact card ──────────────────────────────────────────────────────────────
 function CompactCard({
   ticker, live, sparkCandles, onExpand, onRemove, isOwner, onMoveUp, onMoveDown,
+  alert, onBell,
 }: {
   ticker:       StoredTicker
   live:         LiveData | null
