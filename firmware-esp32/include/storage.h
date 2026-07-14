@@ -275,6 +275,25 @@ public:
     bool   getNftListsDirty()               { return prefs.getBool("nftls_dirty", false); }
     void   setNftListsDirty(bool d)         { prefs.putBool("nftls_dirty", d); }
 
+    // --- Ticker market-cap alerts ---
+    // CSV of "poolAddress:dir:usdValue" — dir is 'g' (fires when mcap rises to or
+    // above usdValue) or 'l' (falls to or below). usdValue is a plain USD number
+    // (may carry decimals from the k/M/B editor, e.g. 40500000 = $40.50M).
+    // One-shot: an alert is removed the moment it fires. Synced both ways with
+    // the web via heartbeat CFG + the dirty flag (same pattern as the NFT lists).
+    String getTickerAlerts()                 { return prefs.isKey("tkr_alerts") ? prefs.getString("tkr_alerts", "") : ""; }
+    void   setTickerAlerts(const String& a)  { prefs.putString("tkr_alerts", a); }
+    bool   getTickerAlertsDirty()            { return prefs.getBool("tkral_dirty", false); }
+    void   setTickerAlertsDirty(bool d)      { prefs.putBool("tkral_dirty", d); }
+
+    // --- NFT collection floor alerts ---
+    // CSV "slug:dir:value" — value in the collection's floor currency (ETH, or
+    // BTC for Ordinals), dir 'g'/'l'. Same one-shot + sync semantics as above.
+    String getNftAlerts()                    { return prefs.isKey("nft_alerts") ? prefs.getString("nft_alerts", "") : ""; }
+    void   setNftAlerts(const String& a)     { prefs.putString("nft_alerts", a); }
+    bool   getNftAlertsDirty()               { return prefs.getBool("nftal_dirty", false); }
+    void   setNftAlertsDirty(bool d)         { prefs.putBool("nftal_dirty", d); }
+
 private:
     Preferences prefs;
     uint32_t _totalUptBase   = 0;   // cumulative uptime at last heartbeat (s), RAM only

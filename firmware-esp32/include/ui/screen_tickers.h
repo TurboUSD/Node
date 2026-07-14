@@ -22,7 +22,9 @@
 #pragma once
 #include <lvgl.h>
 #include <HTTPClient.h>
+#include <functional>      // onTickerAlarm callback (wired by ui_manager)
 #include "psram_alloc.h"   // PSRAM-backed JsonDocument allocator
+#include "ui/modal.h"      // market-cap alert editor popup
 #include <ArduinoJson.h>
 #include "config.h"
 #include "storage.h"
@@ -93,6 +95,9 @@ struct TickerEntry {
                                         // an empty chart that never filled in).
     uint32_t live_at       = 0;         // millis() of last live refresh (cache TTL)
     uint32_t chart_at      = 0;         // millis() of last chart refresh (cache TTL)
+    uint8_t  chart_fails   = 0;         // consecutive chart-fetch failures; ≥5 = give up
+                                        // (pool without GT OHLCV data — retrying forever
+                                        // just burned quota; manual refresh re-arms)
     bool  is_expanded      = false;
 
     // Token logo (from DexScreener pair info.imageUrl), downloaded + decoded
@@ -474,6 +479,7 @@ private:
         lv_obj_t* logoImg        = nullptr;   // token logo image (once downloaded)
         lv_obj_t* symbolLabel    = nullptr;   // compact: symbol text block
         lv_obj_t* nameLabel      = nullptr;   // compact
+        lv_obj_t* alertBell      = nullptr;   // market-cap alert bell (compact + expanded)
         lv_obj_t* fdvLabel       = nullptr;   // compact
         lv_obj_t* changeLabel    = nullptr;   // compact
         lv_obj_t* chart          = nullptr;   // compact sparkline / expanded chart
@@ -543,8 +549,9 @@ private:
     // refresh "did nothing" for the miniatures.
     void _manualRefresh() {
         for (int i = 0; i < _tickerCount; i++) {
-            _tickers[i].live_at  = 0;   // ignore the live TTL → re-fetch price/mcap/change
-            _tickers[i].chart_at = 0;   // ignore the chart TTL → re-fetch candles too
+            _tickers[i].live_at     = 0;   // ignore the live TTL → re-fetch price/mcap/change
+            _tickers[i].chart_at    = 0;   // ignore the chart TTL → re-fetch candles too
+            _tickers[i].chart_fails = 0;   // manual refresh re-arms even given-up charts
         }
         _listReloadRequested = true;   // retried each poll until the worker is free
         Log.println("tickers: manual refresh requested (force live + chart + logo reload)");
@@ -779,7 +786,13 @@ private:
         lv_obj_set_style_text_font(w.changeLabel, &lv_font_montserrat_12, 0);
 
         if (_editMode) {
-            // Edit mode: ▲ / ▼ reorder + red delete, in place of the sparkline.
+            // Edit mode: alert bell + ▲ / ▼ reorder + red delete, in place of
+            // the sparkline. The bell shows the alert state (yellow = armed,
+            // dim = none) and opens the market-cap alert editor.
+            bool armed = _alertFor(t.pool_address);
+            lv_obj_t* bellBtn = _makeCardActionBtn(w.container, LV_SYMBOL_BELL,
+                                    armed ? 0xe8b339 : 0x55555c, idx, _onAlertBellTapped);
+            w.alertBell = lv_obj_get_child(bellBtn, 0);   // the label — recolored on set/clear
             _makeCardActionBtn(w.container, LV_SYMBOL_UP,    CLR_TEXT, idx, _onMoveUpTapped);
             _makeCardActionBtn(w.container, LV_SYMBOL_DOWN,  CLR_TEXT, idx, _onMoveDownTapped);
             _makeCardActionBtn(w.container, LV_SYMBOL_TRASH, CLR_RED,  idx, _onDeleteTapped);
@@ -1103,6 +1116,303 @@ private:
             d.radius   = 0;
             lv_draw_rect(dsc->draw_ctx, &d, &body);
         }
+    }
+
+    // ── Ticker market-cap alerts ─────────────────────────────────────────────
+    // NVS CSV "pool:dir:usd" (dir 'g' = fires when mcap rises to/above usd,
+    // 'l' = falls to/below). ONE-SHOT: cleared the moment it fires. Synced both
+    // ways with the web via heartbeat (storage.setTickerAlertsDirty). The bell
+    // on every card opens the on-device editor.
+public:
+    std::function<void(const char*)> onTickerAlarm;   // wired by ui_manager → TURBOALARM overlay + buzzer
+private:
+    lv_obj_t* _alertDlg        = nullptr;   // modal backdrop (nulled by its DELETE event)
+    lv_obj_t* _alertTa         = nullptr;
+    lv_obj_t* _alertDirLbl     = nullptr;
+    lv_obj_t* _alertUnitBtn[3] = {};
+    int   _alertIdx  = -1;
+    char  _alertDir  = 'g';
+    int   _alertUnit = 1;                   // 0=k 1=M 2=B
+
+    static bool _alertFor(const char* pool, char* dirOut = nullptr, double* valOut = nullptr) {
+        String csv = storage.getTickerAlerts();
+        int start = 0;
+        while (start < (int)csv.length()) {
+            int end = csv.indexOf(',', start);
+            if (end < 0) end = csv.length();
+            String e = csv.substring(start, end);
+            int c1 = e.indexOf(':');
+            int c2 = (c1 >= 0) ? e.indexOf(':', c1 + 1) : -1;
+            if (c1 > 0 && c2 > c1 && e.substring(0, c1).equalsIgnoreCase(pool)) {
+                if (dirOut) *dirOut = e.charAt(c1 + 1);
+                if (valOut) *valOut = atof(e.substring(c2 + 1).c_str());
+                return true;
+            }
+            start = end + 1;
+        }
+        return false;
+    }
+
+    static String _alertsWithout(const char* pool) {
+        String csv = storage.getTickerAlerts(), out;
+        int start = 0;
+        while (start < (int)csv.length()) {
+            int end = csv.indexOf(',', start);
+            if (end < 0) end = csv.length();
+            String e = csv.substring(start, end);
+            int c1 = e.indexOf(':');
+            if (c1 > 0 && !e.substring(0, c1).equalsIgnoreCase(pool)) {
+                if (out.length()) out += ',';
+                out += e;
+            }
+            start = end + 1;
+        }
+        return out;
+    }
+
+    static void _setAlert(const char* pool, char dir, double usd) {
+        String out = _alertsWithout(pool);      // upsert: one alert per pool
+        if (out.length()) out += ',';
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s:%c:%.2f", pool, dir, usd);
+        out += buf;
+        storage.setTickerAlerts(out);
+        storage.setTickerAlertsDirty(true);     // heartbeat pushes it to the web
+        Log.printf("tickers: alert set %s\n", buf);
+    }
+
+    static void _clearAlert(const char* pool) {
+        String before = storage.getTickerAlerts();
+        String out = _alertsWithout(pool);
+        if (out == before) return;
+        storage.setTickerAlerts(out);
+        storage.setTickerAlertsDirty(true);
+        Log.printf("tickers: alert cleared for %.12s...\n", pool);
+    }
+
+    // Removing a ticker from the screener cancels its alerts (spec): called
+    // after every server list load, against the authoritative ticker set.
+    void _pruneAlerts() {
+        String csv = storage.getTickerAlerts();
+        if (!csv.length()) return;
+        String out;
+        bool changed = false;
+        int start = 0;
+        while (start < (int)csv.length()) {
+            int end = csv.indexOf(',', start);
+            if (end < 0) end = csv.length();
+            String e = csv.substring(start, end);
+            int c1 = e.indexOf(':');
+            bool keep = false;
+            if (c1 > 0) {
+                String pool = e.substring(0, c1);
+                for (int i = 0; i < _tickerCount; i++)
+                    if (pool.equalsIgnoreCase(_tickers[i].pool_address)) { keep = true; break; }
+            }
+            if (keep) { if (out.length()) out += ','; out += e; }
+            else changed = true;
+            start = end + 1;
+        }
+        if (changed) {
+            storage.setTickerAlerts(out);
+            storage.setTickerAlertsDirty(true);
+            Log.println("tickers: alerts pruned (ticker removed from screener)");
+        }
+    }
+
+    // "$40M" / "$40.5M" / "$999k" — up to 2 decimals, trailing zeros trimmed.
+    static void _fmtUsdCompact(char* buf, size_t sz, double v) {
+        const char* unit = "";
+        double d = v;
+        if      (v >= 1e9) { d = v / 1e9; unit = "B"; }
+        else if (v >= 1e6) { d = v / 1e6; unit = "M"; }
+        else if (v >= 1e3) { d = v / 1e3; unit = "k"; }
+        char num[24];
+        snprintf(num, sizeof(num), "%.2f", d);
+        char* dot = strchr(num, '.');
+        if (dot) {
+            char* p = num + strlen(num) - 1;
+            while (p > dot && *p == '0') *p-- = 0;
+            if (p == dot) *p = 0;
+        }
+        snprintf(buf, sz, "$%s%s", num, unit);
+    }
+
+    void _refreshBellColor(int idx) {
+        if (idx < 0 || idx >= _tickerCount || !_cards[idx].alertBell) return;
+        bool armed = _alertFor(_tickers[idx].pool_address);
+        // Armed = the alarm's "active" yellow; unarmed = edit-chrome grey.
+        lv_obj_set_style_text_color(_cards[idx].alertBell,
+            lv_color_hex(armed ? 0xe8b339 : 0x55555c), 0);
+    }
+
+    // Edit-mode bell button (same square chrome as ▲▼🗑, via _makeCardActionBtn).
+    // stop_bubbling + swipe guard: the tap opens ONLY the alert editor.
+    static void _onAlertBellTapped(lv_event_t* e) {
+        lv_event_stop_bubbling(e);
+        auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+        lv_obj_t* obj = lv_event_get_current_target(e);
+        int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
+        if (!self || idx < 0 || idx >= self->_tickerCount) return;
+        if (g_touchWasSwipe()) return;   // swipe that merely STARTED on the bell
+        self->_openAlertDialog(idx);
+    }
+
+    void _alertUnitRefresh() {
+        static const char* U[3] = { "k", "M", "B" };
+        for (int u = 0; u < 3; u++) {
+            if (!_alertUnitBtn[u]) continue;
+            bool on = (u == _alertUnit);
+            lv_obj_set_style_bg_color(_alertUnitBtn[u], lv_color_hex(on ? 0x2eaa50 : CLR_SURFACE), 0);
+            lv_obj_set_style_border_color(_alertUnitBtn[u], lv_color_hex(on ? 0x2eaa50 : CLR_BORDER), 0);
+            (void)U;
+        }
+    }
+
+    // Tiny editor: [ >|< ] [ number (2 decimals) ] [ k | M | B ] + SET/CLEAR.
+    void _openAlertDialog(int idx) {
+        if (_alertDlg || idx < 0 || idx >= _tickerCount) return;
+        TickerEntry& t = _tickers[idx];
+        _alertIdx  = idx;
+        _alertDir  = 'g';
+        _alertUnit = 1;
+        char prefill[24] = "";
+        {
+            char cd; double cv;
+            if (_alertFor(t.pool_address, &cd, &cv)) {
+                _alertDir = (cd == 'l') ? 'l' : 'g';
+                double d = cv / 1e6; _alertUnit = 1;
+                if      (cv >= 1e9) { d = cv / 1e9; _alertUnit = 2; }
+                else if (cv <  1e6) { d = cv / 1e3; _alertUnit = 0; }
+                snprintf(prefill, sizeof(prefill), "%.2f", d);
+            }
+        }
+
+        lv_obj_t* card = openModal(lv_scr_act());
+        _alertDlg = lv_obj_get_parent(card);
+        // Null the state on ANY close path (X button, SET/CLEAR, screen teardown).
+        lv_obj_add_event_cb(_alertDlg, [](lv_event_t* e) {
+            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+            if (self) { self->_alertDlg = nullptr; self->_alertTa = nullptr;
+                        self->_alertDirLbl = nullptr;
+                        for (int u = 0; u < 3; u++) self->_alertUnitBtn[u] = nullptr; }
+        }, LV_EVENT_DELETE, this);
+
+        lv_obj_t* title = lv_label_create(card);
+        char tbuf[48];
+        snprintf(tbuf, sizeof(tbuf), "$%s MCAP ALERT", t.base_symbol);
+        lv_label_set_text(title, tbuf);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(title, lv_color_hex(CLR_TEXT), 0);
+
+        // Controls row: direction toggle · amount · unit segmented.
+        lv_obj_t* row = lv_obj_create(card);
+        lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_set_style_pad_column(row, 8, 0);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t* dirBtn = lv_btn_create(row);
+        lv_obj_set_size(dirBtn, 46, 40);
+        lv_obj_set_style_bg_color(dirBtn, lv_color_hex(CLR_SURFACE), 0);
+        lv_obj_set_style_border_color(dirBtn, lv_color_hex(CLR_BORDER), 0);
+        lv_obj_set_style_border_width(dirBtn, 1, 0);
+        lv_obj_set_style_radius(dirBtn, 8, 0);
+        lv_obj_add_event_cb(dirBtn, [](lv_event_t* e) {
+            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+            if (!self || !self->_alertDirLbl) return;
+            self->_alertDir = (self->_alertDir == 'g') ? 'l' : 'g';
+            lv_label_set_text(self->_alertDirLbl, self->_alertDir == 'g' ? ">" : "<");
+        }, LV_EVENT_CLICKED, this);
+        _alertDirLbl = lv_label_create(dirBtn);
+        lv_label_set_text(_alertDirLbl, _alertDir == 'g' ? ">" : "<");
+        lv_obj_set_style_text_font(_alertDirLbl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_color(_alertDirLbl, lv_color_hex(CLR_TEXT), 0);
+        lv_obj_center(_alertDirLbl);
+
+        _alertTa = lv_textarea_create(row);
+        lv_obj_set_flex_grow(_alertTa, 1);
+        lv_obj_set_height(_alertTa, 40);
+        lv_textarea_set_one_line(_alertTa, true);
+        lv_textarea_set_accepted_chars(_alertTa, "0123456789.");
+        lv_textarea_set_max_length(_alertTa, 10);
+        lv_textarea_set_placeholder_text(_alertTa, "40.00");
+        if (prefill[0]) lv_textarea_set_text(_alertTa, prefill);
+
+        for (int u = 0; u < 3; u++) {
+            static const char* U[3] = { "k", "M", "B" };
+            lv_obj_t* b = lv_btn_create(row);
+            _alertUnitBtn[u] = b;
+            lv_obj_set_size(b, 36, 40);
+            lv_obj_set_style_border_width(b, 1, 0);
+            lv_obj_set_style_radius(b, 8, 0);
+            lv_obj_set_user_data(b, (void*)(intptr_t)u);
+            lv_obj_add_event_cb(b, [](lv_event_t* e) {
+                auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+                if (!self) return;
+                self->_alertUnit = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e));
+                self->_alertUnitRefresh();
+            }, LV_EVENT_CLICKED, this);
+            lv_obj_t* l = lv_label_create(b);
+            lv_label_set_text(l, U[u]);
+            lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(l, lv_color_hex(CLR_TEXT), 0);
+            lv_obj_center(l);
+        }
+        _alertUnitRefresh();
+
+        lv_obj_t* kb = lv_keyboard_create(card);
+        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
+        lv_obj_set_size(kb, LV_PCT(100), 140);
+        lv_keyboard_set_textarea(kb, _alertTa);
+
+        lv_obj_t* setBtn = addModalButton(card, "SET ALERT", true);
+        lv_obj_add_event_cb(setBtn, [](lv_event_t* e) {
+            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+            if (!self || !self->_alertTa) return;
+            int i = self->_alertIdx;
+            if (i < 0 || i >= self->_tickerCount) return;
+            double num = atof(lv_textarea_get_text(self->_alertTa));
+            if (num <= 0) return;                       // nothing sensible to arm
+            static const double MULT[3] = { 1e3, 1e6, 1e9 };
+            _setAlert(self->_tickers[i].pool_address, self->_alertDir, num * MULT[self->_alertUnit]);
+            self->_refreshBellColor(i);
+            lv_obj_del(self->_alertDlg);                // DELETE cb nulls the state
+        }, LV_EVENT_CLICKED, this);
+
+        lv_obj_t* clrBtn = addModalButton(card, "CLEAR ALERT", false);
+        lv_obj_add_event_cb(clrBtn, [](lv_event_t* e) {
+            auto* self = static_cast<TickerScreen*>(lv_event_get_user_data(e));
+            if (!self) return;
+            int i = self->_alertIdx;
+            if (i >= 0 && i < self->_tickerCount) {
+                _clearAlert(self->_tickers[i].pool_address);
+                self->_refreshBellColor(i);
+            }
+            lv_obj_del(self->_alertDlg);
+        }, LV_EVENT_CLICKED, this);
+    }
+
+    // Evaluate one ticker's alert against fresh live data; fire = one-shot.
+    void _checkAlert(int i) {
+        TickerEntry& t = _tickers[i];
+        if (!t.live_loaded || t.fdv <= 0) return;
+        char dir; double val;
+        if (!_alertFor(t.pool_address, &dir, &val)) return;
+        bool hit = (dir == 'l') ? (t.fdv <= val) : (t.fdv >= val);
+        if (!hit) return;
+        char thr[20];
+        _fmtUsdCompact(thr, sizeof(thr), val);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "$%s %c %s", t.base_symbol, dir == 'l' ? '<' : '>', thr);
+        Log.printf("tickers: ALERT FIRED %s (mcap now %.0f)\n", msg, (double)t.fdv);
+        _clearAlert(t.pool_address);                    // disarm BEFORE ringing (one-shot)
+        _refreshBellColor(i);
+        if (onTickerAlarm) onTickerAlarm(msg);
     }
 
     // ── Live data label helpers ────────────────────────────────────────────────
@@ -1550,6 +1860,8 @@ private:
                     if (self->_searchRequested) break;   // user is waiting — yield
                     if (millis() < self->_gtCooldownUntil) break;   // 429 backoff — retry next pass
                     TickerEntry& te = self->_tickers[i];
+                    if (te.chart_fails >= 5) continue;   // pool has no GT data — gave up
+                                                         // (manual refresh re-arms it)
                     // chart_at == 0 → forced by the manual refresh button (the
                     // plain age test misses it while uptime < the 15-min TTL).
                     if (!te.chart_loaded || te.chart_at == 0 ||
@@ -1804,6 +2116,7 @@ private:
                 // 10 of 24 candles: the "half-drawn mini chart". Discard and
                 // let the chart_want queue / TTL retry fetch it whole.
                 Log.printf("tickers: chart [%s] parse error: %s\n", te.base_symbol, derr.c_str());
+                if (te.chart_fails < 255) te.chart_fails++;
                 http.end();
                 return;
             }
@@ -1825,7 +2138,9 @@ private:
                 // 15-min TTL then protected from every refetch, and that even
                 // the refresh button couldn't recover. Leave it NOT loaded so
                 // the chart_want queue / next list pass retries.
-                Log.printf("tickers: chart [%s] HTTP 200 but 0 candles — will retry\n", te.base_symbol);
+                Log.printf("tickers: chart [%s] HTTP 200 but 0 candles (attempt %u)\n",
+                           te.base_symbol, (unsigned)(te.chart_fails + 1));
+                if (te.chart_fails < 255) te.chart_fails++;
                 http.end();
                 return;
             }
@@ -1851,14 +2166,19 @@ private:
             if (ohlcv.size() > 0) te.chart_last_ts = (time_t)(ohlcv[0][0].as<long long>());
             te.chart_loaded = true;
             te.chart_at     = millis();
+            te.chart_fails  = 0;
             te.chart_dirty  = true;   // pollPending redraws on core 1
         } else {
             // GeckoTerminal failures were completely silent (no log, no retry
             // path) — "the mini charts just never load". 429 = rate limit
             // (free tier ~30 req/min): back off ALL chart fetches for 20 s,
-            // retrying instantly just burns more of the quota.
-            Log.printf("tickers: chart [%s] HTTP %d\n", te.base_symbol, code);
+            // retrying instantly just burns more of the quota. Other codes
+            // (404 = pool GT simply doesn't chart) count towards the give-up
+            // cap so a dataless pool stops eating quota forever.
+            Log.printf("tickers: chart [%s] HTTP %d (attempt %u)\n",
+                       te.base_symbol, code, (unsigned)(te.chart_fails + 1));
             if (code == 429) self->_gtCooldownUntil = millis() + 20000UL;
+            else if (te.chart_fails < 255) te.chart_fails++;
         }
         http.end();
     }
@@ -2337,6 +2657,7 @@ private:
         lv_obj_t* obj = lv_event_get_current_target(e);
         int idx = (int)(intptr_t)lv_obj_get_user_data(obj);
         if (!self || idx < 0 || idx >= self->_tickerCount) return;
+        _clearAlert(self->_tickers[idx].pool_address);   // removing a ticker cancels its alert
         self->_dispatchRemove(idx);
         // Reclaim the removed ticker's logo bitmap (the array shift below would
         // otherwise overwrite the pointer and leak ~4.7 KB PSRAM per delete).
@@ -2451,6 +2772,23 @@ public:
                 // prices from before the first live load).
                 if (self->_tickers[i].is_expanded && self->_cards[i].chart)
                     lv_obj_invalidate(self->_cards[i].chart);
+                // Fresh market cap in hand → evaluate this ticker's alert.
+                self->_checkAlert(i);
+            }
+        }
+
+        // Background ALERT polling: alerts must fire even if the user never
+        // visits the screener, so with alerts armed keep live data flowing
+        // (one batched DexScreener request per pass; the 2-min live TTL keeps
+        // it cheap). Also re-tints the bells — a web-side alert edit arrives
+        // via heartbeat CFG with no other signal to this screen.
+        {
+            static uint32_t lastAlertPollAt = 0;
+            if (millis() - lastAlertPollAt > 60000UL && self->_loadedOnce) {
+                lastAlertPollAt = millis();
+                for (int i = 0; i < self->_tickerCount; i++) self->_refreshBellColor(i);
+                if (storage.getTickerAlerts().length() > 0 && !self->_bgTask)
+                    self->_listReloadRequested = true;   // TTL-aware → cheap
             }
         }
 
@@ -2465,7 +2803,7 @@ public:
             bool incomplete = false;
             for (int i = 0; i < self->_tickerCount; i++) {
                 TickerEntry& te = self->_tickers[i];
-                if (!te.live_loaded || !te.chart_loaded ||
+                if (!te.live_loaded || (!te.chart_loaded && te.chart_fails < 5) ||
                     (te.logo_url[0] && !te.logo_ready)) { incomplete = true; break; }
             }
             if (!incomplete) {
@@ -2564,6 +2902,7 @@ public:
                 } else {
                     self->_rebuildTickerCards();
                 }
+                self->_pruneAlerts();   // ticker gone from the screener → its alert dies
                 break;
             }
             case PR_LIVE_LOADED:

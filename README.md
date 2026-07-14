@@ -75,7 +75,8 @@ A generic **single-token stats page** for whichever token the node has selected 
 A configurable live crypto price screener. Each node has its own ticker list stored in the backend and synced on load. Features:
 - Search tokens by name or symbol, or paste a contract address directly (routes to DexScreener's tokens API); results show chain and liquidity
 - Each ticker card shows logo, price, 24h change % and a sparkline; tap to **expand into a candlestick chart** (market-cap Y ticks, date X labels) with a **1D / 1W / 1M timeframe dropdown**
-- Gear button → edit mode: ▲/▼ reorder arrows and delete button per card (syncs with the web setup page)
+- Gear button → edit mode: 🔔 market-cap alert, ▲/▼ reorder arrows and delete button per card (syncs with the web setup page)
+- **Market-cap alerts**: set "above/below $X" per ticker (bell in edit mode, or from the web); when the cap crosses the line the device rings **TURBOALARM** with the trigger (e.g. `$CLAWD > $40M`). One-shot, synced both ways, cancelled if the ticker is removed; checked in the background even when the screen isn't open
 - Token logos are decoded once (PNG/JPEG) and **persisted to flash**, so they render instantly after reboots
 - Live prices refresh via a single batched DexScreener request per chain
 
@@ -91,7 +92,8 @@ Displays real NFT artwork fetched from OpenSea (paginated wallet scan) plus opti
 - **One collection per cell** (2×2/3×3), ordered by floor price, cell 1 is the most valuable collection; the cell's carousel cycles through that collection's NFTs. 1×1 cycles the whole wallet.
 - **Real artwork**: PNG/JPEG decoded on-device to the exact cell size (contain, letterboxed, no runtime scaling); SVG/webp/gif transcoded via the wsrv.nl image proxy. Everything is **cached on the LittleFS flash partition**: reboots repaint the full gallery in ~2 s with zero network (list snapshot + compressed images), then refresh silently.
 - **Caption band** under each artwork: collection name + floor price (Ξ, 2 decimals); toggle with the "Data" switch. Long names on 3×3 drop the "#id" automatically.
-- **Gear → edit mode**: ◀/▶ reorder and ✕ delete per cell; a deleted collection's cell is auto-filled by the next collection by floor. Order/hidden/data settings sync bidirectionally with the web setup page.
+- **Gear → edit mode**: ◀/▶ reorder, ✕ delete and 🔔 **floor alert** per cell; a deleted collection's cell is auto-filled by the next collection by floor. Order/hidden/data settings sync bidirectionally with the web setup page.
+- **Floor-price alerts**: per collection, "above/below X" in the collection's own floor currency (Ξ — or ₿ for Ordinals, auto-detected); firing rings **TURBOALARM** with the trigger (e.g. `CRYPTOPUNKS > 35 ETH`). One-shot, web-synced, cancelled when the collection leaves the gallery.
 - **Carousel / slideshow**: auto-advance per cell on a configurable timer (default 10 s; 0 = off).
 - **Spam filtering**: wallet collections with floor 0 are excluded (manual picks are exempt).
 - The device reports its detected collections to the backend, powering the web setup page's collections board (checkbox show/hide + reorder, first 9 fill the grid).
@@ -189,7 +191,9 @@ A Next.js app deployed to Vercel at `network.turbousd.com`:
   - Rewards & Identity: Base wallet address (for ₸USD payouts), X/Twitter handle
   - Alarm: time picker + day-of-week selector + **volume slider (1 to 5, default 2)**
   - Display preferences: °C/°F, date format, time format, brightness, screen timeout, and **auto rotate screens** (off by default): when on, the device cycles through every screen on a timer and loops back to Home, with a selectable dwell time per screen (default 10s). The same toggle and seconds picker also live in the device's own settings popup, and the two stay in sync. Rotation pauses while an alarm is ringing, a popup is open, or the NFT fullscreen photo frame is active.
-  - NFT Gallery: wallet (auto-detect) + **collections board** (one row per detected collection with show/hide checkbox and reorder arrows (first 9 fill the grid) + **manual picks** below (OpenSea URLs or Bitcoin Ordinals inscriptions) always shown on the device); grid size, carousel, "show name & floor" toggle, slideshow interval
+  - NFT Gallery: wallet (auto-detect) + **collections board** (one row per detected collection with show/hide checkbox, 🔔 **floor alert** (Ξ/₿ auto-detected per collection) and reorder arrows (first 9 fill the grid) + **manual picks** below (OpenSea URLs or Bitcoin Ordinals inscriptions) always shown on the device); grid size, carousel, "show name & floor" toggle, slideshow interval
+  - Token Screener board with a 🔔 **market-cap alert** per ticker (above/below $X in k/M/B); alerts ring TURBOALARM on the device and sync both ways
+  - The **Save changes** button is sticky at the bottom of the viewport — always in reach on a long page
   - Screen order: drag-and-drop to reorder the 7 device screens (Home always fixed first), with an **eye toggle** per screen to hide it from the device rotation entirely
   - Verified badge: submit X post URL for manual verification
   - Firmware & updates (its own section, always last): shows the running ESP32 version and a **Check for updates** button that reports whether a newer published image exists. The web can't push the OTA itself (the device pulls it), so when an update is available it points you to the device's own **Settings to Check for updates** button to install it over WiFi.

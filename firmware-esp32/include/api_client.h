@@ -267,6 +267,17 @@ public:
             reqDoc["ticker_stats_symbol"] = storage.getTickerStatsSymbol();
         }
 
+        // Ticker market-cap alerts set/cleared/fired ON THE DEVICE → push up.
+        bool tickerAlertsWereDirty = storage.getTickerAlertsDirty();
+        if (tickerAlertsWereDirty) {
+            reqDoc["ticker_alerts"] = storage.getTickerAlerts();
+        }
+        // NFT collection floor alerts — same flow.
+        bool nftAlertsWereDirty = storage.getNftAlertsDirty();
+        if (nftAlertsWereDirty) {
+            reqDoc["nft_alerts"] = storage.getNftAlerts();
+        }
+
         // Detected collections list changed → report it (feeds the web board).
         bool collsWereDirty = storage.getNftCollsDirty();
         if (collsWereDirty) {
@@ -295,12 +306,16 @@ public:
                 applyServerConfig(cfg, /*skipAlarm=*/alarmWasDirty,
                                   /*skipNftLists=*/nftListsWereDirty,
                                   /*skipCarousel=*/carouselWasDirty,
-                                  /*skipTickerStats=*/tickerStatsWasDirty);
+                                  /*skipTickerStats=*/tickerStatsWasDirty,
+                                  /*skipTickerAlerts=*/tickerAlertsWereDirty,
+                                  /*skipNftAlerts=*/nftAlertsWereDirty);
             }
         }
         http.end();
         if (alarmWasDirty)    storage.clearAlarmDirty();       // pushed successfully
         if (nftListsWereDirty) storage.setNftListsDirty(false);
+        if (tickerAlertsWereDirty) storage.setTickerAlertsDirty(false);
+        if (nftAlertsWereDirty)    storage.setNftAlertsDirty(false);
         if (collsWereDirty)    storage.setNftCollsDirty(false);
         if (carouselWasDirty)  storage.clearScreenCarouselDirty();
         if (tickerStatsWasDirty) storage.clearTickerStatsDirty();
@@ -765,7 +780,7 @@ private:
     // skipAlarm: true while a device-side alarm change is being pushed up —
     // the server copy is (at best) what we just sent, and applying it back
     // could race/revert the local value.
-    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false, bool skipNftLists = false, bool skipCarousel = false, bool skipTickerStats = false) {
+    void applyServerConfig(JsonObjectConst cfg, bool skipAlarm = false, bool skipNftLists = false, bool skipCarousel = false, bool skipTickerStats = false, bool skipTickerAlerts = false, bool skipNftAlerts = false) {
         // Node identity (Node & Network screen headline)
         if (!cfg["display_name"].isNull())      storage.setDisplayName(cfg["display_name"].as<String>());
         if (!cfg["is_verified"].isNull())       storage.setIsVerified(cfg["is_verified"].as<bool>());
@@ -866,11 +881,16 @@ private:
         // whether the DB actually holds the pin — no NFT fetch needed. `isNull`
         // = the server sent JSON null (DB column is null → nothing saved).
         if (cfg["nft_pinlist"].isNull()) {
-            Log.println("CFG nft_pinlist: <null from server> (DB has no pinlist)");
+            if (storage.hasNftPinlist())   // only worth a line when it CLEARS something
+                Log.println("CFG nft_pinlist: <null from server> (DB has no pinlist)");
         } else {
             String pl = cfg["nft_pinlist"].as<String>();
-            Log.printf("CFG nft_pinlist from server: '%s'\n", pl.c_str());
-            storage.setNftPinlist(pl);
+            // Log ONLY on change: this used to print the full pinlist on EVERY
+            // 3-minute heartbeat — pure log spam that drowned real events.
+            if (pl != storage.getNftPinlist()) {
+                Log.printf("CFG nft_pinlist from server: '%s'\n", pl.c_str());
+                storage.setNftPinlist(pl);
+            }
         }
 
         // Home screen background image URL (web-set; server sends null to clear).
@@ -878,6 +898,24 @@ private:
         {
             String hbg = cfg["home_bg_url"].isNull() ? String("") : cfg["home_bg_url"].as<String>();
             if (hbg != storage.getHomeBgUrl()) storage.setHomeBgUrl(hbg);
+        }
+
+        // Ticker market-cap alerts (web-edited; skipped when the DEVICE just
+        // set/cleared/fired one this cycle — device edit wins that race).
+        if (!skipTickerAlerts) {
+            String ta = cfg["ticker_alerts"].isNull() ? String("") : cfg["ticker_alerts"].as<String>();
+            if (ta != storage.getTickerAlerts()) {
+                Log.printf("CFG ticker_alerts from server: '%s'\n", ta.c_str());
+                storage.setTickerAlerts(ta);
+            }
+        }
+        // NFT collection floor alerts — same semantics.
+        if (!skipNftAlerts) {
+            String na = cfg["nft_alerts"].isNull() ? String("") : cfg["nft_alerts"].as<String>();
+            if (na != storage.getNftAlerts()) {
+                Log.printf("CFG nft_alerts from server: '%s'\n", na.c_str());
+                storage.setNftAlerts(na);
+            }
         }
 
         // Screen order

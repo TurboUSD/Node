@@ -33,7 +33,8 @@
 #pragma once
 #include <lvgl.h>
 #include <HTTPClient.h>
-#include <new>   // placement-new for the PSRAM-resident _pendingResult
+#include <new>          // placement-new for the PSRAM-resident _pendingResult
+#include <functional>   // onNftAlarm callback (wired by ui_manager)
 #include "psram_alloc.h"   // PSRAM-backed vector + JsonDocument allocators
 #include <ArduinoJson.h>
 #include <vector>
@@ -530,7 +531,7 @@ private:
         lv_obj_t* floorLbl  = nullptr;
         lv_obj_t* dotRow    = nullptr;   // carousel position dots
         lv_obj_t* placeholder = nullptr; // shown while no bitmap decoded yet
-        lv_obj_t* editBtns[3] = { nullptr, nullptr, nullptr }; // ◀ ✕ ▶ overlay
+        lv_obj_t* editBtns[4] = { nullptr, nullptr, nullptr, nullptr }; // ◀ ✕ ▶ + 🔔 overlay
         int       nftStart  = 0;        // index of first NFT in this cell's "group"
         int       nftCount  = 0;        // how many NFTs are in this cell's group
         int       nftCurrent= 0;        // which one is displayed right now
@@ -1292,7 +1293,11 @@ private:
                 if (!first) rep += ',';
                 first = false;
                 rep += "{\"slug\":\"" + String(_nftCache[i].slug) + "\",\"name\":\"" + nm +
-                       "\",\"floor\":" + String(_nftCache[i].floor_price_eth, 4) + "}";
+                       "\",\"floor\":" + String(_nftCache[i].floor_price_eth, 4) +
+                       // Floor CURRENCY: Ordinals floors are BTC, not ETH — the
+                       // web board needs this to show ₿ vs Ξ (and for its floor-
+                       // alert editor to label the value correctly).
+                       (_nftCache[i].floor_btc ? ",\"btc\":1" : "") + "}";
                 i = j;
             }
             rep += "]";
@@ -1305,6 +1310,8 @@ private:
                 Log.println("NFT: collections report unchanged");
             }
         }
+        _checkNftAlerts();   // fresh floors in hand → evaluate + prune floor alerts
+
         if (listChanged) _rebuildGrid();
         else             _startImageFetch();   // still top up any missing art
     }
@@ -1699,14 +1706,22 @@ private:
             lv_obj_set_style_bg_color(cw.placeholder, lv_color_hex(bgColor == NFT_CLR_GREY ? 0x2a2a2e : bgColor), 0);
         }
 
-        // ── Edit-mode overlay: [◀] [✕] [▶] reorder/delete controls ──
-        // Rebuilt each refresh (rare + transient) via tracked pointers.
-        for (int b = 0; b < 3; b++)
+        // ── Edit-mode overlay: [◀] [✕] [▶] reorder/delete + [🔔] floor alert ──
+        // Rebuilt each refresh (rare + transient) via tracked pointers. The
+        // bell sits on a second row (a 4th button in the main row overflows
+        // the 3x3 cells) and shows the alert state: yellow = armed, dim = none.
+        for (int b = 0; b < 4; b++)
             if (cw.editBtns[b]) { lv_obj_del(cw.editBtns[b]); cw.editBtns[b] = nullptr; }
         if (_editMode && _gridSize != 1) {
-            static const char* glyphs[3] = { LV_SYMBOL_LEFT, LV_SYMBOL_CLOSE, LV_SYMBOL_RIGHT };
-            static lv_event_cb_t cbs[3]  = { _onCellMoveLeft, _onCellDelete, _onCellMoveRight };
-            for (int b = 0; b < 3; b++) {
+            static const char* glyphs[4] = { LV_SYMBOL_LEFT, LV_SYMBOL_CLOSE, LV_SYMBOL_RIGHT, LV_SYMBOL_BELL };
+            static lv_event_cb_t cbs[4]  = { _onCellMoveLeft, _onCellDelete, _onCellMoveRight, _onCellAlertBell };
+            bool armed = false;
+            {
+                int firstIdx = _cellNftIdx(cw, 0);
+                if (firstIdx >= 0 && firstIdx < (int)_nftCache.size())
+                    armed = _nftAlertFor(_nftCache[firstIdx].slug);
+            }
+            for (int b = 0; b < 4; b++) {
                 lv_obj_t* btn = lv_btn_create(cw.container);
                 cw.editBtns[b] = btn;
                 lv_obj_set_size(btn, 34, 30);
@@ -1715,12 +1730,16 @@ private:
                 lv_obj_set_style_border_color(btn, lv_color_hex(0x3a3a42), 0);
                 lv_obj_set_style_border_width(btn, 1, 0);
                 lv_obj_set_style_radius(btn, 6, 0);
-                lv_obj_align(btn, LV_ALIGN_CENTER, (lv_coord_t)((b - 1) * 42), 0);
+                if (b < 3) lv_obj_align(btn, LV_ALIGN_CENTER, (lv_coord_t)((b - 1) * 42), -18);
+                else       lv_obj_align(btn, LV_ALIGN_CENTER, 0, 18);   // bell row below
                 lv_obj_set_user_data(btn, (void*)(intptr_t)idx);
                 lv_obj_add_event_cb(btn, cbs[b], LV_EVENT_CLICKED, nullptr);
                 lv_obj_t* l = lv_label_create(btn);
                 lv_label_set_text(l, glyphs[b]);
-                lv_obj_set_style_text_color(l, lv_color_hex(b == 1 ? 0xff4d4d : NFT_CLR_TEXT), 0);
+                uint32_t col = (b == 1) ? 0xff4d4d
+                             : (b == 3) ? (armed ? 0xe8b339 : 0x55555c)
+                             : NFT_CLR_TEXT;
+                lv_obj_set_style_text_color(l, lv_color_hex(col), 0);
                 lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
                 lv_obj_center(l);
             }
@@ -1921,6 +1940,245 @@ private:
     }
     static void _onCellDelete(lv_event_t* e)    {
         if (s_instance) s_instance->_deleteCollection((int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e)));
+    }
+    static void _onCellAlertBell(lv_event_t* e) {
+        lv_event_stop_bubbling(e);
+        if (g_touchWasSwipe()) return;   // swipe that merely STARTED on the bell
+        if (s_instance) s_instance->_openNftAlertDialog((int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e)));
+    }
+
+    // ── NFT collection floor alerts ──────────────────────────────────────────
+    // NVS CSV "slug:dir:value" (dir 'g' = fires when the floor rises to/above
+    // value, 'l' = falls to/below), value in the collection's floor currency
+    // (ETH, or BTC for Ordinals). ONE-SHOT + web-synced, exactly like the
+    // ticker market-cap alerts (storage.setNftAlertsDirty → heartbeat).
+public:
+    std::function<void(const char*)> onNftAlarm;   // wired by ui_manager → TURBOALARM
+private:
+    lv_obj_t* _nftAlDlg    = nullptr;   // modal backdrop (nulled by DELETE event)
+    lv_obj_t* _nftAlTa     = nullptr;
+    lv_obj_t* _nftAlDirLbl = nullptr;
+    char  _nftAlSlug[68]   = {};
+    char  _nftAlDir        = 'g';
+    bool  _nftAlBtc        = false;
+
+    static bool _nftAlertFor(const char* slug, char* dirOut = nullptr, double* valOut = nullptr) {
+        String csv = storage.getNftAlerts();
+        int start = 0;
+        while (start < (int)csv.length()) {
+            int end = csv.indexOf(',', start);
+            if (end < 0) end = csv.length();
+            String e = csv.substring(start, end);
+            int c1 = e.indexOf(':');
+            int c2 = (c1 >= 0) ? e.indexOf(':', c1 + 1) : -1;
+            if (c1 > 0 && c2 > c1 && e.substring(0, c1).equalsIgnoreCase(slug)) {
+                if (dirOut) *dirOut = e.charAt(c1 + 1);
+                if (valOut) *valOut = atof(e.substring(c2 + 1).c_str());
+                return true;
+            }
+            start = end + 1;
+        }
+        return false;
+    }
+
+    static String _nftAlertsWithout(const char* slug) {
+        String csv = storage.getNftAlerts(), out;
+        int start = 0;
+        while (start < (int)csv.length()) {
+            int end = csv.indexOf(',', start);
+            if (end < 0) end = csv.length();
+            String e = csv.substring(start, end);
+            int c1 = e.indexOf(':');
+            if (c1 > 0 && !e.substring(0, c1).equalsIgnoreCase(slug)) {
+                if (out.length()) out += ',';
+                out += e;
+            }
+            start = end + 1;
+        }
+        return out;
+    }
+
+    static void _setNftAlert(const char* slug, char dir, double v) {
+        String out = _nftAlertsWithout(slug);
+        if (out.length()) out += ',';
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s:%c:%.2f", slug, dir, v);
+        out += buf;
+        storage.setNftAlerts(out);
+        storage.setNftAlertsDirty(true);
+        Log.printf("NFT: floor alert set %s\n", buf);
+    }
+
+    static void _clearNftAlert(const char* slug) {
+        String before = storage.getNftAlerts();
+        String out = _nftAlertsWithout(slug);
+        if (out == before) return;
+        storage.setNftAlerts(out);
+        storage.setNftAlertsDirty(true);
+        Log.printf("NFT: floor alert cleared for %s\n", slug);
+    }
+
+    // Editor: [ >|< ] [ value ] [ETH|BTC] + numeric keyboard + SET/CLEAR.
+    void _openNftAlertDialog(int cellIdx) {
+        if (_nftAlDlg || cellIdx < 0 || cellIdx >= _cellCount) return;
+        int nftIdx = _cellNftIdx(_cells[cellIdx], 0);
+        if (nftIdx < 0 || nftIdx >= (int)_nftCache.size()) return;
+        NftItem& it = _nftCache[nftIdx];
+        strncpy(_nftAlSlug, it.slug, sizeof(_nftAlSlug) - 1);
+        _nftAlBtc = it.floor_btc;
+        _nftAlDir = 'g';
+        char prefill[24] = "";
+        {
+            char cd; double cv;
+            if (_nftAlertFor(_nftAlSlug, &cd, &cv)) {
+                _nftAlDir = (cd == 'l') ? 'l' : 'g';
+                snprintf(prefill, sizeof(prefill), "%.2f", cv);
+            }
+        }
+
+        lv_obj_t* card = openModal(lv_scr_act());
+        _nftAlDlg = lv_obj_get_parent(card);
+        lv_obj_add_event_cb(_nftAlDlg, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (self) { self->_nftAlDlg = nullptr; self->_nftAlTa = nullptr; self->_nftAlDirLbl = nullptr; }
+        }, LV_EVENT_DELETE, this);
+
+        lv_obj_t* title = lv_label_create(card);
+        char tbuf[96];
+        snprintf(tbuf, sizeof(tbuf), "%s FLOOR ALERT", it.collection);
+        lv_label_set_text(title, tbuf);
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(title, lv_color_hex(NFT_CLR_TEXT), 0);
+        lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(title, LV_PCT(100));
+
+        lv_obj_t* row = lv_obj_create(card);
+        lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(row, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_set_style_pad_column(row, 8, 0);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t* dirBtn = lv_btn_create(row);
+        lv_obj_set_size(dirBtn, 46, 40);
+        lv_obj_set_style_bg_color(dirBtn, lv_color_hex(0x141414), 0);
+        lv_obj_set_style_border_color(dirBtn, lv_color_hex(NFT_CLR_BORDER), 0);
+        lv_obj_set_style_border_width(dirBtn, 1, 0);
+        lv_obj_set_style_radius(dirBtn, 8, 0);
+        lv_obj_add_event_cb(dirBtn, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (!self || !self->_nftAlDirLbl) return;
+            self->_nftAlDir = (self->_nftAlDir == 'g') ? 'l' : 'g';
+            lv_label_set_text(self->_nftAlDirLbl, self->_nftAlDir == 'g' ? ">" : "<");
+        }, LV_EVENT_CLICKED, this);
+        _nftAlDirLbl = lv_label_create(dirBtn);
+        lv_label_set_text(_nftAlDirLbl, _nftAlDir == 'g' ? ">" : "<");
+        lv_obj_set_style_text_font(_nftAlDirLbl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_color(_nftAlDirLbl, lv_color_hex(NFT_CLR_TEXT), 0);
+        lv_obj_center(_nftAlDirLbl);
+
+        _nftAlTa = lv_textarea_create(row);
+        lv_obj_set_flex_grow(_nftAlTa, 1);
+        lv_obj_set_height(_nftAlTa, 40);
+        lv_textarea_set_one_line(_nftAlTa, true);
+        lv_textarea_set_accepted_chars(_nftAlTa, "0123456789.");
+        lv_textarea_set_max_length(_nftAlTa, 10);
+        lv_textarea_set_placeholder_text(_nftAlTa, "0.50");
+        if (prefill[0]) lv_textarea_set_text(_nftAlTa, prefill);
+
+        // Real currency GLYPH (Ξ / ₿) via the caption font that already carries
+        // both — detected from the collection (Ordinals floors are BTC).
+        lv_obj_t* curLbl = lv_label_create(row);
+        lv_label_set_text(curLbl, _nftAlBtc ? "\xE2\x82\xBF" : "\xCE\x9E");
+        lv_obj_set_style_text_font(curLbl, ethXiFont10(), 0);
+        lv_obj_set_style_text_color(curLbl, lv_color_hex(NFT_CLR_TEXT), 0);
+
+        lv_obj_t* kb = lv_keyboard_create(card);
+        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
+        lv_obj_set_size(kb, LV_PCT(100), 140);
+        lv_keyboard_set_textarea(kb, _nftAlTa);
+
+        lv_obj_t* setBtn = addModalButton(card, "SET ALERT", true);
+        lv_obj_add_event_cb(setBtn, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (!self || !self->_nftAlTa) return;
+            double num = atof(lv_textarea_get_text(self->_nftAlTa));
+            if (num <= 0) return;
+            _setNftAlert(self->_nftAlSlug, self->_nftAlDir, num);
+            lv_obj_del(self->_nftAlDlg);
+            self->_rebuildReq = true;   // re-tint the cell bells
+        }, LV_EVENT_CLICKED, this);
+
+        lv_obj_t* clrBtn = addModalButton(card, "CLEAR ALERT", false);
+        lv_obj_add_event_cb(clrBtn, [](lv_event_t* e) {
+            NftScreen* self = (NftScreen*)lv_event_get_user_data(e);
+            if (!self) return;
+            _clearNftAlert(self->_nftAlSlug);
+            lv_obj_del(self->_nftAlDlg);
+            self->_rebuildReq = true;
+        }, LV_EVENT_CLICKED, this);
+    }
+
+    // After every SUCCESSFUL absorb (fresh floors in hand): evaluate + prune.
+    void _checkNftAlerts() {
+        if (_pendingResult.wallet_scan_failed) return;   // stale floors — skip both
+        String csv = storage.getNftAlerts();
+        if (csv.length()) {
+            int total = (int)_nftCache.size();
+            for (int i = 0; i < total; ) {
+                int j = i;
+                while (j < total && strcmp(_nftCache[j].slug, _nftCache[i].slug) == 0) j++;
+                const NftItem& it = _nftCache[i];
+                char dir; double val;
+                if (it.floor_price_eth > 0 && _nftAlertFor(it.slug, &dir, &val)) {
+                    bool hit = (dir == 'l') ? (it.floor_price_eth <= val)
+                                            : (it.floor_price_eth >= val);
+                    if (hit) {
+                        char vbuf[24];
+                        snprintf(vbuf, sizeof(vbuf), "%.2f", val);
+                        for (char* p = vbuf + strlen(vbuf) - 1; p > vbuf && *p == '0'; p--) *p = 0;
+                        if (vbuf[strlen(vbuf) - 1] == '.') vbuf[strlen(vbuf) - 1] = 0;
+                        char msg[80];
+                        snprintf(msg, sizeof(msg), "%.20s %c %s %s", it.collection,
+                                 dir == 'l' ? '<' : '>', vbuf, it.floor_btc ? "BTC" : "ETH");
+                        Log.printf("NFT: FLOOR ALERT FIRED %s (floor now %.4f)\n", msg, it.floor_price_eth);
+                        _clearNftAlert(it.slug);         // one-shot
+                        if (onNftAlarm) onNftAlarm(msg);
+                    }
+                }
+                i = j;
+            }
+        }
+        // Prune alerts for collections no longer in the (fresh, authoritative)
+        // cache — removing a collection cancels its alert, like the tickers.
+        csv = storage.getNftAlerts();
+        if (!csv.length()) return;
+        String out;
+        bool changed = false;
+        int start = 0;
+        while (start < (int)csv.length()) {
+            int end = csv.indexOf(',', start);
+            if (end < 0) end = csv.length();
+            String e = csv.substring(start, end);
+            int c1 = e.indexOf(':');
+            bool keep = false;
+            if (c1 > 0) {
+                String slug = e.substring(0, c1);
+                for (auto& it : _nftCache)
+                    if (slug.equalsIgnoreCase(it.slug)) { keep = true; break; }
+            }
+            if (keep) { if (out.length()) out += ','; out += e; }
+            else changed = true;
+            start = end + 1;
+        }
+        if (changed) {
+            storage.setNftAlerts(out);
+            storage.setNftAlertsDirty(true);
+            Log.println("NFT: floor alerts pruned (collection left the gallery)");
+        }
     }
 
     void _advanceCell(int idx) { _stepCell(idx, +1); }

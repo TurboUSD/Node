@@ -419,7 +419,9 @@ public:
         _sensorValid = false;
     }
 
-    void showAlarmFiringOverlay() {
+    // `trigger` (optional): extra line under the STOP button — used by the
+    // ticker market-cap alerts ("$CLAWD > $40M"). nullptr = plain wake-up alarm.
+    void showAlarmFiringOverlay(const char* trigger = nullptr) {
         // The alarm must ALWAYS light the screen — wake it from the
         // button-off state and from the idle-timeout state, and reset the
         // inactivity timer so it doesn't blank again mid-ring.
@@ -465,6 +467,21 @@ public:
         lv_obj_set_style_text_font(stopLabel, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_color(stopLabel, lv_color_hex(0x000000), 0);
         lv_obj_center(stopLabel);
+
+        // Ticker-alert trigger line ("$CLAWD > $40M") on a solid pill under the
+        // STOP button, so it stays readable through the green↔white blinking.
+        if (trigger && trigger[0]) {
+            lv_obj_t* trig = lv_label_create(overlay);
+            lv_label_set_text(trig, trigger);
+            lv_obj_set_style_text_font(trig, &lv_font_montserrat_20, 0);
+            lv_obj_set_style_text_color(trig, lv_color_hex(0xffffff), 0);
+            lv_obj_set_style_bg_color(trig, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_bg_opa(trig, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(trig, 10, 0);
+            lv_obj_set_style_pad_hor(trig, 14, 0);
+            lv_obj_set_style_pad_ver(trig, 8, 0);
+            lv_obj_align(trig, LV_ALIGN_CENTER, 0, 84);   // just below STOP
+        }
 
         alarmOverlay      = overlay;
         _alarmBgText      = bgText;
@@ -1318,6 +1335,20 @@ private:
         screens[(int)ScreenId::TICKERS] = lv_obj_create(nullptr);
         lv_obj_set_style_bg_color(screens[(int)ScreenId::TICKERS], lv_color_black(), 0);
         tickerScreen.build(screens[(int)ScreenId::TICKERS], onLogoTapped, onDateTapped, onQrTapped, this);
+        // Market-cap alert fired → the SAME ringing experience as the wake-up
+        // alarm (buzzer + flashing overlay), plus the trigger that tripped it
+        // ("$CLAWD > $40M"). The overlay's STOP flow reuses onAlarmDismissed →
+        // rp2040Link.stopAlarm(), and main.cpp's re-send loop keeps the buzzer
+        // alive exactly like a wake-up ring.
+        tickerScreen.onTickerAlarm = [this](const char* trigger) {
+            rp2040Link.playAlarm(storage.getAlarmVolume());
+            showAlarmFiringOverlay(trigger);
+        };
+        // NFT floor alerts ring the same TURBOALARM ("CRYPTOPUNKS > 35 ETH").
+        nftScreen.onNftAlarm = [this](const char* trigger) {
+            rp2040Link.playAlarm(storage.getAlarmVolume());
+            showAlarmFiringOverlay(trigger);
+        };
         _wireAlarmIcon(tickerScreen.header);
         _wireFooterNav(tickerScreen.footer);
         TickerScreen::s_instance = &tickerScreen;
@@ -2058,8 +2089,8 @@ private:
         // Button reference (informational).
         lv_obj_t* btnInfo = lv_label_create(card);
         lv_label_set_text(btnInfo,
-            "Top button: tap to toggle the screen, or to silence a ringing alarm. "
-            "On the NFT gallery, double-tap for fullscreen (double-tap again to exit).");
+            "Top button: screen on/off, silences alarms. "
+            "Double-tap on NFTs: fullscreen.");
         lv_obj_set_style_text_color(btnInfo, lv_color_hex(0x6e7280), 0);
         lv_obj_set_style_text_font(btnInfo, &lv_font_montserrat_10, 0);
         // Without wrap the sentence renders on one line and overflows the card
@@ -2068,22 +2099,9 @@ private:
         lv_obj_set_width(btnInfo, LV_PCT(100));
         lv_obj_set_style_text_align(btnInfo, LV_TEXT_ALIGN_CENTER, 0);
 
-        // Diagnostics over WiFi (screen mirror + live logs) — at the very bottom.
-        // Works even when the USB serial console is unavailable. mDNS is now
-        // re-announced on every WiFi (re)connect (see loop()), so the fixed
-        // turbousd.local name always resolves — we no longer show the raw IP
-        // (it changed on every DHCP lease and just added confusion).
-        lv_obj_t* diagInfo = lv_label_create(card);
-        lv_label_set_text(diagInfo, "Logs & screen (same WiFi):\nhttp://turbousd.local/logs");
-        // Same muted tone as the URL under the QR (was bright green, which drew
-        // the eye more than the setup URL above it).
-        lv_obj_set_style_text_color(diagInfo, lv_color_hex(0x9a9a9e), 0);
-        lv_obj_set_style_text_font(diagInfo, &lv_font_montserrat_10, 0);
-        lv_label_set_long_mode(diagInfo, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(diagInfo, LV_PCT(100));
-        lv_obj_set_style_text_align(diagInfo, LV_TEXT_ALIGN_CENTER, 0);
-
-        // ── FIRMWARE & UPDATES (at the bottom; the card scrolls so it's reachable) ──
+        // ── FIRMWARE & UPDATES (bottom; text pared down per request: the old
+        // "Logs & screen (same WiFi):" caption line is gone — the firmware
+        // line takes its slot/tone, with the bare logs URL right under it) ──
         lv_obj_t* verInfo = lv_label_create(card);
         {
             String rpv = rp2040Link.rpVersion();
@@ -2092,11 +2110,19 @@ private:
                      FIRMWARE_VERSION, rpv.length() ? rpv.c_str() : RP2040_FIRMWARE_VERSION);
             lv_label_set_text(verInfo, verBuf);
         }
-        lv_obj_set_style_text_color(verInfo, lv_color_hex(0x6a6a6e), 0);
+        lv_obj_set_style_text_color(verInfo, lv_color_hex(0x9a9a9e), 0);   // the old caption's tone
         lv_obj_set_style_text_font(verInfo, &lv_font_montserrat_10, 0);
         lv_label_set_long_mode(verInfo, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(verInfo, LV_PCT(100));
         lv_obj_set_style_text_align(verInfo, LV_TEXT_ALIGN_CENTER, 0);
+
+        lv_obj_t* diagInfo = lv_label_create(card);
+        lv_label_set_text(diagInfo, "http://turbousd.local/logs");
+        lv_obj_set_style_text_color(diagInfo, lv_color_hex(0x6a6a6e), 0);  // the firmware line's old tone
+        lv_obj_set_style_text_font(diagInfo, &lv_font_montserrat_10, 0);
+        lv_label_set_long_mode(diagInfo, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(diagInfo, LV_PCT(100));
+        lv_obj_set_style_text_align(diagInfo, LV_TEXT_ALIGN_CENTER, 0);
 
         // Tappable "Check for updates" link (WiFi OTA, no USB). A plain clickable
         // label rather than a big button, per request — sits under the versions.

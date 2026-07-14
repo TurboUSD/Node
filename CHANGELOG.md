@@ -5,6 +5,13 @@ and its companion web + backend. The ESP32 image version lives in
 `firmware-esp32/platformio.ini` (`FIRMWARE_VERSION`) and is what OTA compares
 against. Older lines are summarized; from here on, entries are detailed.
 
+## 0.4.0 — July 2026
+
+Price alerts, on tickers and NFTs:
+- Edit mode now shows a bell on every ticker card (market-cap alert) and NFT cell (floor alert). Yellow means armed. Also configurable from the web setup page.
+- When one triggers, the device rings TURBOALARM with the reason, e.g. $CLAWD > $40M. Alerts are one-shot and sync both ways with the web.
+- Also: chart downloads pace themselves to avoid rate limits, cleaner device settings text, and less log noise.
+
 ## 0.3.6 — July 2026
 
 Stability optimization:
