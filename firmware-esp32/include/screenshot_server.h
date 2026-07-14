@@ -257,4 +257,22 @@ inline void restartMdns() {
     }
 }
 
+// Re-bind BOTH the HTTP listener and mDNS after a WiFi (re)connection. The
+// WebServer's listen socket is bound to the old netif exactly like the mDNS
+// responder — after a drop/reconnect the stale pcb never accepts again and
+// handleClient() polls a dead socket forever: the "/logs dead until reboot"
+// failure. Called from the loop on every fresh connection AND whenever the
+// GOT_IP event fired (events catch blips short enough to happen entirely
+// inside one blocked loop pass, which the once-per-pass isConnected() poll
+// can't see).
+inline void restartNet() {
+    if (s_srv) {
+        s_srv->stop();
+        s_srv->begin();
+    }
+    restartMdns();
+    Log.printf("HTTP server re-bound: http://%s/ (logs: /logs)\n",
+                  WiFi.localIP().toString().c_str());
+}
+
 } // namespace screenshot

@@ -50,6 +50,9 @@ uint32_t lastNtpSyncAt          = 0;
 uint32_t lastSensorPollAt       = 0;
 uint32_t lastGeoSyncAt          = 0;
 uint32_t bootMillis             = 0;
+// Set from the WiFi GOT_IP event callback (runs in the system event task);
+// read + cleared by loop() to re-bind the HTTP/mDNS services after reconnects.
+static volatile bool g_wifiGotIp = false;
 
 bool nodeRegistered         = false;
 bool alarmCurrentlyFiring   = false;
@@ -319,6 +322,13 @@ void setup() {
     // When the user taps "Install" on the OTA notification, apply it.
     uiManager.onOtaInstallConfirmed = [](){ applyPendingOtaUpdate(); };
 
+    // GOT_IP event → flag for the loop to re-bind the HTTP/mDNS services.
+    // The event fires even when the (re)connection happens entirely inside
+    // one long blocked loop pass, which the once-per-pass isConnected() poll
+    // misses — that gap is how /logs stayed dead after some WiFi blips.
+    WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t) { g_wifiGotIp = true; },
+                 ARDUINO_EVENT_WIFI_STA_GOT_IP);
+
     wifiManager.begin(); // connects with saved creds or opens provisioning AP
 
     bootMillis = millis();
@@ -384,14 +394,18 @@ void loop() {
 
     // Screenshot server: lazy-started on the first connected pass (the
     // provisioning portal owns port 80 in AP mode, never simultaneously).
-    if (!screenshot::started()) screenshot::init();
-    // mDNS stops answering after a WiFi reconnect (the responder is bound to the
-    // old interface), so re-announce it on every fresh connection — otherwise
-    // turbousd.local works on a fresh boot and dies after the first WiFi blip.
-    if (!wifiWasUp) {
-        wifiWasUp = true;
-        screenshot::restartMdns();
+    bool freshServer = !screenshot::started();
+    if (freshServer) screenshot::init();
+    // Both mDNS AND the HTTP listen socket are bound to the network interface:
+    // after a WiFi reconnect they silently die (turbousd.local unresolvable
+    // and/or /logs unreachable until reboot). Re-bind them on every fresh
+    // connection — detected by the wasUp flag OR the GOT_IP event, which also
+    // catches blips that resolve entirely within one blocked loop pass.
+    if ((!wifiWasUp || g_wifiGotIp) && !freshServer) {
+        screenshot::restartNet();
     }
+    wifiWasUp  = true;
+    g_wifiGotIp = false;
     screenshot::poll();
 
     uint32_t now = millis();

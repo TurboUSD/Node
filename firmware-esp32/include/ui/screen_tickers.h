@@ -1555,10 +1555,13 @@ private:
                     if (!te.chart_loaded || te.chart_at == 0 ||
                         millis() - te.chart_at > 15UL * 60UL * 1000UL) {
                         TickerScreen::_fetchChart(self, i);
-                        // Breathe between candle fetches: GeckoTerminal's free
-                        // tier is ~30 req/min and 6+ back-to-back calls got
-                        // rate-limited (429) — silently, before the log above.
-                        vTaskDelay(pdMS_TO_TICKS(350));
+                        // Pace candle fetches at GeckoTerminal's sustained rate
+                        // (~30 req/min ⇒ one per 2 s): the old 350 ms spacing
+                        // tripped their BURST limit at the 6th chart on every
+                        // first sweep — the last card sat chartless until the
+                        // cooldown retry. Slower but complete beats fast with a
+                        // hole; charts still appear progressively as they land.
+                        vTaskDelay(pdMS_TO_TICKS(2000));
                     }
                 }
                 // If we yielded to a search, resume the remaining work after it.
@@ -1793,7 +1796,17 @@ private:
             // PSRAM-backed document: 360 OHLCV rows peaked ~30 KB of INTERNAL
             // heap through ArduinoJson's default allocator (see psram_alloc.h).
             JsonDocument doc(psramJsonAlloc());
-            deserializeJson(doc, http.getStream());
+            DeserializationError derr = deserializeJson(doc, http.getStream());
+            if (derr) {
+                // UNCHECKED before: a TLS drop mid-body (IncompleteInput — the
+                // same failure the NFT scan hit) left a PARTIALLY-parsed array
+                // that got stored and marked chart_loaded → a sparkline with
+                // 10 of 24 candles: the "half-drawn mini chart". Discard and
+                // let the chart_want queue / TTL retry fetch it whole.
+                Log.printf("tickers: chart [%s] parse error: %s\n", te.base_symbol, derr.c_str());
+                http.end();
+                return;
+            }
             JsonArray ohlcv = doc["data"]["attributes"]["ohlcv_list"].as<JsonArray>();
             if (gen != self->_tfGen) {   // timeframe changed mid-fetch → stale result
                 Log.printf("tickers: chart [%s] discarded (timeframe changed mid-fetch)\n", te.base_symbol);
