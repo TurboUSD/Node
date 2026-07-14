@@ -231,6 +231,8 @@ function CompactCard({
   isOwner:      boolean
   onMoveUp?:    () => void   // undefined = already first
   onMoveDown?:  () => void   // undefined = already last
+  alert?:       AlertCfg | null   // market-cap alert (bell shows armed/unarmed)
+  onBell?:      () => void        // open the alert editor
 }) {
   const isUp   = (live?.change24h ?? 0) >= 0
   const chgCol = isUp ? C.green : C.red
@@ -269,6 +271,13 @@ function CompactCard({
 
       {/* Buttons */}
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        {onBell && (
+          <button
+            style={{ ...s.iconBtn, color: alert ? C.yellow : C.muted }}
+            onClick={e => { e.stopPropagation(); onBell() }}
+            title={alert ? `Alert: mcap ${fmtAlertShort(alert)}` : 'Set market-cap alert'}
+          >🔔</button>
+        )}
         {isOwner && (
           <>
             <button style={{ ...s.iconBtn, opacity: onMoveUp ? 1 : 0.25 }} disabled={!onMoveUp}
@@ -471,7 +480,40 @@ function SearchRow({ nodeCode, onAdded }: { nodeCode: string; onAdded: () => voi
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function TickerBoard({ nodeCode, isOwner }: { nodeCode: string; isOwner: boolean }) {
+// ── Market-cap alerts ─────────────────────────────────────────────────────────
+// CSV "pool:dir:usd" (dir 'g' = fires when mcap rises to/above usd, 'l' = falls
+// to/below). Mirrors the device format 1:1 — saved via the page's main Save
+// button (update-node-config), delivered to the device on its next heartbeat.
+export interface AlertCfg { dir: 'g' | 'l'; usd: number }
+const ALERT_MULT = [1e3, 1e6, 1e9]
+const ALERT_UNITS = ['k', 'M', 'B']
+
+export function parseAlerts(csv: string): Record<string, AlertCfg> {
+  const out: Record<string, AlertCfg> = {}
+  for (const e of (csv || '').split(',')) {
+    const p = e.trim().split(':')
+    if (p.length === 3 && (p[1] === 'g' || p[1] === 'l')) {
+      const usd = parseFloat(p[2])
+      if (usd > 0) out[p[0]] = { dir: p[1], usd }
+    }
+  }
+  return out
+}
+export function serializeAlerts(m: Record<string, AlertCfg>): string {
+  return Object.entries(m).map(([pool, a]) => `${pool}:${a.dir}:${a.usd.toFixed(2)}`).join(',')
+}
+function fmtAlertShort(a: AlertCfg): string {
+  const unit = a.usd >= 1e9 ? 2 : a.usd >= 1e6 ? 1 : 0
+  const n = (a.usd / ALERT_MULT[unit]).toFixed(2).replace(/\.?0+$/, '')
+  return `${a.dir === 'g' ? '>' : '<'} $${n}${ALERT_UNITS[unit]}`
+}
+
+export default function TickerBoard({ nodeCode, isOwner, alerts = '', onAlertsChange }: {
+  nodeCode: string
+  isOwner: boolean
+  alerts?: string                             // "pool:g|l:usd" CSV (node.ticker_alerts)
+  onAlertsChange?: (csv: string) => void      // lifts edits to the page's node state
+}) {
   const [tickers,      setTickers]      = useState<StoredTicker[]>([])
   const [live,         setLive]         = useState<Record<string, LiveData | null>>({})
   const [sparkCandles, setSparkCandles] = useState<Record<string, Candle[]>>({})
@@ -546,10 +588,50 @@ export default function TickerBoard({ nodeCode, isOwner }: { nodeCode: string; i
     try {
       await callFunction('remove-node-ticker', { node_code: nodeCode, pool_address: poolAddress })
       if (expanded === poolAddress) setExpanded(null)
+      // Removing a ticker cancels its alert (the device prunes too — this keeps
+      // the pending page state consistent without waiting for a heartbeat).
+      if (alertMap[poolAddress]) {
+        const m = { ...alertMap }
+        delete m[poolAddress]
+        onAlertsChange?.(serializeAlerts(m))
+      }
       loadTickers()
     } catch (e: unknown) {
       alert((e as Error).message ?? 'Could not remove ticker')
     }
+  }
+
+  // ── Alerts editor state ──
+  const alertMap = parseAlerts(alerts)
+  const [editingAlert, setEditingAlert] = useState<string | null>(null)
+  const [aDir,  setADir]  = useState<'g' | 'l'>('g')
+  const [aVal,  setAVal]  = useState('')
+  const [aUnit, setAUnit] = useState(1)   // 0=k 1=M 2=B
+
+  function openAlertEditor(pool: string) {
+    const cur = alertMap[pool]
+    if (cur) {
+      setADir(cur.dir)
+      const unit = cur.usd >= 1e9 ? 2 : cur.usd >= 1e6 ? 1 : 0
+      setAUnit(unit)
+      setAVal((cur.usd / ALERT_MULT[unit]).toFixed(2).replace(/\.?0+$/, ''))
+    } else {
+      setADir('g'); setAUnit(1); setAVal('')
+    }
+    setEditingAlert(pool)
+  }
+  function saveAlert(pool: string) {
+    const num = parseFloat(aVal)
+    if (!(num > 0)) return
+    const usd = Math.round(num * ALERT_MULT[aUnit] * 100) / 100
+    onAlertsChange?.(serializeAlerts({ ...alertMap, [pool]: { dir: aDir, usd } }))
+    setEditingAlert(null)
+  }
+  function clearAlert(pool: string) {
+    const m = { ...alertMap }
+    delete m[pool]
+    onAlertsChange?.(serializeAlerts(m))
+    setEditingAlert(null)
   }
 
   if (tickers.length === 0 && !isOwner) return null
@@ -594,17 +676,45 @@ export default function TickerBoard({ nodeCode, isOwner }: { nodeCode: string; i
           )
         }
         return (
-          <CompactCard
-            key={t.pool_address}
-            onMoveUp={idx > 0 ? () => moveTicker(idx, -1) : undefined}
-            onMoveDown={idx < tickers.length - 1 ? () => moveTicker(idx, +1) : undefined}
-            ticker={t}
-            live={liveD}
-            sparkCandles={sparks}
-            onExpand={() => { setExpanded(t.pool_address); setTimeframe('1D') }}
-            onRemove={() => removeTicker(t.pool_address)}
-            isOwner={isOwner}
-          />
+          <div key={t.pool_address}>
+            <CompactCard
+              onMoveUp={idx > 0 ? () => moveTicker(idx, -1) : undefined}
+              onMoveDown={idx < tickers.length - 1 ? () => moveTicker(idx, +1) : undefined}
+              ticker={t}
+              live={liveD}
+              sparkCandles={sparks}
+              onExpand={() => { setExpanded(t.pool_address); setTimeframe('1D') }}
+              onRemove={() => removeTicker(t.pool_address)}
+              isOwner={isOwner}
+              alert={alertMap[t.pool_address] ?? null}
+              onBell={isOwner && onAlertsChange ? () => (editingAlert === t.pool_address
+                        ? setEditingAlert(null) : openAlertEditor(t.pool_address)) : undefined}
+            />
+            {editingAlert === t.pool_address && (
+              <div style={s.alertEditor}>
+                <span style={{ fontSize: 12, color: C.muted }}>Ring when mcap goes</span>
+                <select value={aDir} onChange={e => setADir(e.target.value as 'g' | 'l')} style={s.alertInput}>
+                  <option value="g">above &gt;</option>
+                  <option value="l">below &lt;</option>
+                </select>
+                <input type="number" min="0" step="0.01" placeholder="40.00" value={aVal}
+                  onChange={e => setAVal(e.target.value)} style={{ ...s.alertInput, width: 90 }} />
+                <select value={aUnit} onChange={e => setAUnit(parseInt(e.target.value))} style={s.alertInput}>
+                  <option value={0}>k</option>
+                  <option value={1}>M</option>
+                  <option value={2}>B</option>
+                </select>
+                <button style={s.alertBtn} onClick={() => saveAlert(t.pool_address)}>Set</button>
+                {alertMap[t.pool_address] && (
+                  <button style={{ ...s.alertBtn, color: C.red, borderColor: C.red }}
+                    onClick={() => clearAlert(t.pool_address)}>Clear</button>
+                )}
+                <span style={{ fontSize: 11, color: C.muted }}>
+                  Saved with the page&apos;s Save button; rings TURBOALARM on the device.
+                </span>
+              </div>
+            )}
+          </div>
         )
       })}
     </div>
@@ -618,6 +728,19 @@ const s: Record<string, React.CSSProperties> = {
   sectionTitle: {
     fontSize: 16, fontWeight: 'bold', color: '#ffffff',
     textTransform: 'uppercase', letterSpacing: 1.2, margin: 0,
+  },
+  alertEditor: {
+    display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+    padding: '10px 12px', marginTop: -6, marginBottom: 10,
+    background: '#0a0a0a', border: `1px solid ${C.border}`, borderRadius: 8,
+  },
+  alertInput: {
+    background: '#141414', color: '#e8e8e8', border: `1px solid ${C.border}`,
+    borderRadius: 6, padding: '6px 8px', fontSize: 13,
+  },
+  alertBtn: {
+    background: 'transparent', color: C.green, border: `1px solid ${C.green}`,
+    borderRadius: 6, padding: '6px 12px', fontSize: 13, cursor: 'pointer',
   },
   count: {
     background: '#141414', border: `1px solid ${C.border}`,

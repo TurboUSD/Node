@@ -63,7 +63,7 @@ interface NodeConfig {
   ticker_cols?:           1 | 2
   nft_coll_order?:        string | null
   nft_coll_hidden?:       string | null
-  nft_collections?:       { slug: string; name: string; floor: number }[] | null
+  nft_collections?:       { slug: string; name: string; floor: number; btc?: number }[] | null
   screen_hidden?:         string | null
   nft_slideshow_secs?:    number
   // Screen order (optional, requires DB migration)
@@ -72,6 +72,10 @@ interface NodeConfig {
   // Manual NFT pinlist (optional, requires DB migration)
   // Comma-separated "chain:contract:tokenId" items, max 20. Takes priority over nft_wallet_address on device.
   nft_pinlist?:           string | null
+  // Ticker market-cap alerts ("pool:g|l:usd" CSV, requires DB migration).
+  ticker_alerts?:         string | null
+  // NFT collection floor alerts ("slug:g|l:value" CSV, requires DB migration).
+  nft_alerts?:            string | null
   // Ticker Stats screen selection: which DEX pool the screen shows stats for.
   // Defaults to ₸USD. Chosen here or via the device's footer picker.
   ticker_stats_pool?:     string | null
@@ -301,6 +305,8 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         ticker_cols:           node.ticker_cols ?? 1,
         nft_coll_order:        node.nft_coll_order ?? '',
         nft_coll_hidden:       node.nft_coll_hidden ?? '',
+        ticker_alerts:         node.ticker_alerts ?? '',
+        nft_alerts:            node.nft_alerts ?? '',
         screen_hidden:         node.screen_hidden ?? '',
         nft_slideshow_secs:    node.nft_slideshow_secs,
         // Serialize pinlist: active if items exist, null to clear (falls back to wallet mode on device)
@@ -642,6 +648,8 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
             order={node.nft_coll_order ?? ''}
             hidden={node.nft_coll_hidden ?? ''}
             onChange={(ord, hid) => setNode({ ...node, nft_coll_order: ord, nft_coll_hidden: hid })}
+            alerts={node.nft_alerts ?? ''}
+            onAlertsChange={csv => setNode({ ...node, nft_alerts: csv })}
           />
 
           {/* Manual picks join the list above: each pick is ALWAYS shown on the
@@ -699,19 +707,28 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
         </Section>
 
           {/* One Save button for EVERYTHING above (profile, alarm, display,
-              NFT gallery, screen order), the NFT/order sections used to sit
-              outside the form with no way to save them. */}
-          <button type="submit" disabled={saving} style={s.primaryBtn}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-          {saveMsg && (
-            <p style={{ ...s.msg, color: saveMsg.ok ? C.green : C.red }}>{saveMsg.text}</p>
-          )}
+              NFT gallery, screen order). STICKY at the viewport bottom: the
+              page grew long enough that editing near the top meant scrolling
+              forever to find Save — now it's always in reach. */}
+          <div style={{ position: 'sticky', bottom: 0, zIndex: 20, padding: '12px 0',
+                        background: 'linear-gradient(to top, #000000 75%, transparent)' }}>
+            <button type="submit" disabled={saving} style={s.primaryBtn}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+            {saveMsg && (
+              <p style={{ ...s.msg, color: saveMsg.ok ? C.green : C.red, marginBottom: 0 }}>{saveMsg.text}</p>
+            )}
+          </div>
         </form>
 
         {/* ── Token screener, same left-accent treatment as the other sections ── */}
         <div style={{ ...s.section, borderLeftColor: C.green, marginTop: 36 }}>
-          <TickerBoard nodeCode={nodeCode} isOwner={true} />
+          <TickerBoard
+            nodeCode={nodeCode}
+            isOwner={true}
+            alerts={node.ticker_alerts ?? ''}
+            onAlertsChange={csv => setNode({ ...node, ticker_alerts: csv })}
+          />
         </div>
 
         {/* ── Verification ── */}
@@ -780,9 +797,10 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
 // the device's Settings → Check for updates (which does the WiFi OTA).
 function FirmwareCheck({ current }: { current?: string | null }) {
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [notes, setNotes] = useState<string | null>(null)   // changelog for the newer version
   const [busy, setBusy] = useState(false)
   async function check() {
-    setBusy(true); setMsg(null)
+    setBusy(true); setMsg(null); setNotes(null)
     try {
       const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
       const res = await fetch(`${FUNCTIONS_BASE_URL}/latest-firmware?target=esp32s3`, {
@@ -803,6 +821,8 @@ function FirmwareCheck({ current }: { current?: string | null }) {
           text: `Update available: v${latest}${cur ? ` (your node reports v${cur})` : ''}. On the device, open Settings (gear icon) and tap "Check for updates" to install it over WiFi.`,
           ok: false,
         })
+        // Show the changelog for the new version when the release carries one.
+        if (typeof j?.release_notes === 'string' && j.release_notes.trim()) setNotes(j.release_notes.trim())
       }
     } catch (e) {
       setMsg({ text: e instanceof Error ? e.message : 'Check failed.', ok: false })
@@ -824,6 +844,12 @@ function FirmwareCheck({ current }: { current?: string | null }) {
         color: '#dbe7ff', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
       }}>{busy ? 'Checking…' : 'Check for updates'}</button>
       {msg && <p style={{ marginTop: 8, fontSize: 13, color: msg.ok ? C.green : '#ffcf72' }}>{msg.text}</p>}
+      {notes && (
+        <div style={{ marginTop: 10, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 6, letterSpacing: 0.5 }}>WHAT&apos;S NEW</div>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 12, color: C.muted, lineHeight: 1.6 }}>{notes}</pre>
+        </div>
+      )}
     </div>
   )
 }
@@ -1134,12 +1160,18 @@ const collBtnStyle: React.CSSProperties = {
   lineHeight: 1, flexShrink: 0,
 }
 
-function NftCollectionsBoard({ collections, order, hidden, onChange }: {
-  collections: { slug: string; name: string; floor: number }[] | null
+function NftCollectionsBoard({ collections, order, hidden, onChange, alerts = '', onAlertsChange }: {
+  collections: { slug: string; name: string; floor: number; btc?: number }[] | null
   order: string
   hidden: string
   onChange: (order: string, hidden: string) => void
+  alerts?: string                          // "slug:g|l:value" CSV (node.nft_alerts)
+  onAlertsChange?: (csv: string) => void   // lifts edits into the page's node state
 }) {
+  // Floor-alert editor state (must be declared before any early return).
+  const [editingAlert, setEditingAlert] = React.useState<string | null>(null)
+  const [aDir, setADir] = React.useState<'g' | 'l'>('g')
+  const [aVal, setAVal] = React.useState('')
   if (!collections || collections.length === 0) {
     return (
       <p style={{ fontSize: 12, color: C.muted, margin: '10px 0' }}>
@@ -1151,7 +1183,7 @@ function NftCollectionsBoard({ collections, order, hidden, onChange }: {
   const hiddenSet = new Set(hidden.split(',').map(x => x.trim()).filter(Boolean))
   // Effective order: listed slugs first (in saved order), then the rest by reported (floor) order
   const bySlug = new Map(collections.map(c => [c.slug, c]))
-  const ordered: { slug: string; name: string; floor: number }[] = []
+  const ordered: { slug: string; name: string; floor: number; btc?: number }[] = []
   for (const slug of order.split(',').map(x => x.trim()).filter(Boolean)) {
     const c = bySlug.get(slug)
     if (c) { ordered.push(c); bySlug.delete(slug) }
@@ -1175,6 +1207,37 @@ function NftCollectionsBoard({ collections, order, hidden, onChange }: {
   // Hiding/showing must NOT rewrite the order (that was the main accidental
   // freeze): keep the existing order string, only update the hidden set.
   const commitHidden = (hs: Set<string>) => onChange(order, [...hs].join(','))
+
+  // Floor alerts ("slug:g|l:value" CSV, value in the collection's floor
+  // currency). Mirrors the ticker alerts; saved with the page's Save button.
+  const alertMap: Record<string, { dir: 'g' | 'l'; val: number }> = {}
+  for (const e of (alerts || '').split(',')) {
+    const p = e.trim().split(':')
+    if (p.length === 3 && (p[1] === 'g' || p[1] === 'l')) {
+      const v = parseFloat(p[2])
+      if (v > 0) alertMap[p[0]] = { dir: p[1], val: v }
+    }
+  }
+  const serializeNftAlerts = (m: typeof alertMap) =>
+    Object.entries(m).map(([slug, a]) => `${slug}:${a.dir}:${a.val.toFixed(2)}`).join(',')
+  const openAlertEditor = (slug: string) => {
+    const cur = alertMap[slug]
+    setADir(cur?.dir ?? 'g')
+    setAVal(cur ? cur.val.toFixed(2).replace(/\.?0+$/, '') : '')
+    setEditingAlert(slug)
+  }
+  const saveAlert = (slug: string) => {
+    const num = parseFloat(aVal)
+    if (!(num > 0)) return
+    onAlertsChange?.(serializeNftAlerts({ ...alertMap, [slug]: { dir: aDir, val: Math.round(num * 100) / 100 } }))
+    setEditingAlert(null)
+  }
+  const clearAlert = (slug: string) => {
+    const m = { ...alertMap }
+    delete m[slug]
+    onAlertsChange?.(serializeNftAlerts(m))
+    setEditingAlert(null)
+  }
 
   const move = (idx: number, dir: number) => {
     const to = idx + dir
@@ -1217,8 +1280,17 @@ function NftCollectionsBoard({ collections, order, hidden, onChange }: {
               {c.name || c.slug}
             </span>
             <span style={{ fontSize: 12, color: C.muted, flexShrink: 0 }}>
-              {c.floor >= 0.01 ? c.floor.toFixed(2) : c.floor.toFixed(3)} Ξ
+              {c.floor >= 0.01 ? c.floor.toFixed(2) : c.floor.toFixed(3)} {c.btc ? '₿' : 'Ξ'}
             </span>
+            {onAlertsChange && (
+              <button type="button"
+                style={{ ...collBtnStyle, color: alertMap[c.slug] ? '#ffcf72' : C.muted }}
+                title={alertMap[c.slug]
+                  ? `Floor alert: ${alertMap[c.slug].dir === 'g' ? '>' : '<'} ${alertMap[c.slug].val}`
+                  : 'Set floor alert'}
+                onClick={() => (editingAlert === c.slug ? setEditingAlert(null) : openAlertEditor(c.slug))}
+              >🔔</button>
+            )}
             <button type="button" style={{ ...collBtnStyle, opacity: idx > 0 ? 1 : 0.25 }} disabled={idx === 0}
               onClick={() => move(idx, -1)}>▲</button>
             <button type="button" style={{ ...collBtnStyle, opacity: idx < ordered.length - 1 ? 1 : 0.25 }} disabled={idx === ordered.length - 1}
@@ -1226,6 +1298,32 @@ function NftCollectionsBoard({ collections, order, hidden, onChange }: {
           </div>
         )
       })}
+      {editingAlert && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                      padding: '10px 12px', marginTop: 4, background: '#0a0a0a',
+                      border: `1px solid ${C.border}`, borderRadius: 8 }}>
+          <span style={{ fontSize: 12, color: C.muted }}>
+            {editingAlert}: ring when floor goes
+          </span>
+          <select value={aDir} onChange={e => setADir(e.target.value as 'g' | 'l')}
+            style={{ background: '#141414', color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 8px', fontSize: 13 }}>
+            <option value="g">above &gt;</option>
+            <option value="l">below &lt;</option>
+          </select>
+          <input type="number" min="0" step="0.01" placeholder="0.50" value={aVal}
+            onChange={e => setAVal(e.target.value)}
+            style={{ background: '#141414', color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: '6px 8px', fontSize: 13, width: 90 }} />
+          <span style={{ fontSize: 13, color: C.text, fontWeight: 700 }}>
+            {collections.find(c => c.slug === editingAlert)?.btc ? '₿ BTC' : 'Ξ ETH'}
+          </span>
+          <button type="button" onClick={() => saveAlert(editingAlert)}
+            style={{ background: 'transparent', color: '#43e397', border: '1px solid #43e397', borderRadius: 6, padding: '6px 12px', fontSize: 13, cursor: 'pointer' }}>Set</button>
+          {alertMap[editingAlert] && (
+            <button type="button" onClick={() => clearAlert(editingAlert)}
+              style={{ background: 'transparent', color: '#ff6b6b', border: '1px solid #ff6b6b', borderRadius: 6, padding: '6px 12px', fontSize: 13, cursor: 'pointer' }}>Clear</button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

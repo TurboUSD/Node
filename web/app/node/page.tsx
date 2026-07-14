@@ -158,11 +158,11 @@ export default function NodeProductPage() {
           <Feature icon="⛏" title="Mines ₸USD" color={C.green}
             text="Every hour the network opens a block and one online node wins it. Keep your node on your desk, keep it online, stack ₸USD. Verified nodes appear on the public leaderboard and world map." />
           <Feature icon="📈" title="Live tickers" color={C.yellow}
-            text="Track ₸USD and any tokens you pick, with logos, sparklines and expandable candlestick charts. One or two columns, fully configured from your phone." />
+            text="Track ₸USD and any tokens you pick, with logos, sparklines and expandable candlestick charts. Set market-cap alerts that ring the device like an alarm when a token crosses your line." />
           <Feature icon="⏰" title="Clock & alarm" color={C.blue}
             text="A proper bedside clock: big time, date, weekday alarms with a real buzzer. The screen wakes up on its own when the alarm fires, even from sleep." />
           <Feature icon="🖼" title="NFT gallery" color={C.blue}
-            text="Show your Ethereum NFTs and Bitcoin Ordinals in 1×1, 2×2 or 3×3 grids with floor prices. Point it at your wallet and it curates by floor, or pin exactly the pieces you want on display." />
+            text="Your Ethereum NFTs and Bitcoin Ordinals in 1×1, 2×2 or 3×3 grids with live floors, floor-price alerts and a fullscreen photo-frame mode. Point it at your wallet or pin exactly what you want on display." />
           <Feature icon="💸" title="Inflation game" color={C.red}
             text="Watch $10,000 lose purchasing power in real time, at the current US debt-derived rate, down to the fourth decimal, tick by tick. Painfully honest. Switch to 1-100 year horizons when you want the long view." />
           <Feature icon="🏛" title="US debt clock" color={C.red}
