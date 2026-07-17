@@ -5,6 +5,22 @@ and its companion web + backend. The ESP32 image version lives in
 `firmware-esp32/platformio.ini` (`FIRMWARE_VERSION`) and is what OTA compares
 against. Older lines are summarized; from here on, entries are detailed.
 
+## Web/backend — July 2026 (no firmware change)
+
+Communities ("projects"):
+- Node settings (Profile section) gain a Projects list: one unified search bar that accepts a token ticker (DexScreener) or a pasted OpenSea/Satflow/ordinals link. Up to 10 per node, one marked ★ favorite. Saved instantly via three new Edge Functions (add-node-project / remove-node-project / set-favorite-project) and a new node_projects table.
+- Block tiles on `/` and `/node` redesigned: winner's name sits where the reward figure was, their ★ favorite community sits where the name was.
+- Block pages add a "Part of" row: the winner's communities as tags, favorite highlighted first, each linking to a new `/community/[key]` page with aggregate stats and a member table.
+- New "By Communities" leaderboard (blocks mined by each community's members); the leaderboard grid grows to three columns on wide screens and a third toggle tab on mobile.
+- Requires re-running `backend/sql/schema.sql` (new table + updated public_mining_feed + two new views) and deploying the three new functions.
+
+## 0.4.1 — July 2026
+
+Communities on the device network screen:
+- Mined block tiles now match the web: the winner's node name is the centered headline (bright green, prominent) where the ₸ reward used to be, and their favorite community sits below it where the name was — with "(+N)" showing how many more communities the winner belongs to.
+- The web block-card project line also shows the "(+N)" extra-community count, and the favorite tag now appears next to the node name on the map popup, the map detail overlay, and the full node profile (which gains a "Part of N communities" section). The ★ glyph was dropped everywhere in favor of the highlighted green tag style.
+- Requires re-running the updated `public_mining_feed` view (adds `winner_project_count`) — see `backend/sql/2026-07-17-project-count-and-favorites-tiebreak.sql`.
+
 ## 0.4.0 — July 2026
 
 Price alerts, on tickers and NFTs:

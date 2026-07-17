@@ -423,7 +423,7 @@ public:
         int minedIdx = 0;
         for (int i = 0; i < count && minedIdx < NODE_MINED_BLOCKS_SHOWN; i++) {
             if (!entries[i].mined) continue;
-            setBlockContent(minedBlocks[minedIdx], entries[i].blockNumber, entries[i].rewardTusd, entries[i].winnerDisplayName, entries[i].winnerCountry);
+            setBlockContent(minedBlocks[minedIdx], entries[i].blockNumber, entries[i].winnerDisplayName, entries[i].winnerCountry, entries[i].winnerProject, entries[i].winnerProjectCount);
             minedIdx++;
         }
         // Hide any slots that no longer have a block (a shorter feed than before
@@ -640,24 +640,31 @@ private:
             lv_obj_set_style_text_color(w.numberLabel, lv_color_hex(0xd8ffe6), 0);
             lv_obj_align(w.numberLabel, LV_ALIGN_TOP_MID, 0, 6);
 
-            w.rewardLabel = lv_label_create(w.container);
-            lv_label_set_text(w.rewardLabel, "");
-            lv_obj_set_style_text_font(w.rewardLabel, tengeFont20(), 0);   // "₸100"
-            lv_obj_set_style_text_color(w.rewardLabel, lv_color_white(), 0);
-            // Nudged up so the number/reward/name/country stack is evenly
-            // spaced now that a country line sits at the bottom.
-            lv_obj_align(w.rewardLabel, LV_ALIGN_CENTER, 0, -8);
-
+            // Winner NAME — the headline, centered where the reward used to be.
+            // Bright green + montserrat_14 so it stands out from the dimmer
+            // project/country lines, width-capped with an ellipsis so long names
+            // still fit the tile. This label is the tap target for the info modal
+            // (wired in build()), so the name — not the reward — opens the winner.
             w.minerNameLabel = lv_label_create(w.container);
             lv_label_set_text(w.minerNameLabel, "");
-            lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 14);
+            lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 10);
             lv_label_set_long_mode(w.minerNameLabel, LV_LABEL_LONG_DOT);
-            lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_10, 0);
-            lv_obj_set_style_text_color(w.minerNameLabel, lv_color_hex(0xd8ffe6), 0);
+            lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(w.minerNameLabel, lv_color_hex(0x3aff7a), 0);
             lv_obj_set_style_text_align(w.minerNameLabel, LV_TEXT_ALIGN_CENTER, 0);
-            lv_obj_align(w.minerNameLabel, LV_ALIGN_BOTTOM_MID, 0, -20);   // nudged up to
-                                                                          // make room for the
-                                                                          // bigger country line
+            lv_obj_align(w.minerNameLabel, LV_ALIGN_CENTER, 0, -6);
+
+            // Winner's favourite community — where the name used to sit. Reuses the
+            // old reward label object (the ₸ reward was dropped per the web change).
+            // Dim light-green, one line, shows "SYMBOL (+N)".
+            w.rewardLabel = lv_label_create(w.container);
+            lv_label_set_text(w.rewardLabel, "");
+            lv_obj_set_width(w.rewardLabel, NODE_BLOCK_W - 14);
+            lv_label_set_long_mode(w.rewardLabel, LV_LABEL_LONG_DOT);
+            lv_obj_set_style_text_font(w.rewardLabel, &lv_font_montserrat_10, 0);
+            lv_obj_set_style_text_color(w.rewardLabel, lv_color_hex(0xd8ffe6), 0);
+            lv_obj_set_style_text_align(w.rewardLabel, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_align(w.rewardLabel, LV_ALIGN_BOTTOM_MID, 0, -20);
             // Country under the name — dim green, one line, ellipsised. Bumped
             // 8→10 px (montserrat_9 isn't compiled in) so it's actually readable.
             w.minerCountryLabel = lv_label_create(w.container);
@@ -713,8 +720,8 @@ private:
         lv_obj_set_style_shadow_color(w.container, mined ? lv_color_hex(0x0c3a20) : lv_color_hex(0x3a2c08), 0);
     }
 
-    void setBlockContent(BlockWidget& w, long blockNumber, double reward, const String& minerName,
-                         const String& country = String("")) {
+    void setBlockContent(BlockWidget& w, long blockNumber, const String& minerName,
+                         const String& country, const String& project, int projectCount) {
         bool isNewBlock = (w.lastBlockNumber != blockNumber);
         w.lastBlockNumber = blockNumber;
         // Remember the winner for the tap-to-open info modal.
@@ -723,9 +730,16 @@ private:
 
         char numBuf[12]; snprintf(numBuf, sizeof(numBuf), "#%ld", blockNumber);
         lv_label_set_text(w.numberLabel, numBuf);
-        char rewardBuf[16]; snprintf(rewardBuf, sizeof(rewardBuf), "\xE2\x82\xB8%d", (int)reward);
-        lv_label_set_text(w.rewardLabel, rewardBuf);
+        // Headline = the winner's node name (centered, prominent).
         lv_label_set_text(w.minerNameLabel, minerName.length() ? minerName.c_str() : "--");
+        // Under it, the winner's favourite community + "(+N)" extra communities.
+        char projBuf[40] = {};
+        if (project.length()) {
+            int extra = projectCount - 1;
+            if (extra > 0) snprintf(projBuf, sizeof(projBuf), "%s (+%d)", project.c_str(), extra);
+            else           snprintf(projBuf, sizeof(projBuf), "%s", project.c_str());
+        }
+        lv_label_set_text(w.rewardLabel, projBuf);
         if (w.minerCountryLabel) {
             // Location is always the anonymized (~300 km) IP-derived country; no
             // marker needed here (the "i" info note lives on the web cards).

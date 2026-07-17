@@ -78,6 +78,8 @@ struct MiningFeedEntry {
     double rewardTusd = 0;
     String winnerDisplayName = "";
     String winnerCountry = "";  // shown under the winner name on mined block tiles
+    String winnerProject = "";  // winner's favourite community (symbol or name)
+    int    winnerProjectCount = 0;  // total communities the winner is in ("(+N)" extras)
     bool mined = false;         // false = this is the currently-pending block
     time_t createdAtUtc = 0;    // when the block was opened (drives the countdown ring)
     time_t minedAtUtc   = 0;    // when it was mined (countdown fallback: minedAt + 1 h)
@@ -714,6 +716,14 @@ public:
                 outEntries[count].winnerDisplayName = "";
             outEntries[count].winnerCountry = row["winner_country"].isNull()
                 ? String("") : row["winner_country"].as<String>();
+            // Winner's favourite community: prefer the ticker symbol, else the name.
+            if (!row["winner_project_symbol"].isNull())
+                outEntries[count].winnerProject = row["winner_project_symbol"].as<String>();
+            else if (!row["winner_project_name"].isNull())
+                outEntries[count].winnerProject = row["winner_project_name"].as<String>();
+            else
+                outEntries[count].winnerProject = "";
+            outEntries[count].winnerProjectCount = row["winner_project_count"] | 0;
             outEntries[count].mined = !row["mined_at"].isNull();
             outEntries[count].createdAtUtc = parseIso8601Utc(row["created_at"] | "");
             outEntries[count].minedAtUtc   = parseIso8601Utc(row["mined_at"]   | "");

@@ -88,7 +88,7 @@ static const lv_font_t* tengeFont12() {
     return _tengeFontFor(&lv_font_montserrat_12, s_tenge12Bitmap, s_tenge12Glyphs,
                          &cmap, &dsc, &cache, &font, &ready);
 }
-static const lv_font_t* tengeFont20() {
+[[maybe_unused]] static const lv_font_t* tengeFont20() {  // kept for reuse; block tiles dropped the ₸ reward
     static bool ready = false;
     static lv_font_fmt_txt_cmap_t cmap; static lv_font_fmt_txt_dsc_t dsc;
     static lv_font_fmt_txt_glyph_cache_t cache; static lv_font_t font;
