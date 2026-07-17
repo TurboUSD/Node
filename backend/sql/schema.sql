@@ -72,6 +72,7 @@ create table if not exists nodes (
   nft_carousel_enabled boolean  default true,
   nft_slideshow_secs   smallint default 10,
   nft_pinlist          text,                          -- comma-joined "chain:contract:tokenId[:#bg]"
+  ticker_alerts        text,                          -- comma-joined "pool:g|l:usd" market-cap alerts
   nft_show_data        boolean  default true,
   nft_coll_order       text,                          -- comma-joined slugs, display order
   nft_coll_hidden      text,                          -- comma-joined hidden slugs
@@ -97,6 +98,13 @@ alter table nodes add column if not exists ticker_stats_symbol text default 'TUS
 -- Home (first screen) background image. When set, the device paints it behind
 -- the clock and draws a shadow panel behind the clock/alarm box for legibility.
 alter table nodes add column if not exists home_bg_url text;
+
+-- Ticker market-cap alerts: comma-joined "pool:g|l:usd" (g = fires when mcap
+-- rises to/above usd, l = falls to/below). One-shot; device rings TURBOALARM.
+alter table nodes add column if not exists ticker_alerts text;
+-- NFT collection floor alerts: comma-joined "slug:g|l:value" (value in the
+-- collection's floor currency — ETH, or BTC for Ordinals). Same semantics.
+alter table nodes add column if not exists nft_alerts text;
 
 -- Verification submissions (written by the submit-verification function; the
 -- owner sends their X post + wallet, a human reviews and flips is_verified).
@@ -162,6 +170,34 @@ create table if not exists node_tickers (
   created_at    timestamptz not null default now(),
   unique (node_id, pool_address)
 );
+
+-- Communities a node is part of ("projects"): a token (screener ticker) or an
+-- NFT collection (EVM via OpenSea link, or a BTC Ordinals collection via a
+-- Satflow/Magic Eden link). project_key is the normalised community identity so
+-- two nodes adding the same token/collection through different pools/items
+-- still count as the SAME community:
+--   token:<chain>:<base_token_address>   (falls back to the pool address)
+--   nft:<chain>:<contract>               (EVM collection)
+--   ord:<collection-slug|inscription-id> (Ordinals collection)
+-- Exactly ONE row per node may be the favourite (partial unique index below);
+-- the favourite is what block tiles show next to the winner's name.
+create table if not exists node_projects (
+  id            uuid primary key default gen_random_uuid(),
+  node_id       uuid not null references nodes(id) on delete cascade,
+  project_key   text not null,
+  kind          text not null check (kind in ('token', 'nft')),
+  name          text not null,
+  symbol        text,                                -- token ticker symbol, if any
+  image_url     text,                                -- collection / token image, if any
+  chain         text,                                -- 'base', 'ethereum', 'ord', …
+  ref_url       text,                                -- link the user pasted / canonical page
+  is_favorite   boolean not null default false,
+  display_order integer default 0,
+  created_at    timestamptz not null default now(),
+  unique (node_id, project_key)
+);
+create unique index if not exists node_projects_one_favorite
+  on node_projects (node_id) where is_favorite;
 
 -- Per-device owner secret. RLS on with NO policies: anon can never read it,
 -- only the Edge Functions (service role, which bypasses RLS) can.
@@ -270,14 +306,27 @@ select
   n.country,
   n.city,
   (round(n.lat::numeric / 3) * 3)::float8                     as lat,
-  (round(n.lng::numeric / 3) * 3)::float8                     as lng
+  (round(n.lng::numeric / 3) * 3)::float8                     as lng,
+  -- Winner's favourite community + total community count, so the node-info popup
+  -- (device) can show "Part of  SYMBOL (+N)" anywhere a node name is tapped.
+  fav.name                                                   as fav_project_name,
+  fav.symbol                                                 as fav_project_symbol,
+  coalesce((
+    select count(*)::int from node_projects np where np.node_id = n.id
+  ), 0)                                                      as project_count
 from nodes n
 left join node_reward_balances rb on rb.node_id = n.id
 left join lateral (
   select count(*)::int as blocks_won
   from mining_blocks b
   where b.winner_node_id = n.id
-) bw on true;
+) bw on true
+left join lateral (
+  select fp.name, fp.symbol
+  from node_projects fp
+  where fp.node_id = n.id and fp.is_favorite
+  limit 1
+) fav on true;
 
 grant select on public_node_directory to anon, authenticated;
 
@@ -296,9 +345,25 @@ select
   w.node_code    as winner_node_code,
   w.is_verified  as winner_is_verified,
   w.is_genesis   as winner_is_genesis,
-  w.country      as winner_country
+  w.country      as winner_country,
+  wp.project_key as winner_project_key,
+  wp.kind        as winner_project_kind,
+  wp.name        as winner_project_name,
+  wp.symbol      as winner_project_symbol,
+  wp.image_url   as winner_project_image,
+  -- Total communities the winner is part of. The tiles show the favourite by
+  -- name and append "(+N)" where N = winner_project_count - 1 (the extras).
+  coalesce((
+    select count(*)::int from node_projects np where np.node_id = b.winner_node_id
+  ), 0)          as winner_project_count
 from mining_blocks b
 left join nodes w on w.id = b.winner_node_id
+left join lateral (
+  select fp.project_key, fp.kind, fp.name, fp.symbol, fp.image_url
+  from node_projects fp
+  where fp.node_id = b.winner_node_id and fp.is_favorite
+  limit 1
+) wp on true
 order by b.block_number desc;
 
 grant select on public_mining_feed to anon, authenticated;
@@ -319,6 +384,60 @@ join nodes n on n.id = t.node_id
 order by t.display_order;
 
 grant select on node_ticker_config to anon, authenticated;
+
+-- A node's communities (projects), read by node_code. Favourite first.
+drop view if exists public_node_projects;
+create view public_node_projects as
+select
+  n.node_code,
+  p.project_key,
+  p.kind,
+  p.name,
+  p.symbol,
+  p.image_url,
+  p.chain,
+  p.ref_url,
+  p.is_favorite,
+  p.display_order,
+  p.created_at
+from node_projects p
+join nodes n on n.id = p.node_id
+order by p.is_favorite desc, p.display_order, p.created_at;
+
+grant select on public_node_projects to anon, authenticated;
+
+-- Leaderboard "by communities": every community ranked by the blocks mined by
+-- the nodes that added it (favourite or not). Metadata columns prefer the most
+-- recently added row's values via max() — good enough since all rows describe
+-- the same token/collection.
+drop view if exists public_community_leaderboard;
+create view public_community_leaderboard as
+select
+  p.project_key,
+  max(p.kind)      as kind,
+  max(p.name)      as name,
+  max(p.symbol)    as symbol,
+  max(p.image_url) as image_url,
+  max(p.chain)     as chain,
+  count(distinct p.node_id)::int as members_count,
+  (count(distinct p.node_id) filter
+     (where n.last_seen_at > now() - interval '10 minutes'))::int as members_online,
+  (count(distinct p.node_id) filter (where p.is_favorite))::int  as favorites_count,
+  coalesce(sum(bw.blocks_won), 0)::int   as blocks_won,
+  coalesce(sum(rb.total_tusd_earned), 0) as total_tusd_earned
+from node_projects p
+join nodes n on n.id = p.node_id
+left join node_reward_balances rb on rb.node_id = p.node_id
+left join lateral (
+  select count(*)::int as blocks_won
+  from mining_blocks b
+  where b.winner_node_id = p.node_id
+) bw on true
+group by p.project_key
+-- Ties broken by how many nodes picked the community as their ★ favourite
+order by blocks_won desc, favorites_count desc, members_count desc;
+
+grant select on public_community_leaderboard to anon, authenticated;
 
 -- Nodes still owed ₸USD (used by rewards-payout, service role only — NOT granted
 -- to anon so wallet addresses stay private).
@@ -347,6 +466,11 @@ create policy nodes_anon_read on nodes for select to anon, authenticated using (
 -- Setup tokens: RLS on, no policies, revoke from anon (service role only).
 alter table node_setup_tokens enable row level security;
 revoke all on node_setup_tokens from anon, authenticated;
+
+-- node_projects: RLS on, no policies — anon reads go through the public views,
+-- writes go through the add/remove/favorite Edge Functions (service role).
+alter table node_projects enable row level security;
+revoke all on node_projects from anon, authenticated;
 
 -- ── Scheduled jobs (pg_cron) ──────────────────────────────────────────────────
 -- Replace <PROJECT-REF> and <ANON-KEY> below, then run this section. mine-block
