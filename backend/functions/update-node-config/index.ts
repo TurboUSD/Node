@@ -110,6 +110,15 @@ async function handle(req: Request): Promise<Response> {
     // NFT manual pinlist: comma-separated "chain:contract:tokenId" entries, max 20.
     // Takes priority over nft_wallet_address on the device. Pass null/'' to clear.
     nft_pinlist?:            string | null
+    // Ticker market-cap alerts: CSV of "poolAddress:dir:usd" (dir 'g' = fires
+    // when mcap rises to/above usd, 'l' = falls to/below; usd may carry two
+    // decimals). One alert per pool; pass null/'' to clear all.
+    // Requires: ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ticker_alerts text;
+    ticker_alerts?:          string | null
+    // NFT collection floor alerts: CSV of "slug:dir:value" (value in the
+    // collection's floor currency — ETH, or BTC for Ordinals).
+    // Requires: ALTER TABLE nodes ADD COLUMN IF NOT EXISTS nft_alerts text;
+    nft_alerts?:             string | null
     // Ticker Stats screen selection: which DEX pool the screen shows stats for.
     ticker_stats_pool?:      string
     ticker_stats_chain?:     string
@@ -274,6 +283,42 @@ async function handle(req: Request): Promise<Response> {
       if (droppedItems.length > 0)
         console.warn(`nft_pinlist: dropped ${droppedItems.length} invalid item(s):`, droppedItems)
       updates.nft_pinlist = validItems.length > 0 ? validItems.join(',') : null
+    }
+  }
+  if (body.ticker_alerts !== undefined) {
+    if (!body.ticker_alerts) {
+      updates.ticker_alerts = null
+    } else {
+      // Per-entry validation, keep-the-valid (same philosophy as nft_pinlist):
+      // pool addresses aren't always 0x-hex (non-EVM chains), so accept any
+      // reasonable token; dir is g/l; value is a positive number (≤2 decimals).
+      const validAlert = /^[a-zA-Z0-9]{6,90}:[gl]:\d+(\.\d{1,2})?$/
+      const items = body.ticker_alerts.split(',').map(s => s.trim()).filter(Boolean)
+      if (items.length > 30)
+        return new Response(JSON.stringify({ error: 'ticker_alerts max 30 items' }), { status: 400 })
+      const valid = items.filter(i => validAlert.test(i))
+      if (valid.length === 0 && items.length > 0)
+        return new Response(JSON.stringify({ error: `No valid ticker_alerts items (first invalid: "${items[0]}"). Expected pool:g|l:usdValue` }), { status: 400 })
+      if (valid.length < items.length)
+        console.warn(`ticker_alerts: dropped ${items.length - valid.length} invalid item(s)`)
+      updates.ticker_alerts = valid.length > 0 ? valid.join(',') : null
+    }
+  }
+  if (body.nft_alerts !== undefined) {
+    if (!body.nft_alerts) {
+      updates.nft_alerts = null
+    } else {
+      // OpenSea slugs: lowercase alphanumerics + hyphens.
+      const validNftAlert = /^[a-z0-9-]{1,80}:[gl]:\d+(\.\d{1,2})?$/
+      const items = body.nft_alerts.split(',').map(s => s.trim()).filter(Boolean)
+      if (items.length > 30)
+        return new Response(JSON.stringify({ error: 'nft_alerts max 30 items' }), { status: 400 })
+      const valid = items.filter(i => validNftAlert.test(i))
+      if (valid.length === 0 && items.length > 0)
+        return new Response(JSON.stringify({ error: `No valid nft_alerts items (first invalid: "${items[0]}"). Expected slug:g|l:value` }), { status: 400 })
+      if (valid.length < items.length)
+        console.warn(`nft_alerts: dropped ${items.length - valid.length} invalid item(s)`)
+      updates.nft_alerts = valid.length > 0 ? valid.join(',') : null
     }
   }
 
