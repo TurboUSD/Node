@@ -78,7 +78,7 @@ function projectLabel(symbol?: string | null, name?: string | null, count?: numb
   const base = symbol || name
   if (!base) return '—'
   const extra = (count ?? 0) - 1
-  return extra > 0 ? `${base} (+${extra})` : base
+  return extra > 0 ? `${base} (${extra}+)` : base
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -687,7 +687,7 @@ const s: Record<string, React.CSSProperties> = {
   blockAgo:     { fontSize: 9,  color: '#a4a8b2' },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green },
   // Winner name — prominent, sits where the reward used to be on mined tiles
-  blockWinnerBig: { fontSize: 12, fontWeight: 'bold', color: C.green, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
+  blockWinnerBig: { fontSize: 10.5, fontWeight: 'bold', color: C.green, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 96 },
   // Winner's favourite community — sits where the winner name used to be
   blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
   blockCountry: { fontSize: 9, color: '#a4a8b2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },

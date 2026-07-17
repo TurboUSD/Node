@@ -250,7 +250,6 @@ export default function PublicNodePage() {
                 style={p.is_favorite ? s.projTagFav : s.projTag}
                 title={p.is_favorite ? `${p.name} — favorite community` : p.name}
               >
-                {p.is_favorite && <span aria-hidden>★</span>}
                 {p.image_url && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={p.image_url} alt="" style={{ width: 15, height: 15, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />

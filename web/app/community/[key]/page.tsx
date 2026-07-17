@@ -172,9 +172,6 @@ export default function CommunityPage({ params }: { params: { key: string } }) {
             {members.length === 0
               ? <p style={s.dim}>No members yet.</p>
               : wide ? <DesktopTable rows={members} /> : <MobileList rows={members} />}
-            <p style={{ fontSize: 11, color: C.muted, marginTop: 12, opacity: 0.7 }}>
-              ★ = nodes that picked this community as their favorite (shown on their mined blocks).
-            </p>
           </>
         )}
       </div>
@@ -218,7 +215,6 @@ function DesktopTable({ rows }: { rows: MemberRow[] }) {
             }} />
             <span style={{ ...s.ellip, fontWeight: 600 }}>{nameLabel(m)}</span>
             {m.is_verified && <span style={{ fontSize: 10, color: '#1d9bf0', flexShrink: 0 }}>✓</span>}
-            {m.is_favorite && <span style={{ fontSize: 10, color: C.yellow, flexShrink: 0 }} title="Favorite community of this node">★</span>}
             {m.country && <span style={{ ...s.ellip, fontSize: 11, color: C.muted }}>{m.country}</span>}
           </div>
           <div style={{ ...s.td, ...s.cBlocks, color: m.blocks_won > 0 ? C.yellow : C.muted, fontWeight: 700 }}>{m.blocks_won}</div>
@@ -242,7 +238,6 @@ function MobileList({ rows }: { rows: MemberRow[] }) {
               background: m.is_online ? C.green : '#2a2a2a',
             }} />
             <span style={{ ...s.ellip, fontWeight: 600, fontSize: 14, flex: 1, minWidth: 0 }}>{nameLabel(m)}</span>
-            {m.is_favorite && <span style={{ fontSize: 11, color: C.yellow, flexShrink: 0 }}>★</span>}
             <span style={{ color: m.blocks_won > 0 ? C.yellow : C.muted, fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{m.blocks_won} blk</span>
           </div>
           <div style={s.mMeta}>

@@ -139,7 +139,7 @@ function projectLabel(symbol?: string | null, name?: string | null, count?: numb
   const base = symbol || name
   if (!base) return '—'
   const extra = (count ?? 0) - 1
-  return extra > 0 ? `${base} (+${extra})` : base
+  return extra > 0 ? `${base} (${extra}+)` : base
 }
 
 // Minimal HTML escaping for user-supplied strings injected into the Leaflet
@@ -878,9 +878,9 @@ function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<str
         const favExtra = fav ? fav.count - 1 : 0
         const favTag = fav
           ? `<a href="/community/${encodeURIComponent(fav.project_key)}" onclick="event.stopPropagation()"
-               style="display:inline-flex;align-items:center;gap:4px;background:#43e39718;border:1px solid #43e39755;border-radius:20px;padding:1px 8px;font-size:10px;font-weight:700;color:#43e397;text-decoration:none;flex-shrink:0;max-width:130px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">★${
+               style="display:inline-flex;align-items:center;gap:4px;background:#43e39718;border:1px solid #43e39755;border-radius:20px;padding:1px 8px;font-size:10px;font-weight:700;color:#43e397;text-decoration:none;flex-shrink:0;max-width:130px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${
                  fav.image_url ? `<img src="${escHtml(fav.image_url)}" style="width:12px;height:12px;border-radius:3px;object-fit:cover;flex-shrink:0">` : ''
-               } ${escHtml(fav.symbol || fav.name)}${favExtra > 0 ? ` (+${favExtra})` : ''}</a>`
+               }${escHtml(fav.symbol || fav.name)}${favExtra > 0 ? ` (${favExtra}+)` : ''}</a>`
           : ''
         const popupHtml = `
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:272px;background:#111;border:1px solid #222;border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px #000a">
@@ -1416,13 +1416,12 @@ function FavTag({ fav }: { fav: FavProject }) {
         padding: '2px 9px', fontSize: 11, fontWeight: 700, color: C.green, textDecoration: 'none',
       }}
     >
-      <span aria-hidden>★</span>
       {fav.image_url && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={fav.image_url} alt="" style={{ width: 13, height: 13, borderRadius: 3, objectFit: 'cover', flexShrink: 0 }} />
       )}
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{fav.symbol || fav.name}</span>
-      {extra > 0 && <span style={{ flexShrink: 0, opacity: 0.85 }}>(+{extra})</span>}
+      {extra > 0 && <span style={{ flexShrink: 0, opacity: 0.85 }}>({extra}+)</span>}
     </a>
   )
 }
@@ -1488,7 +1487,7 @@ const s: Record<string, React.CSSProperties> = {
   blockAgo:     { fontSize: 9,  color: '#a4a8b2' },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green },
   // Winner name — prominent, sits where the reward used to be on mined tiles
-  blockWinnerBig: { fontSize: 12, fontWeight: 'bold', color: C.green, maxWidth: 92, textAlign: 'center' },
+  blockWinnerBig: { fontSize: 10.5, fontWeight: 'bold', color: C.green, maxWidth: 96, textAlign: 'center' },
   // Winner's favourite community — sits where the winner name used to be
   blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', maxWidth: 92, textAlign: 'center' },
   blockCountry: { fontSize: 9, color: '#a4a8b2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
@@ -1532,7 +1531,7 @@ const s: Record<string, React.CSSProperties> = {
   toggleBtn:    { padding: '5px 16px', fontSize: 12, fontWeight: 600, background: 'transparent', color: C.muted, border: 'none', cursor: 'pointer', borderRadius: 16 },
   toggleActive: { background: '#2a2a2a', color: C.text },
 
-  rank: { fontSize: 14, width: 28, textAlign: 'center', flexShrink: 0 },
+  rank: { fontSize: 14, width: 28, textAlign: 'center', flexShrink: 0, color: C.statVal },
 
   // Node detail panel
   backdrop: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 2000 },
