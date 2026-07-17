@@ -78,7 +78,7 @@ function projectLabel(symbol?: string | null, name?: string | null, count?: numb
   const base = symbol || name
   if (!base) return '—'
   const extra = (count ?? 0) - 1
-  return extra > 0 ? `${base} (${extra}+)` : base
+  return extra > 0 ? `${base} (+${extra})` : base
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────

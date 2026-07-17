@@ -139,7 +139,7 @@ function projectLabel(symbol?: string | null, name?: string | null, count?: numb
   const base = symbol || name
   if (!base) return '—'
   const extra = (count ?? 0) - 1
-  return extra > 0 ? `${base} (${extra}+)` : base
+  return extra > 0 ? `${base} (+${extra})` : base
 }
 
 // Minimal HTML escaping for user-supplied strings injected into the Leaflet
@@ -880,7 +880,7 @@ function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<str
           ? `<a href="/community/${encodeURIComponent(fav.project_key)}" onclick="event.stopPropagation()"
                style="display:inline-flex;align-items:center;gap:4px;background:#43e39718;border:1px solid #43e39755;border-radius:20px;padding:1px 8px;font-size:10px;font-weight:700;color:#43e397;text-decoration:none;flex-shrink:0;max-width:130px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${
                  fav.image_url ? `<img src="${escHtml(fav.image_url)}" style="width:12px;height:12px;border-radius:3px;object-fit:cover;flex-shrink:0">` : ''
-               }${escHtml(fav.symbol || fav.name)}${favExtra > 0 ? ` (${favExtra}+)` : ''}</a>`
+               }${escHtml(fav.symbol || fav.name)}${favExtra > 0 ? ` (+${favExtra})` : ''}</a>`
           : ''
         const popupHtml = `
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:272px;background:#111;border:1px solid #222;border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px #000a">
@@ -1421,7 +1421,7 @@ function FavTag({ fav }: { fav: FavProject }) {
         <img src={fav.image_url} alt="" style={{ width: 13, height: 13, borderRadius: 3, objectFit: 'cover', flexShrink: 0 }} />
       )}
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{fav.symbol || fav.name}</span>
-      {extra > 0 && <span style={{ flexShrink: 0, opacity: 0.85 }}>({extra}+)</span>}
+      {extra > 0 && <span style={{ flexShrink: 0, opacity: 0.85 }}>(+{extra})</span>}
     </a>
   )
 }
