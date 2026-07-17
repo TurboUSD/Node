@@ -53,10 +53,29 @@ interface MiningBlock {
   reward_tusd:         number
   winner_display_name: string | null
   winner_node_code:    string | null
-  winner_country?:     string | null   // shown under the winner name on mined tiles
+  winner_country?:     string | null   // shown at the bottom of mined tiles
+  // Winner's favourite community (from node_projects), shown where the winner
+  // name used to sit on mined tiles.
+  winner_project_key?:    string | null
+  winner_project_name?:   string | null
+  winner_project_symbol?: string | null
   mined_at:            string | null
   created_at?:         string | null   // when the block was opened (pending countdown)
   candidates_count:    number | null
+}
+
+// Leaderboard "By Communities" rows (public_community_leaderboard view).
+interface CommunityRow {
+  project_key:       string
+  kind:              'token' | 'nft'
+  name:              string
+  symbol:            string | null
+  image_url:         string | null
+  chain:             string | null
+  members_count:     number
+  members_online:    number
+  blocks_won:        number
+  total_tusd_earned: number
 }
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
@@ -75,6 +94,13 @@ async function fetchBlocks(): Promise<MiningBlock[]> {
     .order('block_number', { ascending: false })
     .limit(50)   // deeper history — the mined lane is horizontally scrollable now
   return (data ?? []) as MiningBlock[]
+}
+
+async function fetchCommunities(): Promise<CommunityRow[]> {
+  const { data } = await supabase
+    .from('public_community_leaderboard')
+    .select('*')
+  return (data ?? []) as CommunityRow[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -129,8 +155,9 @@ function fmtCountdown(ms: number): string {
 export default function NetworkPage() {
   const [nodes,        setNodes]        = useState<NodeRow[]>([])
   const [blocks,       setBlocks]       = useState<MiningBlock[]>([])
+  const [communities,  setCommunities]  = useState<CommunityRow[]>([])
   const [selectedNode, setSelectedNode] = useState<NodeRow | null>(null)
-  const [leaderSort,   setLeaderSort]   = useState<'rewards' | 'uptime'>('rewards')
+  const [leaderSort,   setLeaderSort]   = useState<'rewards' | 'uptime' | 'communities'>('rewards')
   const [winW,         setWinW]         = useState(1200)
   useEffect(() => {
     const update = () => setWinW(window.innerWidth)
@@ -210,9 +237,10 @@ export default function NetworkPage() {
   const [nowMs,        setNowMs]        = useState(Date.now())
 
   const refresh = useCallback(async () => {
-    const [n, b] = await Promise.all([fetchNodes(), fetchBlocks()])
+    const [n, b, c] = await Promise.all([fetchNodes(), fetchBlocks(), fetchCommunities()])
     setNodes(n)
     setBlocks(b)
+    setCommunities(c)
   }, [])
 
   useEffect(() => {
@@ -273,6 +301,10 @@ export default function NetworkPage() {
   const leaderboard = leaderSort === 'rewards'
     ? [...nodes].sort((a, b) => b.total_tusd_earned - a.total_tusd_earned)
     : [...nodes].sort((a, b) => totalUptime(b) - totalUptime(a))
+
+  // Communities ranked by the blocks their members are mining (view is already
+  // ordered that way; re-sort defensively for client-side refreshes).
+  const communityBoard = [...communities].sort((a, b) => b.blocks_won - a.blocks_won || b.members_count - a.members_count)
 
   // Ticker layout: mined blocks flow on the LEFT (newest pushes the rest
   // leftwards), the pending block sits FIXED on the right behind a dashed
@@ -386,8 +418,9 @@ export default function NetworkPage() {
           {nodes.length === 0
             ? <p style={s.empty}>No nodes registered yet.</p>
             : winW >= 640
-              ? /* Desktop: two side-by-side tables */
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              ? /* Desktop: side-by-side tables — three columns when the width
+                   allows, otherwise Communities drops to a full-width row below */
+                <div style={{ display: 'grid', gridTemplateColumns: winW >= 980 ? '1fr 1fr 1fr' : '1fr 1fr', gap: 16 }}>
                   <LeaderColumn
                     title="Total Rewards"
                     nodes={[...nodes].sort((a, b) => b.total_tusd_earned - a.total_tusd_earned)}
@@ -412,14 +445,24 @@ export default function NetworkPage() {
                     )}
                     onSelect={setSelectedNode}
                   />
+                  <div style={winW >= 980 ? undefined : { gridColumn: '1 / -1' }}>
+                    <CommunityColumn title="By Communities" rows={communityBoard} />
+                  </div>
                 </div>
               : /* Mobile: toggle */
                 <>
                   <div style={{ ...s.toggle, marginBottom: 12 }}>
                     <button style={leaderSort === 'rewards' ? { ...s.toggleBtn, ...s.toggleActive } : s.toggleBtn} onClick={() => setLeaderSort('rewards')}>₸ Rewards</button>
                     <button style={leaderSort === 'uptime'  ? { ...s.toggleBtn, ...s.toggleActive } : s.toggleBtn} onClick={() => setLeaderSort('uptime')}>Uptime</button>
+                    <button style={leaderSort === 'communities' ? { ...s.toggleBtn, ...s.toggleActive } : s.toggleBtn} onClick={() => setLeaderSort('communities')}>Communities</button>
                   </div>
-                  {leaderboard.map((node, idx) => (
+                  {leaderSort === 'communities'
+                    ? (communityBoard.length === 0
+                        ? <p style={s.empty}>No communities yet. Node owners add theirs in the node settings.</p>
+                        : communityBoard.map((c, idx) => (
+                            <CommunityRowCard key={c.project_key} community={c} rank={idx} />
+                          )))
+                    : leaderboard.map((node, idx) => (
                     <NodeRowCard key={node.node_code} node={node}
                       prefix={<div style={s.rank}>{idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}</div>}
                       right={
@@ -536,11 +579,14 @@ function BlockTile({ block, circlePct, minsLeft }: {
         <>
           {/* When it was mined */}
           <div style={s.blockAgo}>{block.mined_at ? timeSince(block.mined_at) : ''}</div>
-          {/* Reward — prominent */}
-          <div style={s.blockReward}>₸{block.reward_tusd}</div>
-          {/* Winner name (or #id if no name), marquee if it doesn't fit */}
+          {/* Winner name — prominent, where the reward used to be */}
           <Marquee
             text={block.winner_display_name || (block.winner_node_code ? `#${block.winner_node_code}` : '—')}
+            style={s.blockWinnerBig}
+          />
+          {/* Winner's favourite community — where the name used to be */}
+          <Marquee
+            text={block.winner_project_symbol || block.winner_project_name || '—'}
             style={s.blockWinner}
           />
           {/* Country under the name */}
@@ -1059,6 +1105,68 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
   )
 }
 
+// ── Communities leaderboard ───────────────────────────────────────────────────
+// Ranks COMMUNITIES (tokens / NFT collections added by node owners) by the
+// blocks their member nodes are mining. Rows link to /community/<key>.
+
+function CommunityAvatar({ c, size = 22 }: { c: CommunityRow; size?: number }) {
+  return c.image_url
+    // eslint-disable-next-line @next/next/no-img-element
+    ? <img src={c.image_url} alt="" style={{ width: size, height: size, borderRadius: 6, objectFit: 'cover', flexShrink: 0, background: '#111' }} />
+    : <div style={{ width: size, height: size, borderRadius: 6, background: C.surface, border: `1px solid ${C.border}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: C.muted }}>{c.kind === 'nft' ? '🖼' : '◆'}</div>
+}
+
+function CommunityColumn({ title, rows }: { title: string; rows: CommunityRow[] }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10,
+                    height: 16, lineHeight: '16px', display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>{title}</div>
+      {rows.length === 0
+        ? <p style={s.empty}>No communities yet.</p>
+        : rows.map((c, idx) => (
+            <a key={c.project_key} href={`/community/${encodeURIComponent(c.project_key)}`}
+              style={{ ...s.nodeRow, padding: '9px 10px', textDecoration: 'none' }}>
+              <div style={{ ...s.rank, fontSize: 11 }}>{idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}</div>
+              <CommunityAvatar c={c} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {c.name}{c.symbol ? <span style={{ color: C.muted, fontWeight: 400, marginLeft: 5, fontSize: 10 }}>{c.symbol}</span> : null}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {c.members_count} member{c.members_count !== 1 ? 's' : ''}{c.members_online > 0 ? ` · ${c.members_online} online` : ''}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 'bold', color: c.blocks_won > 0 ? C.yellow : C.muted }}>{c.blocks_won}</div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>blocks</div>
+              </div>
+            </a>
+          ))}
+    </div>
+  )
+}
+
+function CommunityRowCard({ community: c, rank }: { community: CommunityRow; rank: number }) {
+  return (
+    <a href={`/community/${encodeURIComponent(c.project_key)}`} style={{ ...s.nodeRow, textDecoration: 'none' }}>
+      <div style={s.rank}>{rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `#${rank + 1}`}</div>
+      <CommunityAvatar c={c} size={26} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {c.name}{c.symbol ? <span style={{ color: C.muted, fontWeight: 400, marginLeft: 6, fontSize: 11 }}>{c.symbol}</span> : null}
+        </div>
+        <div style={{ fontSize: 13, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {c.members_count} member{c.members_count !== 1 ? 's' : ''}{c.members_online > 0 ? ` · ${c.members_online} online` : ''}
+        </div>
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 'bold', color: c.blocks_won > 0 ? C.yellow : C.muted }}>{c.blocks_won}</div>
+        <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>blocks</div>
+      </div>
+    </a>
+  )
+}
+
 function NodeRowCard({ node, right, prefix, onClick }: {
   node:    NodeRow
   right?:  React.ReactNode
@@ -1287,6 +1395,9 @@ const s: Record<string, React.CSSProperties> = {
   blockNum:     { fontSize: 12, fontWeight: 700, color: '#e8e8ea', letterSpacing: 0.5 },
   blockAgo:     { fontSize: 9,  color: '#a4a8b2' },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green },
+  // Winner name — prominent, sits where the reward used to be on mined tiles
+  blockWinnerBig: { fontSize: 13, fontWeight: 'bold', color: C.green, maxWidth: 92, textAlign: 'center' },
+  // Winner's favourite community — sits where the winner name used to be
   blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', maxWidth: 92, textAlign: 'center' },
   blockCountry: { fontSize: 9, color: '#a4a8b2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
 

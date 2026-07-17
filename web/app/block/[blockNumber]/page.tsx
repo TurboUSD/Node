@@ -36,6 +36,16 @@ interface BlockDetail {
   winner_is_genesis:  boolean | null
 }
 
+// Communities the winner is part of (public_node_projects view).
+interface WinnerProject {
+  project_key: string
+  kind:        'token' | 'nft'
+  name:        string
+  symbol:      string | null
+  image_url:   string | null
+  is_favorite: boolean
+}
+
 function formatTs(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleString('en-GB', {
@@ -60,6 +70,7 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
   const [nextNum, setNextNum] = useState<number | null>(null)
   const [tipNum,  setTipNum]  = useState<number | null>(null)   // latest mined block → depth
   const [overlayCode, setOverlayCode] = useState<string | null>(null)
+  const [winnerProjects, setWinnerProjects] = useState<WinnerProject[]>([])
 
   useEffect(() => {
     if (isNaN(blockNum)) { setLoading(false); return }
@@ -77,6 +88,16 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
       .then(({ data }) => {
         setBlock(data as BlockDetail | null)
         setLoading(false)
+        // Communities the winner is part of ("Part of" row): favourite first
+        // (the view orders by is_favorite desc, display_order).
+        const code = (data as BlockDetail | null)?.winner_node_code
+        if (code) {
+          supabase
+            .from('public_node_projects')
+            .select('project_key, kind, name, symbol, image_url, is_favorite')
+            .eq('node_code', code)
+            .then(({ data: projs }) => setWinnerProjects((projs ?? []) as WinnerProject[]))
+        }
       })
 
     // Fetch adjacent block numbers for prev/next navigation. MUST use the public
@@ -157,6 +178,30 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
                   ) : '—'
                 }
               />
+              {winnerProjects.length > 0 && (
+                <Row
+                  label="Part of"
+                  value={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      {winnerProjects.map(p => (
+                        <a
+                          key={p.project_key}
+                          href={`/community/${encodeURIComponent(p.project_key)}`}
+                          style={p.is_favorite ? s.projTagFav : s.projTag}
+                          title={p.is_favorite ? `${p.name} — favorite community` : p.name}
+                        >
+                          {p.image_url && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={p.image_url} alt="" style={{ width: 14, height: 14, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                          )}
+                          {p.is_favorite && <span aria-hidden>★</span>}
+                          {p.symbol || p.name}
+                        </a>
+                      ))}
+                    </span>
+                  }
+                />
+              )}
               <Row
                 label="Randomness"
                 value={
@@ -258,6 +303,18 @@ const s: Record<string, React.CSSProperties> = {
   infoBox: {
     background: `${C.blue}08`, border: `1px solid ${C.blue}20`, borderRadius: 10,
     padding: '14px 16px', marginBottom: 24,
+  },
+
+  // "Part of" community tags: the ★ favourite pops in green, the rest stay muted.
+  projTagFav: {
+    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px',
+    background: `${C.green}18`, border: `1px solid ${C.green}55`, borderRadius: 20,
+    color: C.green, fontSize: 12, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap',
+  },
+  projTag: {
+    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px',
+    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 20,
+    color: C.text, fontSize: 12, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap',
   },
 
   verBadge: { fontSize: 11, color: C.blue, fontWeight: 'bold' },

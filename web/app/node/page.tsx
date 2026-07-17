@@ -54,6 +54,10 @@ interface MiningBlock {
   reward_tusd:         number
   winner_display_name: string | null
   winner_country?:     string | null
+  // Winner's favourite community (from node_projects), shown where the winner
+  // name used to sit on mined tiles.
+  winner_project_name?:   string | null
+  winner_project_symbol?: string | null
   mined_at:            string | null
   created_at?:         string | null
 }
@@ -432,8 +436,10 @@ function BlocksStrip({ mined, pending, circlePct, minsLeft }: {
           <div key={b.block_number} style={{ ...s.blockTile, ...s.blockMined }}>
             <div style={s.blockNum}>#{b.block_number}</div>
             <div style={s.blockAgo}>{b.mined_at ? timeSince(b.mined_at) : ''}</div>
-            <div style={s.blockReward}>₸{b.reward_tusd}</div>
-            <div style={s.blockWinner}>{b.winner_display_name ?? '—'}</div>
+            {/* Winner name — prominent, where the reward used to be */}
+            <div style={s.blockWinnerBig}>{b.winner_display_name ?? '—'}</div>
+            {/* Winner's favourite community — where the name used to be */}
+            <div style={s.blockWinner}>{b.winner_project_symbol || b.winner_project_name || '—'}</div>
             <div style={s.blockCountry}>{b.winner_country || ' '}</div>
           </div>
         ))}
@@ -670,6 +676,9 @@ const s: Record<string, React.CSSProperties> = {
   blockNum:     { fontSize: 12, fontWeight: 700, color: '#e8e8ea', letterSpacing: 0.5 },
   blockAgo:     { fontSize: 9,  color: '#a4a8b2' },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green },
+  // Winner name — prominent, sits where the reward used to be on mined tiles
+  blockWinnerBig: { fontSize: 13, fontWeight: 'bold', color: C.green, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
+  // Winner's favourite community — sits where the winner name used to be
   blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
   blockCountry: { fontSize: 9, color: '#a4a8b2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
 

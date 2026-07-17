@@ -377,6 +377,10 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
             {/* Location is NOT editable: it's derived from the node's IP and
                 anonymized to ~300 km before it's ever stored, so there is no
                 country/city field to set. The map/cards show that coarse value. */}
+            {/* Communities ("projects") the node is part of. Self-saving —
+                each add/remove/★ hits its own Edge Function immediately, the
+                main Save button is not involved. */}
+            <ProjectsEditor nodeCode={nodeCode} />
           </Section>
 
           {/* ── Rewards ── */}
@@ -1493,6 +1497,262 @@ function parseOrdinal(url: string): { chain: string; contract: string; tokenId: 
   const m = url.match(/([0-9a-fA-F]{64}i[0-9]+)/)
   if (!m) return null
   return { chain: 'ord', contract: m[1].toLowerCase(), tokenId: '0' }
+}
+
+// ── Projects (communities) ────────────────────────────────────────────────────
+// The communities a node is part of: tokens (same DexScreener search the
+// ticker board uses) or NFT collections (pasted OpenSea / Satflow / ordinals
+// link — same parsers as the pinlist below). ONE unified search bar: type a
+// ticker OR paste a link. Saved instantly via dedicated Edge Functions
+// (add-node-project / remove-node-project / set-favorite-project) — NOT part
+// of the main Save button. The ★ favourite is the community shown on block
+// tiles next to the winner's name, and feeds the "By Communities" leaderboard.
+
+interface NodeProject {
+  project_key: string
+  kind:        'token' | 'nft'
+  name:        string
+  symbol:      string | null
+  image_url:   string | null
+  chain:       string | null
+  is_favorite: boolean
+}
+
+interface ProjectResult {
+  key:        string
+  kind:       'token' | 'nft'
+  name:       string
+  symbol?:    string
+  image_url?: string
+  chain?:     string
+  ref_url?:   string
+  meta?:      string
+}
+
+function slugifyProject(t: string): string {
+  return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
+function ProjectsEditor({ nodeCode }: { nodeCode: string }) {
+  const [projects, setProjects] = useState<NodeProject[]>([])
+  const [query,    setQuery]    = useState('')
+  const [results,  setResults]  = useState<ProjectResult[]>([])
+  const [loading,  setLoading]  = useState(false)
+  const [busyKey,  setBusyKey]  = useState<string | null>(null)
+  const [error,    setError]    = useState<string | null>(null)
+  const [tick,     setTick]     = useState(0)   // bump to reload the saved list
+
+  useEffect(() => {
+    supabase
+      .from('public_node_projects')
+      .select('project_key, kind, name, symbol, image_url, chain, is_favorite')
+      .eq('node_code', nodeCode)
+      .then(({ data }) => setProjects((data ?? []) as NodeProject[]))
+  }, [nodeCode, tick])
+
+  async function search() {
+    const q = query.trim()
+    if (q.length < 2) return
+    setLoading(true)
+    setError(null)
+    setResults([])
+    try {
+      const nft = parseOpenseaUrl(q)
+      const ord = nft ? null : parseOrdinal(q)
+      if (nft) {
+        // OpenSea item link → the ITEM's collection is the community
+        const res = await callFunction<{ results: { name?: string; image_url?: string; collection_name?: string; error?: string }[] }>(
+          'resolve-nft', { items: [`${nft.chain}:${nft.contract}:${nft.tokenId}`] })
+        const r = res?.results?.[0]
+        if (!r || r.error) throw new Error('Could not resolve that OpenSea link')
+        setResults([{
+          key:       `nft:${nft.chain}:${nft.contract}`,
+          kind:      'nft',
+          name:      r.collection_name || r.name || 'NFT collection',
+          image_url: r.image_url,
+          chain:     nft.chain,
+          ref_url:   q,
+          meta:      `NFT collection · ${nft.chain}`,
+        }])
+      } else if (ord) {
+        // Satflow / Magic Eden / ordinals.com link (or raw inscription id)
+        const res = await callFunction<{ results: { id: string; name?: string | null; collection?: string | null }[] }>(
+          'resolve-ordinal', { ids: [ord.contract] })
+        const r = res?.results?.[0]
+        const coll = r?.collection || null
+        setResults([{
+          key:       `ord:${coll ? slugifyProject(coll) : ord.contract}`,
+          kind:      'nft',
+          name:      coll || r?.name || 'Ordinals collection',
+          image_url: `https://ordinals.com/content/${ord.contract}`,
+          chain:     'ord',
+          ref_url:   q,
+          meta:      'Ordinals collection',
+        }])
+      } else {
+        // Ticker → same DexScreener search + liquidity filter as the ticker
+        // board, but deduped per TOKEN (a community is the token, not a pool).
+        const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`)
+        if (!res.ok) throw new Error(`DexScreener ${res.status}`)
+        const data = await res.json() as { pairs?: Array<{
+          pairAddress: string; chainId: string
+          liquidity?: { usd?: number }
+          baseToken?: { symbol?: string; name?: string; address?: string }
+          info?: { imageUrl?: string }
+        }> }
+        const seen = new Set<string>()
+        const mapped: ProjectResult[] = []
+        for (const pr of data.pairs ?? []) {
+          if ((pr.liquidity?.usd ?? 0) < 1000) continue   // sink dust/scam clones
+          const base = (pr.baseToken?.address || pr.pairAddress).toLowerCase()
+          const key  = `token:${pr.chainId}:${base}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          mapped.push({
+            key,
+            kind:      'token',
+            name:      pr.baseToken?.name || pr.baseToken?.symbol || '?',
+            symbol:    pr.baseToken?.symbol,
+            image_url: pr.info?.imageUrl,
+            chain:     pr.chainId,
+            ref_url:   `https://dexscreener.com/${pr.chainId}/${pr.pairAddress}`,
+            meta:      `${pr.chainId} · Liq $${Math.round((pr.liquidity?.usd ?? 0) / 1000)}k`,
+          })
+          if (mapped.length >= 8) break
+        }
+        setResults(mapped)
+        if (mapped.length === 0) setError('No tokens found. You can also paste an OpenSea or Satflow link.')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Search failed')
+    }
+    setLoading(false)
+  }
+
+  async function add(r: ProjectResult) {
+    setBusyKey(r.key)
+    try {
+      await callFunction('add-node-project', {
+        node_code:   nodeCode,
+        project_key: r.key,
+        kind:        r.kind,
+        name:        r.name,
+        symbol:      r.symbol,
+        image_url:   r.image_url,
+        chain:       r.chain,
+        ref_url:     r.ref_url,
+      })
+      setResults([])
+      setQuery('')
+      setTick(t => t + 1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not add project')
+    }
+    setBusyKey(null)
+  }
+
+  async function favorite(p: NodeProject) {
+    if (p.is_favorite) return
+    setBusyKey(p.project_key)
+    try {
+      await callFunction('set-favorite-project', { node_code: nodeCode, project_key: p.project_key })
+      setTick(t => t + 1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not set favorite')
+    }
+    setBusyKey(null)
+  }
+
+  async function remove(p: NodeProject) {
+    setBusyKey(p.project_key)
+    try {
+      await callFunction('remove-node-project', { node_code: nodeCode, project_key: p.project_key })
+      setTick(t => t + 1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not remove project')
+    }
+    setBusyKey(null)
+  }
+
+  return (
+    <div style={{ marginBottom: 4 }}>
+      <label style={s.label}>Projects</label>
+
+      {/* Saved projects */}
+      {projects.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+          {projects.map(p => (
+            <div key={p.project_key} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: C.surface, border: `1px solid ${p.is_favorite ? `${C.green}55` : C.border}`,
+              borderRadius: 8, padding: '7px 10px',
+            }}>
+              {p.image_url
+                ? <img src={p.image_url} alt="" style={{ width: 24, height: 24, borderRadius: 6, objectFit: 'cover', flexShrink: 0, background: '#000' }} />
+                : <div style={{ width: 24, height: 24, borderRadius: 6, background: C.border, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: C.muted }}>{p.kind === 'nft' ? '🖼' : '◆'}</div>}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {p.name}{p.symbol ? <span style={{ color: C.muted, fontWeight: 400, marginLeft: 6, fontSize: 11 }}>{p.symbol}</span> : null}
+                </div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>
+                  {p.kind === 'nft' ? 'NFT collection' : 'Token'}{p.chain ? ` · ${p.chain}` : ''}
+                </div>
+              </div>
+              <button type="button" onClick={() => favorite(p)} disabled={busyKey === p.project_key}
+                title={p.is_favorite ? 'Favorite — shown on your mined blocks' : 'Make favorite'}
+                style={{ background: 'none', border: 'none', cursor: p.is_favorite ? 'default' : 'pointer', fontSize: 15, lineHeight: 1, padding: 2, color: p.is_favorite ? C.yellow : C.muted, flexShrink: 0 }}>
+                {p.is_favorite ? '★' : '☆'}
+              </button>
+              <button type="button" onClick={() => remove(p)} disabled={busyKey === p.project_key}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 2, color: C.muted, flexShrink: 0 }}
+                aria-label={`Remove ${p.name}`}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Unified search: ticker text OR pasted OpenSea/Satflow link */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          style={{ ...s.input, flex: 1 }}
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); search() } }}
+          placeholder="Search a token, or paste an OpenSea / Satflow link…"
+        />
+        <button type="button" onClick={search} disabled={loading} style={{
+          padding: '0 16px', background: C.surface, color: C.text, border: `1px solid ${C.border}`,
+          borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
+        }}>{loading ? '…' : 'Search'}</button>
+      </div>
+
+      {/* Results */}
+      {results.length > 0 && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, marginTop: 8, overflow: 'hidden' }}>
+          {results.map(r => (
+            <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderBottom: `1px solid ${C.border}`, background: C.card }}>
+              {r.image_url && <img src={r.image_url} alt="" style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'cover', flexShrink: 0, background: '#000' }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{r.name}</span>
+                {r.symbol && <span style={{ fontSize: 11, color: C.muted, marginLeft: 6 }}>{r.symbol}</span>}
+                {r.meta && <span style={{ fontSize: 11, color: C.muted, marginLeft: 6 }}>· {r.meta}</span>}
+              </div>
+              <button type="button" onClick={() => add(r)} disabled={busyKey === r.key} style={{
+                padding: '5px 12px', background: C.green, color: C.onGreen, border: 'none',
+                borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+              }}>{busyKey === r.key ? '…' : '+ Add'}</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error && <p style={{ ...s.hint, color: C.red, opacity: 1 }}>{error}</p>}
+      <p style={s.hint}>
+        Communities you&apos;re part of — tokens or NFT collections. The ★ favorite is shown
+        next to your name on mined blocks and counts toward the community leaderboard.
+      </p>
+    </div>
+  )
 }
 
 function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (items: PinItem[]) => void }) {
