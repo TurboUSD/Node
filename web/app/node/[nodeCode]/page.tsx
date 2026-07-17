@@ -48,6 +48,16 @@ interface NodeStats {
   last_seen_at:          string | null
 }
 
+// Communities the node is part of (public_node_projects view, favourite first).
+interface NodeCommunity {
+  project_key: string
+  kind:        string
+  name:        string
+  symbol:      string | null
+  image_url:   string | null
+  is_favorite: boolean
+}
+
 function fmtUptime(secs: number): string {
   if (secs <= 0) return '—'
   if (secs < 60)    return `${secs}s`
@@ -76,6 +86,7 @@ export default function PublicNodePage() {
   const [node,  setNode]  = useState<NodeProfile | null>(null)
   const [stats, setStats] = useState<NodeStats | null>(null)
   const [lastBlock, setLastBlock] = useState<{ block_number: number; mined_at: string } | null>(null)
+  const [communities, setCommunities] = useState<NodeCommunity[]>([])
   const [prevCode, setPrevCode] = useState<string | null>(null)   // neighbours in registration order
   const [nextCode, setNextCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -106,6 +117,11 @@ export default function PublicNodePage() {
       .limit(1)
       .maybeSingle()
       .then(({ data }) => { if (data) setLastBlock(data as { block_number: number; mined_at: string }) })
+    supabase
+      .from('public_node_projects')
+      .select('project_key, kind, name, symbol, image_url, is_favorite')
+      .eq('node_code', nodeCode)
+      .then(({ data }) => setCommunities((data ?? []) as NodeCommunity[]))
   }, [nodeCode])
 
   // Neighbours for the Prev/Next buttons — in registration order (join date), so
@@ -222,6 +238,30 @@ export default function PublicNodePage() {
         )}
       </div>
 
+      {/* Communities this node is part of — favourite first (★). */}
+      {communities.length > 0 && (
+        <section style={s.projCard}>
+          <div style={s.projTitle}>Part of {communities.length === 1 ? '1 community' : `${communities.length} communities`}</div>
+          <div style={s.projList}>
+            {communities.map(p => (
+              <a
+                key={p.project_key}
+                href={`/community/${encodeURIComponent(p.project_key)}`}
+                style={p.is_favorite ? s.projTagFav : s.projTag}
+                title={p.is_favorite ? `${p.name} — favorite community` : p.name}
+              >
+                {p.is_favorite && <span aria-hidden>★</span>}
+                {p.image_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.image_url} alt="" style={{ width: 15, height: 15, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                )}
+                {p.symbol || p.name}
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Navigate between nodes (registration order) + link to the full list. */}
       <div style={s.navRow}>
         {prevCode
@@ -265,6 +305,21 @@ const s: Record<string, React.CSSProperties> = {
   statsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   lastBlockBox: { marginTop: 14, padding: '12px 14px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 },
   linkBtn: { display: 'inline-block', background: '#1c1c1c', border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 18px', color: C.text, textDecoration: 'none', fontSize: 14 },
+
+  // "Part of" communities section (favourite first, ★).
+  projCard:  { background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22, marginTop: 14 },
+  projTitle: { fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 },
+  projList:  { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  projTagFav: {
+    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+    background: `${C.green}18`, border: `1px solid ${C.green}55`, borderRadius: 20,
+    color: C.green, fontSize: 13, fontWeight: 700, textDecoration: 'none', whiteSpace: 'nowrap',
+  },
+  projTag: {
+    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 20,
+    color: C.text, fontSize: 13, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap',
+  },
 
   // Prev / Node List / Next — same neutral dark buttons as the block page.
   navRow:         { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 18 },

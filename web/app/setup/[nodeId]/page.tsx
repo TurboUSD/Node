@@ -1533,6 +1533,22 @@ function slugifyProject(t: string): string {
   return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
+// https://opensea.io/collection/<slug> → slug (whole-collection paste; the
+// item parser below only matches …/item/… URLs).
+function parseOpenseaCollection(url: string): string | null {
+  const m = url.match(/opensea\.io\/collection\/([a-z0-9_-]+)/i)
+  return m ? m[1].toLowerCase() : null
+}
+
+// Satflow / Magic Eden ordinals COLLECTION links → slug.
+//   https://www.satflow.com/ordinals/<slug>        (item pages are /ordinal/<id>,
+//   singular, so they fall through to parseOrdinal below)
+//   https://magiceden.io/ordinals/marketplace/<slug>
+function parseOrdCollection(url: string): string | null {
+  const m = url.match(/(?:satflow\.com\/(?:ordinals|collections?)|magiceden\.(?:io|us)\/ordinals\/marketplace)\/([a-z0-9_-]+)/i)
+  return m ? m[1].toLowerCase() : null
+}
+
 function ProjectsEditor({ nodeCode }: { nodeCode: string }) {
   const [projects, setProjects] = useState<NodeProject[]>([])
   const [query,    setQuery]    = useState('')
@@ -1557,9 +1573,37 @@ function ProjectsEditor({ nodeCode }: { nodeCode: string }) {
     setError(null)
     setResults([])
     try {
-      const nft = parseOpenseaUrl(q)
-      const ord = nft ? null : parseOrdinal(q)
-      if (nft) {
+      const osColl  = parseOpenseaCollection(q)
+      const nft     = osColl ? null : parseOpenseaUrl(q)
+      const ordColl = osColl || nft ? null : parseOrdCollection(q)
+      const ord     = osColl || nft || ordColl ? null : parseOrdinal(q)
+      if (osColl) {
+        // OpenSea COLLECTION link → resolve slug to name/image/contract so the
+        // key matches communities added via item links (nft:<chain>:<contract>)
+        const res = await callFunction<{ results: { chain?: string; contract?: string; name?: string; image_url?: string; collection_name?: string; error?: string }[] }>(
+          'resolve-nft', { items: [`collection:${osColl}`] })
+        const r = res?.results?.[0]
+        if (!r || r.error) throw new Error('Could not resolve that OpenSea collection')
+        setResults([{
+          key:       r.contract && r.chain ? `nft:${r.chain}:${r.contract}` : `nft:opensea:${osColl}`,
+          kind:      'nft',
+          name:      r.collection_name || r.name || osColl,
+          image_url: r.image_url,
+          chain:     r.chain || undefined,
+          ref_url:   q,
+          meta:      `NFT collection${r.chain ? ` · ${r.chain}` : ''}`,
+        }])
+      } else if (ordColl) {
+        // Satflow / Magic Eden ordinals collection link → slug IS the community
+        setResults([{
+          key:     `ord:${ordColl}`,
+          kind:    'nft',
+          name:    ordColl.replace(/[-_]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase()),
+          chain:   'ord',
+          ref_url: q,
+          meta:    'Ordinals collection',
+        }])
+      } else if (nft) {
         // OpenSea item link → the ITEM's collection is the community
         const res = await callFunction<{ results: { name?: string; image_url?: string; collection_name?: string; error?: string }[] }>(
           'resolve-nft', { items: [`${nft.chain}:${nft.contract}:${nft.tokenId}`] })

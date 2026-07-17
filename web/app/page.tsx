@@ -59,6 +59,7 @@ interface MiningBlock {
   winner_project_key?:    string | null
   winner_project_name?:   string | null
   winner_project_symbol?: string | null
+  winner_project_count?:  number | null   // total communities the winner has; extras = count - 1
   mined_at:            string | null
   created_at?:         string | null   // when the block was opened (pending countdown)
   candidates_count:    number | null
@@ -74,6 +75,7 @@ interface CommunityRow {
   chain:             string | null
   members_count:     number
   members_online:    number
+  favorites_count:   number
   blocks_won:        number
   total_tusd_earned: number
 }
@@ -101,6 +103,49 @@ async function fetchCommunities(): Promise<CommunityRow[]> {
     .from('public_community_leaderboard')
     .select('*')
   return (data ?? []) as CommunityRow[]
+}
+
+// Every node's ★ favourite community, keyed by node_code — shown next to the
+// name on the map popup and the node detail overlay.
+interface FavProject {
+  node_code:   string
+  project_key: string
+  name:        string
+  symbol:      string | null
+  image_url:   string | null
+  count:       number   // total communities the node has (favourite included)
+}
+
+async function fetchFavorites(): Promise<Record<string, FavProject>> {
+  // Pull every community so we can show the favourite AND how many more the node
+  // belongs to ("(+N)" extras). One row per project; favourite has is_favorite.
+  const { data } = await supabase
+    .from('public_node_projects')
+    .select('node_code, project_key, name, symbol, image_url, is_favorite')
+  type Row = Omit<FavProject, 'count'> & { is_favorite: boolean }
+  const counts: Record<string, number> = {}
+  const map: Record<string, FavProject> = {}
+  for (const r of (data ?? []) as Row[]) {
+    counts[r.node_code] = (counts[r.node_code] ?? 0) + 1
+    if (r.is_favorite) map[r.node_code] = { ...r, count: 0 }
+  }
+  for (const code of Object.keys(map)) map[code].count = counts[code] ?? 1
+  return map
+}
+
+// Winner's favourite community label for the block tiles: the favourite's
+// symbol/name, plus "(+N)" when the winner belongs to N more communities.
+function projectLabel(symbol?: string | null, name?: string | null, count?: number | null): string {
+  const base = symbol || name
+  if (!base) return '—'
+  const extra = (count ?? 0) - 1
+  return extra > 0 ? `${base} (+${extra})` : base
+}
+
+// Minimal HTML escaping for user-supplied strings injected into the Leaflet
+// popup (built as an HTML string, not JSX).
+function escHtml(t: string): string {
+  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -156,6 +201,7 @@ export default function NetworkPage() {
   const [nodes,        setNodes]        = useState<NodeRow[]>([])
   const [blocks,       setBlocks]       = useState<MiningBlock[]>([])
   const [communities,  setCommunities]  = useState<CommunityRow[]>([])
+  const [favs,         setFavs]         = useState<Record<string, FavProject>>({})
   const [selectedNode, setSelectedNode] = useState<NodeRow | null>(null)
   const [leaderSort,   setLeaderSort]   = useState<'rewards' | 'uptime' | 'communities'>('rewards')
   const [winW,         setWinW]         = useState(1200)
@@ -237,10 +283,11 @@ export default function NetworkPage() {
   const [nowMs,        setNowMs]        = useState(Date.now())
 
   const refresh = useCallback(async () => {
-    const [n, b, c] = await Promise.all([fetchNodes(), fetchBlocks(), fetchCommunities()])
+    const [n, b, c, f] = await Promise.all([fetchNodes(), fetchBlocks(), fetchCommunities(), fetchFavorites()])
     setNodes(n)
     setBlocks(b)
     setCommunities(c)
+    setFavs(f)
   }, [])
 
   useEffect(() => {
@@ -302,9 +349,13 @@ export default function NetworkPage() {
     ? [...nodes].sort((a, b) => b.total_tusd_earned - a.total_tusd_earned)
     : [...nodes].sort((a, b) => totalUptime(b) - totalUptime(a))
 
-  // Communities ranked by the blocks their members are mining (view is already
-  // ordered that way; re-sort defensively for client-side refreshes).
-  const communityBoard = [...communities].sort((a, b) => b.blocks_won - a.blocks_won || b.members_count - a.members_count)
+  // Communities ranked by the blocks their members are mining. Ties broken by
+  // how many nodes picked the community as their ★ favourite, then by members
+  // (view is already ordered that way; re-sort defensively for refreshes).
+  const communityBoard = [...communities].sort((a, b) =>
+    b.blocks_won - a.blocks_won
+    || (b.favorites_count ?? 0) - (a.favorites_count ?? 0)
+    || b.members_count - a.members_count)
 
   // Ticker layout: mined blocks flow on the LEFT (newest pushes the rest
   // leftwards), the pending block sits FIXED on the right behind a dashed
@@ -389,7 +440,7 @@ export default function NetworkPage() {
       <GetNotifiedBanner />
 
       {/* ── Node Map ── */}
-      <NodeMap nodes={nodes} onSelect={setSelectedNode} />
+      <NodeMap nodes={nodes} favs={favs} onSelect={setSelectedNode} />
 
         {/* ── Nodes Online ── */}
         <section style={s.section}>
@@ -412,7 +463,9 @@ export default function NetworkPage() {
         )}
 
         {/* ── Leaderboard ── */}
-        <section style={s.section}>
+        {/* Breaks out of the 800px content column (up to 1080px, centered) so
+            the three side-by-side tables get comfortably wide cards. */}
+        <section style={{ ...s.section, width: 'min(1080px, calc(100vw - 32px))', marginLeft: '50%', transform: 'translateX(-50%)' }}>
           <h2 style={s.sectionTitle}>Leaderboard</h2>
 
           {nodes.length === 0
@@ -487,7 +540,7 @@ export default function NetworkPage() {
       </div>
 
       {selectedNode && (
-        <NodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
+        <NodeDetail node={selectedNode} fav={favs[selectedNode.node_code]} onClose={() => setSelectedNode(null)} />
       )}
 
       {/* ── Install banner (mobile only, fixed to bottom) ── */}
@@ -584,9 +637,9 @@ function BlockTile({ block, circlePct, minsLeft }: {
             text={block.winner_display_name || (block.winner_node_code ? `#${block.winner_node_code}` : '—')}
             style={s.blockWinnerBig}
           />
-          {/* Winner's favourite community — where the name used to be */}
+          {/* Winner's favourite community + "(+N)" extra communities they added */}
           <Marquee
-            text={block.winner_project_symbol || block.winner_project_name || '—'}
+            text={projectLabel(block.winner_project_symbol, block.winner_project_name, block.winner_project_count)}
             style={s.blockWinner}
           />
           {/* Country under the name */}
@@ -764,7 +817,7 @@ function GetNotifiedBanner() {
 // Renders a Leaflet map loaded dynamically (client-side only).
 // Only nodes that have lat/lng set (auto-detected from IP on registration)
 // appear as markers. Online nodes are bright green; offline nodes are grey.
-function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow) => void }) {
+function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<string, FavProject>; onSelect: (n: NodeRow) => void }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef       = useRef<any>(null)
   const onSelectRef  = useRef(onSelect)
@@ -819,12 +872,23 @@ function NodeMap({ nodes, onSelect }: { nodes: NodeRow[]; onSelect: (n: NodeRow)
         if (twh)     metaParts.push(`<a href="https://x.com/${twh}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()" style="color:#43e397;text-decoration:none">@${twh}</a>`)
         const line2 = metaParts.length ? `<div style="font-size:12px;color:#9096a1;margin-bottom:10px">${metaParts.join(' · ')}</div>` : ''
 
+        // ★ favourite community tag, to the right of the name (links to its page),
+        // with "(+N)" when the node belongs to N more communities.
+        const fav = favs[node.node_code]
+        const favExtra = fav ? fav.count - 1 : 0
+        const favTag = fav
+          ? `<a href="/community/${encodeURIComponent(fav.project_key)}" onclick="event.stopPropagation()"
+               style="display:inline-flex;align-items:center;gap:4px;background:#43e39718;border:1px solid #43e39755;border-radius:20px;padding:1px 8px;font-size:10px;font-weight:700;color:#43e397;text-decoration:none;flex-shrink:0;max-width:130px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">★${
+                 fav.image_url ? `<img src="${escHtml(fav.image_url)}" style="width:12px;height:12px;border-radius:3px;object-fit:cover;flex-shrink:0">` : ''
+               } ${escHtml(fav.symbol || fav.name)}${favExtra > 0 ? ` (+${favExtra})` : ''}</a>`
+          : ''
         const popupHtml = `
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-width:272px;background:#111;border:1px solid #222;border-radius:12px;padding:14px 16px;box-shadow:0 8px 32px #000a">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
               <span style="width:8px;height:8px;border-radius:50%;background:${online ? '#43e397' : '#555'};flex-shrink:0${online ? ';animation:tgNodePulse 2.4s ease-in-out infinite' : ''}"></span>
               <span style="font-weight:700;font-size:14px;color:#e8e8e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${node.display_name || node.node_code}</span>
               ${node.is_verified ? '<span style="font-size:11px;color:#5b8dee;flex-shrink:0">✓</span>' : ''}
+              ${favTag}
             </div>
             ${line2}
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
@@ -1206,7 +1270,7 @@ function NodeRowCard({ node, right, prefix, onClick }: {
   )
 }
 
-function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
+function NodeDetail({ node, fav, onClose }: { node: NodeRow; fav?: FavProject; onClose: () => void }) {
   const [lastBlock, setLastBlock] = useState<{ block_number: number; mined_at: string } | null>(null)
 
   useEffect(() => {
@@ -1250,6 +1314,7 @@ function NodeDetail({ node, onClose }: { node: NodeRow; onClose: () => void }) {
           </span>
           {node.is_verified ? <VerifiedBadge size={18} /> : <UnverifiedBadge size={14} />}
           {node.is_genesis && <GenesisBadge size={16} />}
+          {fav && <FavTag fav={fav} />}
         </div>
 
         {/* Line 2: id · country + info · X handle. Inline text with " · " separators
@@ -1335,6 +1400,33 @@ function DetailStat({ label, value, color }: { label: string; value: string; col
   )
 }
 
+// ★ favourite community pill — shown to the right of the node name on the map
+// detail overlay. Links to the community page (matches the map popup favTag).
+function FavTag({ fav }: { fav: FavProject }) {
+  const extra = fav.count - 1
+  return (
+    <a
+      href={`/community/${encodeURIComponent(fav.project_key)}`}
+      onClick={e => e.stopPropagation()}
+      title={`${fav.name} — favorite community${extra > 0 ? ` (+${extra} more)` : ''}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+        maxWidth: 170, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+        background: `${C.green}18`, border: `1px solid ${C.green}55`, borderRadius: 20,
+        padding: '2px 9px', fontSize: 11, fontWeight: 700, color: C.green, textDecoration: 'none',
+      }}
+    >
+      <span aria-hidden>★</span>
+      {fav.image_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={fav.image_url} alt="" style={{ width: 13, height: 13, borderRadius: 3, objectFit: 'cover', flexShrink: 0 }} />
+      )}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{fav.symbol || fav.name}</span>
+      {extra > 0 && <span style={{ flexShrink: 0, opacity: 0.85 }}>(+{extra})</span>}
+    </a>
+  )
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
   root: { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
@@ -1396,7 +1488,7 @@ const s: Record<string, React.CSSProperties> = {
   blockAgo:     { fontSize: 9,  color: '#a4a8b2' },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green },
   // Winner name — prominent, sits where the reward used to be on mined tiles
-  blockWinnerBig: { fontSize: 13, fontWeight: 'bold', color: C.green, maxWidth: 92, textAlign: 'center' },
+  blockWinnerBig: { fontSize: 12, fontWeight: 'bold', color: C.green, maxWidth: 92, textAlign: 'center' },
   // Winner's favourite community — sits where the winner name used to be
   blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', maxWidth: 92, textAlign: 'center' },
   blockCountry: { fontSize: 9, color: '#a4a8b2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },

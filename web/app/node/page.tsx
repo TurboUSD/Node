@@ -58,6 +58,7 @@ interface MiningBlock {
   // name used to sit on mined tiles.
   winner_project_name?:   string | null
   winner_project_symbol?: string | null
+  winner_project_count?:  number | null   // total communities the winner has; extras = count - 1
   mined_at:            string | null
   created_at?:         string | null
 }
@@ -69,6 +70,15 @@ function timeSince(iso: string): string {
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
   const d = Math.floor(sec / 86400)
   return d === 1 ? '1 day ago' : `${d} days ago`
+}
+
+// Winner's favourite community label for block tiles: the favourite's
+// symbol/name, plus "(+N)" when the winner belongs to N more communities.
+function projectLabel(symbol?: string | null, name?: string | null, count?: number | null): string {
+  const base = symbol || name
+  if (!base) return '—'
+  const extra = (count ?? 0) - 1
+  return extra > 0 ? `${base} (+${extra})` : base
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -438,8 +448,8 @@ function BlocksStrip({ mined, pending, circlePct, minsLeft }: {
             <div style={s.blockAgo}>{b.mined_at ? timeSince(b.mined_at) : ''}</div>
             {/* Winner name — prominent, where the reward used to be */}
             <div style={s.blockWinnerBig}>{b.winner_display_name ?? '—'}</div>
-            {/* Winner's favourite community — where the name used to be */}
-            <div style={s.blockWinner}>{b.winner_project_symbol || b.winner_project_name || '—'}</div>
+            {/* Winner's favourite community + "(+N)" extra communities they added */}
+            <div style={s.blockWinner}>{projectLabel(b.winner_project_symbol, b.winner_project_name, b.winner_project_count)}</div>
             <div style={s.blockCountry}>{b.winner_country || ' '}</div>
           </div>
         ))}
@@ -677,7 +687,7 @@ const s: Record<string, React.CSSProperties> = {
   blockAgo:     { fontSize: 9,  color: '#a4a8b2' },
   blockReward:  { fontSize: 16, fontWeight: 'bold', color: C.green },
   // Winner name — prominent, sits where the reward used to be on mined tiles
-  blockWinnerBig: { fontSize: 13, fontWeight: 'bold', color: C.green, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
+  blockWinnerBig: { fontSize: 12, fontWeight: 'bold', color: C.green, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
   // Winner's favourite community — sits where the winner name used to be
   blockWinner:  { fontSize: 11, fontWeight: 600, color: '#e8e8e8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },
   blockCountry: { fontSize: 9, color: '#a4a8b2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 92 },

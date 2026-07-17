@@ -190,11 +190,11 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
                           style={p.is_favorite ? s.projTagFav : s.projTag}
                           title={p.is_favorite ? `${p.name} — favorite community` : p.name}
                         >
+                          {p.is_favorite && <span aria-hidden>★</span>}
                           {p.image_url && (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={p.image_url} alt="" style={{ width: 14, height: 14, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
                           )}
-                          {p.is_favorite && <span aria-hidden>★</span>}
                           {p.symbol || p.name}
                         </a>
                       ))}
