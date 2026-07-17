@@ -18,8 +18,9 @@ Communities ("projects"):
 
 Communities on the device network screen:
 - Mined block tiles now match the web: the winner's node name is the centered headline (bright green, prominent) where the ₸ reward used to be, and their favorite community sits below it where the name was — with "(+N)" showing how many more communities the winner belongs to.
+- Tapping a node name anywhere on the device (block winners, leaderboard rows, your own node) now shows a "Part of  SYMBOL (+N)" line under Uptime in the info popup.
 - The web block-card project line also shows the "(+N)" extra-community count, and the favorite tag now appears next to the node name on the map popup, the map detail overlay, and the full node profile (which gains a "Part of N communities" section). The ★ glyph was dropped everywhere in favor of the highlighted green tag style.
-- Requires re-running the updated `public_mining_feed` view (adds `winner_project_count`) — see `backend/sql/2026-07-17-project-count-and-favorites-tiebreak.sql`.
+- Requires re-running the community display views (`public_mining_feed` gains `winner_project_count`; `public_node_directory` gains `fav_project_name` / `fav_project_symbol` / `project_count`) — see `backend/sql/2026-07-17-communities-display.sql`.
 
 ## 0.4.0 — July 2026
 

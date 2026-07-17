@@ -331,7 +331,8 @@ public:
     }
 
     void _showNodeInfo(const char* name, const char* country, const char* twitter,
-                       bool hasStats, double earned, int blocksWon, const char* uptimeStr) {
+                       bool hasStats, double earned, int blocksWon, const char* uptimeStr,
+                       const char* project = "", int projectCount = 0) {
         if (g_touchWasSwipe()) return;   // a swipe that merely started on the name — not a tap
         lv_obj_t* card = openModal(lv_scr_act());
 
@@ -382,6 +383,20 @@ public:
                 lv_obj_set_style_text_font(u, &lv_font_montserrat_12, 0);
             }
         }
+
+        // "Part of" — the winner's favourite community + "(+N)" more, under Uptime.
+        // Shown whenever we have the data (block taps always; leaderboard/own taps
+        // when the directory carried a favourite).
+        if (project && project[0]) {
+            char pb[48];
+            int extra = projectCount - 1;
+            if (extra > 0) snprintf(pb, sizeof(pb), "Part of   %s (+%d)", project, extra);
+            else           snprintf(pb, sizeof(pb), "Part of   %s", project);
+            lv_obj_t* pl = lv_label_create(card);
+            lv_label_set_text(pl, pb);
+            lv_obj_set_style_text_color(pl, lv_color_hex(0xd8ffe6), 0);
+            lv_obj_set_style_text_font(pl, &lv_font_montserrat_12, 0);
+        }
     }
 
     // Tap handlers — `this` comes via the event user_data; per-object user_data
@@ -392,7 +407,8 @@ public:
         // always show stats (an unverified node still has ₸0 rewards + real uptime).
         LeaderboardEntry* d = s->_findSlotByName(s->_ownName);
         s->_showNodeInfo(s->_ownName, d ? d->country : "", d ? d->twitter : "",
-                         true, s->_ownEarned, d ? d->blocksWon : 0, s->_ownUptime);
+                         true, s->_ownEarned, d ? d->blocksWon : 0, s->_ownUptime,
+                         d ? d->favProject : "", d ? d->projectCount : 0);
     }
     static void _onLbNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
@@ -400,7 +416,8 @@ public:
         if (idx < 0 || idx >= 2 * LB_ROWS || !s->_slotEntry[idx].name[0]) return;
         LeaderboardEntry& en = s->_slotEntry[idx];
         char up[24]; _fmtUptimeShort(up, sizeof(up), en.totalUptimeSecs);
-        s->_showNodeInfo(en.name, en.country, en.twitter, true, en.earned, en.blocksWon, up);
+        s->_showNodeInfo(en.name, en.country, en.twitter, true, en.earned, en.blocksWon, up,
+                         en.favProject, en.projectCount);
     }
     static void _onBlockNameTapped(lv_event_t* e) {
         NodeScreen* s = (NodeScreen*)lv_event_get_user_data(e);
@@ -408,13 +425,15 @@ public:
         if (bi < 0 || bi >= NODE_MINED_BLOCKS_SHOWN || !s->minedBlocks[bi].winnerName[0]) return;
         const char* wn = s->minedBlocks[bi].winnerName;
         const char* wc = s->minedBlocks[bi].winnerCountry;
+        const char* wp = s->minedBlocks[bi].winnerProject;   // from the block feed
+        int wpc        = s->minedBlocks[bi].winnerProjectCount;
         // Match the winner to a leaderboard row for rewards/uptime/twitter.
         LeaderboardEntry* d = s->_findSlotByName(wn);
         if (d) {
             char up[24]; _fmtUptimeShort(up, sizeof(up), d->totalUptimeSecs);
-            s->_showNodeInfo(wn, wc, d->twitter, true, d->earned, d->blocksWon, up);
+            s->_showNodeInfo(wn, wc, d->twitter, true, d->earned, d->blocksWon, up, wp, wpc);
         } else {
-            s->_showNodeInfo(wn, wc, "", false, 0, 0, "");
+            s->_showNodeInfo(wn, wc, "", false, 0, 0, "", wp, wpc);
         }
     }
 
@@ -614,6 +633,8 @@ private:
                                     // not on every periodic data refresh.
         char winnerName[24]    = {};   // stored for the tap-to-info modal
         char winnerCountry[40] = {};
+        char winnerProject[24] = {};   // favourite community, for the info modal
+        int  winnerProjectCount = 0;   // total communities → "Part of  SYMBOL (+N)"
     };
 
     BlockWidget minedBlocks[NODE_MINED_BLOCKS_SHOWN];
@@ -647,9 +668,9 @@ private:
             // (wired in build()), so the name — not the reward — opens the winner.
             w.minerNameLabel = lv_label_create(w.container);
             lv_label_set_text(w.minerNameLabel, "");
-            lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 10);
+            lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 8);
             lv_label_set_long_mode(w.minerNameLabel, LV_LABEL_LONG_DOT);
-            lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(w.minerNameLabel, lv_color_hex(0x3aff7a), 0);
             lv_obj_set_style_text_align(w.minerNameLabel, LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_align(w.minerNameLabel, LV_ALIGN_CENTER, 0, -6);
@@ -727,6 +748,8 @@ private:
         // Remember the winner for the tap-to-open info modal.
         strncpy(w.winnerName,    minerName.c_str(), sizeof(w.winnerName) - 1);
         strncpy(w.winnerCountry, country.c_str(),   sizeof(w.winnerCountry) - 1);
+        strncpy(w.winnerProject, project.c_str(),   sizeof(w.winnerProject) - 1);
+        w.winnerProjectCount = projectCount;
 
         char numBuf[12]; snprintf(numBuf, sizeof(numBuf), "#%ld", blockNumber);
         lv_label_set_text(w.numberLabel, numBuf);

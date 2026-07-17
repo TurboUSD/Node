@@ -109,6 +109,8 @@ struct LeaderboardEntry {
     uint32_t totalUptimeSecs = 0;  // cumulative uptime → the device "Uptime" column
                                    // shows real time ("4h 58m"), matching the web card
     bool     online     = false;
+    char     favProject[24] = {};  // favourite community (symbol/name) → node info popup
+    int      projectCount   = 0;   // total communities → "Part of  SYMBOL (+N)"
 };
 
 struct GeoLocale {
@@ -649,7 +651,7 @@ public:
         HTTPClient http;
         http.useHTTP10(true);   // see header note
         http.begin(String(SUPABASE_REST_BASE_URL) +
-                   "/public_node_directory?select=display_name,node_code,country,twitter_handle,total_tusd_earned,blocks_won,uptime_pct,total_uptime_seconds,is_online&limit=24");
+                   "/public_node_directory?select=display_name,node_code,country,twitter_handle,total_tusd_earned,blocks_won,uptime_pct,total_uptime_seconds,is_online,fav_project_symbol,fav_project_name,project_count&limit=24");
         http.setTimeout(8000);
         http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
         http.addHeader("apikey", SUPABASE_ANON_KEY);
@@ -675,6 +677,11 @@ public:
             e.uptimePct       = row["uptime_pct"] | 0;
             e.totalUptimeSecs = row["total_uptime_seconds"] | 0;
             e.online          = row["is_online"] | false;
+            // Favourite community: prefer symbol, else name.
+            { const char* fp = row["fav_project_symbol"] | "";
+              if (!fp[0]) fp = row["fav_project_name"] | "";
+              snprintf(e.favProject, sizeof(e.favProject), "%s", fp); }
+            e.projectCount    = row["project_count"] | 0;
             count++;
         }
         return count;
