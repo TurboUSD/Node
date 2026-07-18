@@ -649,6 +649,11 @@ private:
         lv_obj_set_style_radius(w.container, 10, 0);
         lv_obj_set_style_border_width(w.container, 2, 0);
         lv_obj_set_style_pad_all(w.container, 6, 0);
+        // Trim the LEFT/RIGHT padding so the winner name has almost the full tile
+        // width to work with (6 px each side wasted 12 of 100 px and truncated
+        // names like "Tony SopraNFTos" to "Tony…"). Vertical padding stays at 6.
+        lv_obj_set_style_pad_left(w.container, 2, 0);
+        lv_obj_set_style_pad_right(w.container, 2, 0);
         lv_obj_clear_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
         styleBlock(w, false);
 
@@ -668,7 +673,7 @@ private:
             // (wired in build()), so the name — not the reward — opens the winner.
             w.minerNameLabel = lv_label_create(w.container);
             lv_label_set_text(w.minerNameLabel, "");
-            lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 8);
+            lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 4);
             lv_label_set_long_mode(w.minerNameLabel, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(w.minerNameLabel, lv_color_hex(0x3aff7a), 0);
@@ -680,7 +685,7 @@ private:
             // Dim light-green, one line, shows "SYMBOL (+N)".
             w.rewardLabel = lv_label_create(w.container);
             lv_label_set_text(w.rewardLabel, "");
-            lv_obj_set_width(w.rewardLabel, NODE_BLOCK_W - 14);
+            lv_obj_set_width(w.rewardLabel, NODE_BLOCK_W - 6);
             lv_label_set_long_mode(w.rewardLabel, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_font(w.rewardLabel, &lv_font_montserrat_10, 0);
             lv_obj_set_style_text_color(w.rewardLabel, lv_color_hex(0xd8ffe6), 0);
@@ -690,7 +695,7 @@ private:
             // 8→10 px (montserrat_9 isn't compiled in) so it's actually readable.
             w.minerCountryLabel = lv_label_create(w.container);
             lv_label_set_text(w.minerCountryLabel, "");
-            lv_obj_set_width(w.minerCountryLabel, NODE_BLOCK_W - 14);
+            lv_obj_set_width(w.minerCountryLabel, NODE_BLOCK_W - 6);
             lv_label_set_long_mode(w.minerCountryLabel, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_font(w.minerCountryLabel, &lv_font_montserrat_10, 0);
             lv_obj_set_style_text_color(w.minerCountryLabel, lv_color_hex(0x89b39a), 0);
