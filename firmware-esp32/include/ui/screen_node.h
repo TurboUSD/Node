@@ -672,9 +672,13 @@ private:
             // still fit the tile. This label is the tap target for the info modal
             // (wired in build()), so the name — not the reward — opens the winner.
             w.minerNameLabel = lv_label_create(w.container);
-            lv_label_set_text(w.minerNameLabel, "");
-            lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 4);
+            // Show as much of the name as fits, then an ellipsis ("Tony SopraN…").
+            // long_mode is set BEFORE the width: if set afterwards LVGL resets the
+            // label to content-size, so the DOT truncation would use the wrong
+            // (tiny) width and only ever show "Tony…".
             lv_label_set_long_mode(w.minerNameLabel, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 4);
+            lv_label_set_text(w.minerNameLabel, "");
             lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(w.minerNameLabel, lv_color_hex(0x3aff7a), 0);
             lv_obj_set_style_text_align(w.minerNameLabel, LV_TEXT_ALIGN_CENTER, 0);
