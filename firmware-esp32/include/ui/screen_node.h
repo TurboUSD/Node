@@ -672,11 +672,12 @@ private:
             // still fit the tile. This label is the tap target for the info modal
             // (wired in build()), so the name — not the reward — opens the winner.
             w.minerNameLabel = lv_label_create(w.container);
-            // Show as much of the name as fits, then an ellipsis ("Tony SopraN…").
-            // long_mode is set BEFORE the width: if set afterwards LVGL resets the
-            // label to content-size, so the DOT truncation would use the wrong
-            // (tiny) width and only ever show "Tony…".
-            lv_label_set_long_mode(w.minerNameLabel, LV_LABEL_LONG_DOT);
+            // Truncation is done MANUALLY in setBlockContent() (_fitOneLine):
+            // LVGL's LONG_DOT first wraps at word boundaries, so "Tony SopraNFTos"
+            // rendered as just "Tony" — the line broke at the space regardless of
+            // remaining width. We pre-fit the text ourselves ("Tony Sopra...")
+            // and use CLIP only as a safety net; the text always fits the width.
+            lv_label_set_long_mode(w.minerNameLabel, LV_LABEL_LONG_CLIP);
             lv_obj_set_width(w.minerNameLabel, NODE_BLOCK_W - 4);
             lv_label_set_text(w.minerNameLabel, "");
             lv_obj_set_style_text_font(w.minerNameLabel, &lv_font_montserrat_12, 0);
@@ -750,6 +751,33 @@ private:
         lv_obj_set_style_shadow_color(w.container, mined ? lv_color_hex(0x0c3a20) : lv_color_hex(0x3a2c08), 0);
     }
 
+    // Fit `text` on ONE line of width `maxW` for font `f`, truncating mid-word
+    // with "..." if needed. This exists because every LVGL long mode (DOT/CLIP/
+    // WRAP) breaks lines at spaces FIRST, so any name with a space ("Tony
+    // SopraNFTos") collapsed to its first word no matter how much width was
+    // left. Measuring with lv_txt_get_size and cutting the string ourselves is
+    // the only way to get "Tony Sopra..." instead of "Tony".
+    static void _fitOneLine(char* buf, size_t bufSz, const char* text,
+                            const lv_font_t* f, lv_coord_t maxW) {
+        snprintf(buf, bufSz, "%s", text);
+        lv_point_t sz;
+        lv_txt_get_size(&sz, buf, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_EXPAND);
+        if (sz.x <= maxW) return;                     // fits whole — done
+        size_t len = strlen(buf);
+        char tmp[64];
+        while (len > 0) {
+            // Drop one UTF-8 character (skip continuation bytes), then any
+            // trailing spaces so we never render "Tony ...".
+            do { len--; } while (len > 0 && ((unsigned char)buf[len] & 0xC0) == 0x80);
+            while (len > 0 && buf[len - 1] == ' ') len--;
+            buf[len] = '\0';
+            snprintf(tmp, sizeof(tmp), "%s...", buf);
+            lv_txt_get_size(&sz, tmp, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_EXPAND);
+            if (sz.x <= maxW) { snprintf(buf, bufSz, "%s", tmp); return; }
+        }
+        snprintf(buf, bufSz, "...");                  // pathological: nothing fits
+    }
+
     void setBlockContent(BlockWidget& w, long blockNumber, const String& minerName,
                          const String& country, const String& project, int projectCount) {
         bool isNewBlock = (w.lastBlockNumber != blockNumber);
@@ -762,8 +790,13 @@ private:
 
         char numBuf[12]; snprintf(numBuf, sizeof(numBuf), "#%ld", blockNumber);
         lv_label_set_text(w.numberLabel, numBuf);
-        // Headline = the winner's node name (centered, prominent).
-        lv_label_set_text(w.minerNameLabel, minerName.length() ? minerName.c_str() : "--");
+        // Headline = the winner's node name (centered, prominent), pre-fitted to
+        // one line so LVGL never gets the chance to wrap it at a space.
+        char nameBuf[64];
+        _fitOneLine(nameBuf, sizeof(nameBuf),
+                    minerName.length() ? minerName.c_str() : "--",
+                    &lv_font_montserrat_12, NODE_BLOCK_W - 4);
+        lv_label_set_text(w.minerNameLabel, nameBuf);
         // Under it, the winner's favourite community + "(+N)" extra communities.
         char projBuf[40] = {};
         if (project.length()) {
