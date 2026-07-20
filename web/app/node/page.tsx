@@ -340,9 +340,19 @@ function DeviceRenderCarousel() {
   const onDown = (e: React.PointerEvent) => {
     dragRef.current = { x: e.clientX, active: true }
     stopAuto()
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture?.(e.pointerId)
+    el.style.cursor = 'grabbing'
+    // DESKTOP: without this the mouse-drag starts a native text selection, which
+    // fires pointercancel and killed the swipe before pointerup ever ran — that's
+    // why dragging worked on touch but not with a mouse.
+    e.preventDefault()
+  }
+  const endDrag = (e: React.PointerEvent) => {
+    (e.currentTarget as HTMLElement).style.cursor = 'grab'
   }
   const onUp = (e: React.PointerEvent) => {
+    endDrag(e)
     if (!dragRef.current.active) return
     const dx = e.clientX - dragRef.current.x
     dragRef.current.active = false
@@ -373,10 +383,13 @@ function DeviceRenderCarousel() {
         <div
           onPointerDown={onDown}
           onPointerUp={onUp}
-          onPointerCancel={() => { dragRef.current.active = false; startAuto() }}
+          onPointerCancel={e => { endDrag(e); dragRef.current.active = false; startAuto() }}
+          onDragStart={e => e.preventDefault()}   // no native image/text drag on desktop
           style={{
             position: 'absolute', ...SCREEN_ZONE,
             cursor: 'grab', touchAction: 'none', borderRadius: '5%',
+            // Mouse drags must not select surrounding text (see onDown).
+            userSelect: 'none', WebkitUserSelect: 'none',
           }}
         />
       </div>
