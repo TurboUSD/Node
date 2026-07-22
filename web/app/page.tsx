@@ -820,6 +820,7 @@ function GetNotifiedBanner() {
 function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<string, FavProject>; onSelect: (n: NodeRow) => void }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef       = useRef<any>(null)
+  const fittedRef    = useRef(false)   // frame the nodes once, then leave the user's pan/zoom alone
   const onSelectRef  = useRef(onSelect)
   onSelectRef.current = onSelect
 
@@ -916,6 +917,23 @@ function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<str
         })
         marker.addTo(mapRef.current)
       })
+
+      // Frame the map to fit all ONLINE nodes (fallback: all located nodes) so
+      // it opens showing every online node instead of a fixed world/Spain view.
+      // Done ONCE — a later data refresh must not yank the map away from the
+      // user's own pan/zoom.
+      if (!fittedRef.current) {
+        const onlineGeo = geoNodes.filter(n => n.is_online)
+        const toFit = onlineGeo.length ? onlineGeo : geoNodes
+        if (toFit.length === 1) {
+          fittedRef.current = true
+          mapRef.current.setView([toFit[0].lat, toFit[0].lng], 5)
+        } else if (toFit.length > 1) {
+          fittedRef.current = true
+          const bounds = L.latLngBounds(toFit.map(n => [n.lat, n.lng]))
+          mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 })
+        }
+      }
     }
 
     function initMap() {
