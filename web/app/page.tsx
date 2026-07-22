@@ -820,7 +820,7 @@ function GetNotifiedBanner() {
 function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<string, FavProject>; onSelect: (n: NodeRow) => void }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef       = useRef<any>(null)
-  const fittedRef    = useRef(false)   // frame the nodes once, then leave the user's pan/zoom alone
+  const resizeRef    = useRef<(() => void) | null>(null)   // window-resize handler (re-fits the world)
   const onSelectRef  = useRef(onSelect)
   onSelectRef.current = onSelect
 
@@ -917,23 +917,6 @@ function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<str
         })
         marker.addTo(mapRef.current)
       })
-
-      // Frame the map to fit all ONLINE nodes (fallback: all located nodes) so
-      // it opens showing every online node instead of a fixed world/Spain view.
-      // Done ONCE — a later data refresh must not yank the map away from the
-      // user's own pan/zoom.
-      if (!fittedRef.current) {
-        const onlineGeo = geoNodes.filter(n => n.is_online)
-        const toFit = onlineGeo.length ? onlineGeo : geoNodes
-        if (toFit.length === 1) {
-          fittedRef.current = true
-          mapRef.current.setView([toFit[0].lat, toFit[0].lng], 5)
-        } else if (toFit.length > 1) {
-          fittedRef.current = true
-          const bounds = L.latLngBounds(toFit.map(n => [n.lat, n.lng]))
-          mapRef.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 })
-        }
-      }
     }
 
     function initMap() {
@@ -956,6 +939,23 @@ function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<str
         { attribution: 'Tiles © Esri &mdash; Esri, DeLorme, NAVTEQ', maxZoom: 16 }
       ).addTo(map)
       mapRef.current = map
+
+      // Always open framed to the WHOLE WORLD (both mobile and desktop) — never
+      // zoom into wherever the nodes happen to be. fitBounds sizes the world to
+      // the container, so it fits at any width/height. Re-fit on resize so it
+      // stays whole-world across breakpoints/orientation changes.
+      const WORLD_BOUNDS = L.latLngBounds([[-58, -170], [76, 170]])
+      const fitWorld = () => {
+        if (!mapRef.current) return
+        mapRef.current.invalidateSize(false)
+        mapRef.current.fitBounds(WORLD_BOUNDS, { animate: false, padding: [6, 6] })
+      }
+      fitWorld()
+      // The container often gets its final size a tick after mount — re-fit once
+      // more on the next frame so the first paint isn't a wrong-sized view.
+      requestAnimationFrame(fitWorld)
+      resizeRef.current = fitWorld
+      window.addEventListener('resize', fitWorld)
       // The Leaflet popup lives inside the transformed map-pane, so NO z-index can
       // lift it above the zoom control (a separate stacking context) — most visible
       // on mobile, where the card overlaps the top-left zoom buttons. So hide the
@@ -992,6 +992,10 @@ function NodeMap({ nodes, favs, onSelect }: { nodes: NodeRow[]; favs: Record<str
     }
 
     return () => {
+      if (resizeRef.current) {
+        window.removeEventListener('resize', resizeRef.current)
+        resizeRef.current = null
+      }
       if (mapRef.current) {
         mapRef.current.remove()
         mapRef.current = null
