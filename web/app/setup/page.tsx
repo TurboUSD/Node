@@ -149,7 +149,7 @@ export default function SetupPage() {
               manifest="https://network.turbousd.com/firmware/manifest.json"
             >
               <button slot="activate" className="tc-btn tc-btn--primary" style={{ width: '100%' }}>
-                ⚡ Install TurboUSD Firmware
+                Install TurboUSD Firmware
               </button>
               <span slot="unsupported" style={{ color: C.red, fontSize: 13 }}>
                 Your browser doesn't support WebSerial. Please use Chrome or Edge on desktop.

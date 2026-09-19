@@ -150,7 +150,7 @@ export default function NodeProductPage() {
             your clock and alarm, your NFT gallery and the most honest inflation monitor money can buy.
           </p>
           <div style={s.ctaRow}>
-            <Link href="/" className="tc-btn tc-btn--primary">Live network ⚡️</Link>
+            <Link href="/" className="tc-btn tc-btn--primary">₸USD Network</Link>
             <a href="/setup" className="tc-btn tc-btn--ghost">Flash NodeOS</a>
           </div>
           <p style={{ fontSize: 11, color: C.muted, marginTop: 14 }}>
@@ -283,7 +283,7 @@ export default function NodeProductPage() {
         <MiniMap nodes={nodes} />
 
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
-          <Link href="/" className="tc-btn tc-btn--primary">Explore the full network ⚡️</Link>
+          <Link href="/" className="tc-btn tc-btn--primary">Explore the full network</Link>
         </div>
       </section>
 
@@ -291,7 +291,7 @@ export default function NodeProductPage() {
       <section style={{ ...s.section, textAlign: 'center', paddingBottom: 90 }}>
         <h2 style={{ ...s.h2, fontSize: 30 }}>Ready to put one on your desk?</h2>
         <div style={{ ...s.ctaRow, justifyContent: 'center', marginTop: 20 }}>
-          <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" className="tc-btn tc-btn--primary">Get the hardware ⚡️</a>
+          <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" className="tc-btn tc-btn--primary">Get the hardware</a>
           <a href="/setup" className="tc-btn tc-btn--ghost">Flash NodeOS</a>
         </div>
         <p style={{ fontSize: 11, color: C.muted, marginTop: 22 }}>

@@ -9,7 +9,7 @@ import { usePathname } from 'next/navigation'
 import { TusdHeader } from './tusd-chrome'
 
 const TABS = [
-  { label: 'Live network', href: '/' },
+  { label: '₸USD Network', href: '/' },
   { label: 'The Device', href: '/node' },
   { label: 'My Node', href: '/my-node' },
 ]
