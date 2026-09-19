@@ -23,7 +23,6 @@ const CULTURE: NavItem[] = [
   { label: "Manifesto", href: `${T}/manifiesto`, blurb: "Why we reject stability" },
   { label: "Unstable Meta", href: `${T}/unstable-meta`, blurb: "The sector we started" },
   { label: "Community & Builders", href: `${T}/community`, blurb: "Cult of Chaos" },
-  { label: "Timeline & News", href: `${T}/timeline`, blurb: "What happened" },
   { label: "Database", href: `${T}/memes`, blurb: "Memes" },
 ];
 const PRODUCTS: NavItem[] = [
@@ -40,10 +39,10 @@ export const NAV: NavGroup[] = [
       {
         title: null,
         items: [
-          { label: "₸USD", href: `${T}/unstablecoin`, blurb: "The unstablecoin" },
+          { label: "₸USD", href: `${T}/unstablecoin`, blurb: "The first unstablecoin" },
           { label: "Origin", href: `${T}/origin`, blurb: "Oct 12, 2024" },
-          { label: "The Flywheel", href: `${T}/#flywheel`, blurb: "From demand to burn" },
           { label: "Staking", href: `${T}/staking`, blurb: "~15% APY" },
+          { label: "Timeline & News", href: `${T}/timeline`, blurb: "What happened" },
           { label: "Stats", href: `${T}/stats`, blurb: "Live numbers" },
         ],
       },
@@ -55,9 +54,10 @@ export const NAV: NavGroup[] = [
       {
         title: null,
         items: [
-          { label: "The Anchor", href: `${T}/#tokenized-assets`, blurb: "Stocks, metals & crypto" },
-          { label: "Tokenization", href: `${T}/#tokenization`, blurb: "SEC, CFTC & the onchain wave" },
-          { label: "Strategic Tokens", href: `${T}/#treasury`, blurb: "Buyback triggers" },
+          { label: "Tokenization", href: `${T}/#tokenized-assets`, blurb: "The onchain wave" },
+          { label: "The Flywheel", href: `${T}/#flywheel`, blurb: "Inside + outside" },
+          { label: "Treasury Manager", href: `${T}/#treasury`, blurb: "Holdings & buyback triggers" },
+          { label: "The Anchor", href: `${T}/#anchor`, blurb: "Why hard assets" },
           { label: "Holdings", href: "https://treasury.turbousd.com", blurb: "Live, onchain" },
         ],
       },
@@ -69,9 +69,9 @@ export const NAV: NavGroup[] = [
       {
         title: null,
         items: [
-          { label: "AMI Overview", href: `${T}/artificial-monetary-intelligence`, blurb: "The anti-Fed" },
+          { label: "AMI 9000", href: `${T}/artificial-monetary-intelligence`, blurb: "AI agent overview" },
           { label: "Agent Architecture", href: `${T}/artificial-monetary-intelligence#architecture`, blurb: "How AMI thinks" },
-          { label: "Treasury Manager", href: `${T}/treasury-manager`, blurb: "Onchain execution" },
+          { label: "Onchain Log", href: "https://treasury.turbousd.com/#activity", blurb: "Every operation, receipted" },
         ],
       },
     ],

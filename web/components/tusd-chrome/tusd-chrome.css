@@ -172,12 +172,16 @@
 .tc-header {
   position: sticky;
   top: 0;
-  z-index: 60;
+  /* above the host page's own layers (Leaflet maps sit around 1000), below its modals (2000+) */
+  z-index: 1500;
   background: rgba(0, 0, 0, 0.82);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
 }
 .tc-row {
+  /* its own layer above the ticker and the section bar, so the menus open over them */
+  position: relative;
+  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -266,6 +270,8 @@
 }
 .tc-drop-panel {
   display: flex;
+  /* solid, whatever the host page paints underneath */
+  background: #0a0a0b !important;
   overflow: hidden;
   padding: 8px;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
@@ -503,6 +509,7 @@
 }
 .tc-pop {
   position: absolute;
+  background: #0a0a0b !important;
   right: 0;
   top: 44px;
   z-index: 70;
