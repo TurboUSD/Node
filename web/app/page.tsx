@@ -391,9 +391,17 @@ export default function NetworkPage() {
           needs a real stylesheet — no inline ::-webkit-scrollbar). */}
       <style>{`.tusd-lane::-webkit-scrollbar{display:none}`}</style>
       <div style={s.tickerWrap}>
+        {/* the next-block countdown, centred on the page right above the blocks */}
+        {nextBlockAt && (
+          <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 12 }}>
+            <div style={{ ...s.nextPill, marginBottom: 0 }}>
+              <span style={s.nextPillLabel}>Next block</span>
+              <span style={s.nextPillTimer}>{countdown}</span>
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}>
-          {/* the countdown sits over the pending block, so the mined lane starts that much lower and every tile lines up */}
-          <div style={{ ...s.tickerMinedLane, paddingTop: nextBlockAt ? 12 + NEXT_PILL_H : 12 }} className="tusd-lane"
+          <div style={{ ...s.tickerMinedLane, paddingTop: 12 }} className="tusd-lane"
             onMouseDown={onBlockLaneDown}
             ref={el => {
               blockLaneRef.current = el
@@ -414,13 +422,6 @@ export default function NetworkPage() {
           <div style={s.tickerDivider} />
           {pendingBlock && (
             <div style={{ padding: '12px 8px 16px 8px', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              {/* the next-block countdown, on the block it counts down to */}
-              {nextBlockAt && (
-                <div style={s.nextPill}>
-                  <span style={s.nextPillLabel}>Next block</span>
-                  <span style={s.nextPillTimer}>{countdown}</span>
-                </div>
-              )}
               <BlockTile block={pendingBlock} circlePct={circlePct} minsLeft={minsLeft} />
             </div>
           )}
@@ -1449,7 +1450,7 @@ function FavTag({ fav }: { fav: FavProject }) {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
-/** Height of the next-block pill, margin included; the mined lane is pushed down by the same amount. */
+/** Height of the next-block pill, margin included. */
 const NEXT_PILL_H = 38
 
 const s: Record<string, React.CSSProperties> = {
@@ -1467,7 +1468,7 @@ const s: Record<string, React.CSSProperties> = {
   navLink:  { color: C.muted, fontSize: 13, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' },
   setupBtn: { padding: '7px 18px', background: C.green, color: C.onGreen, borderRadius: 20, fontWeight: 'bold', fontSize: 13, textDecoration: 'none', whiteSpace: 'nowrap' },
 
-  // Next-block countdown: a pill over the pending block, not a bar of its own
+  // Next-block countdown: a pill centred over the block strip, not a bar of its own
   nextPill: {
     height: NEXT_PILL_H - 8, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8,
     padding: '0 12px', borderRadius: 999, border: `1px solid ${C.yellow}55`, background: `${C.yellow}10`,
