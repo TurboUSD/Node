@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import SiteFooter from '@/components/SiteFooter'
+import '@/components/tusd-chrome/tusd-chrome.css'
 
 export const metadata: Metadata = {
   title: 'TurboUSD Network',
