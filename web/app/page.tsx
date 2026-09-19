@@ -386,21 +386,14 @@ export default function NetworkPage() {
       {/* ── Header ── */}
       <SiteHeader />
 
-      {/* ── Countdown bar ── */}
-      {nextBlockAt && (
-        <div style={s.countdownBar}>
-          <span style={s.countdownLabel}>Next block in</span>
-          <span style={s.countdownTimer}>{countdown}</span>
-        </div>
-      )}
-
       {/* ── Block ticker: mined lane (left) | dashed divider | pending (fixed right) ── */}
       {/* Hidden-scrollbar rule for the drag-scrollable mined lane (WebKit
           needs a real stylesheet — no inline ::-webkit-scrollbar). */}
       <style>{`.tusd-lane::-webkit-scrollbar{display:none}`}</style>
       <div style={s.tickerWrap}>
         <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}>
-          <div style={s.tickerMinedLane} className="tusd-lane"
+          {/* the countdown sits over the pending block, so the mined lane starts that much lower and every tile lines up */}
+          <div style={{ ...s.tickerMinedLane, paddingTop: nextBlockAt ? 12 + NEXT_PILL_H : 12 }} className="tusd-lane"
             onMouseDown={onBlockLaneDown}
             ref={el => {
               blockLaneRef.current = el
@@ -420,7 +413,14 @@ export default function NetworkPage() {
           </div>
           <div style={s.tickerDivider} />
           {pendingBlock && (
-            <div style={{ padding: '12px 8px 16px 8px', flexShrink: 0 }}>
+            <div style={{ padding: '12px 8px 16px 8px', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              {/* the next-block countdown, on the block it counts down to */}
+              {nextBlockAt && (
+                <div style={s.nextPill}>
+                  <span style={s.nextPillLabel}>Next block</span>
+                  <span style={s.nextPillTimer}>{countdown}</span>
+                </div>
+              )}
               <BlockTile block={pendingBlock} circlePct={circlePct} minsLeft={minsLeft} />
             </div>
           )}
@@ -1449,6 +1449,9 @@ function FavTag({ fav }: { fav: FavProject }) {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
+/** Height of the next-block pill, margin included; the mined lane is pushed down by the same amount. */
+const NEXT_PILL_H = 38
+
 const s: Record<string, React.CSSProperties> = {
   root: { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
 
@@ -1464,6 +1467,15 @@ const s: Record<string, React.CSSProperties> = {
   navLink:  { color: C.muted, fontSize: 13, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' },
   setupBtn: { padding: '7px 18px', background: C.green, color: C.onGreen, borderRadius: 20, fontWeight: 'bold', fontSize: 13, textDecoration: 'none', whiteSpace: 'nowrap' },
 
+  // Next-block countdown: a pill over the pending block, not a bar of its own
+  nextPill: {
+    height: NEXT_PILL_H - 8, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8,
+    padding: '0 12px', borderRadius: 999, border: `1px solid ${C.yellow}55`, background: `${C.yellow}10`,
+    whiteSpace: 'nowrap' as const,
+  },
+  nextPillLabel: { fontSize: 9.5, color: C.muted, textTransform: 'uppercase' as const, letterSpacing: 1 },
+  nextPillTimer: { fontSize: 15, fontWeight: 'bold', color: C.yellow, fontVariantNumeric: 'tabular-nums' as const },
+
   // Countdown
   countdownBar: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16,
@@ -1477,7 +1489,7 @@ const s: Record<string, React.CSSProperties> = {
   countdownReward: { fontSize: 12, color: C.muted },
 
   // Ticker
-  tickerWrap:  { width: '100%', overflow: 'hidden', background: '#050505', borderBottom: `1px solid ${C.border}` },
+  tickerWrap:  { width: '100%', overflow: 'hidden', background: '#050505', borderBottom: `1px solid ${C.border}`, marginTop: 14, borderTop: `1px solid ${C.border}` },
   // Mined blocks: right-aligned in a clipped lane, so each newly mined block
   // appears next to the divider and pushes the older ones to the left.
   // No flex:1 — the lane shrinks to its content so the whole strip (mined +
