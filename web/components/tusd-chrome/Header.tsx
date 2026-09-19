@@ -25,6 +25,7 @@ export default function TusdHeader({
   site,
   tabs,
   connect,
+  subStyle = "default",
   Link,
 }: {
   /** this site's name in the section bar, e.g. "Treasury" */
@@ -32,6 +33,8 @@ export default function TusdHeader({
   tabs: TcTab[];
   /** the wallet button, when the site has one */
   connect?: ReactNode;
+  /** "centered": the section bar sits in the middle, with more air above it and no dot before the site name */
+  subStyle?: "default" | "centered";
   /** the host's client-side link (next/link); plain <a> otherwise. Typed loosely: next/link's own props differ between Next versions. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Link?: ComponentType<any>;
@@ -169,9 +172,9 @@ export default function TusdHeader({
 
       <TcTicker />
 
-      <div ref={sub} className="tc-wrap tc-sub">
+      <div ref={sub} className={`tc-wrap tc-sub ${subStyle === "centered" ? "tc-sub--centered" : ""}`}>
         <L href={site.href} className="tc-sub-site">
-          <span className="tc-sub-dot" />
+          {subStyle === "centered" ? null : <span className="tc-sub-dot" />}
           {site.label}
         </L>
         <nav className="tc-sub-tabs" aria-label={site.label}>

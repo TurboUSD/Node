@@ -752,6 +752,10 @@
 .tc-sub::-webkit-scrollbar {
   display: none;
 }
+.tc-sub--centered {
+  justify-content: safe center;
+  margin-top: 8px;
+}
 .tc-sub-site {
   display: inline-flex !important;
   flex-shrink: 0;

@@ -27,6 +27,7 @@ export default function SiteHeader() {
   return (
     <TusdHeader
       site={{ label: '₸USD Network', href: '/' }}
+      subStyle="centered"
       tabs={TABS.map((t) => ({ ...t, active: isActive(t.href) }))}
       Link={Link}
     />
