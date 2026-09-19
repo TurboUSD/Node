@@ -660,7 +660,7 @@ function BlockTile({ block, circlePct, minsLeft }: {
               transform="rotate(-90 26 26)"
             />
             <text x="26" y="26" textAnchor="middle" dominantBaseline="central"
-              fill={C.yellow} fontSize="15" fontWeight="bold" fontFamily="system-ui, sans-serif">{minsLeft}</text>
+              fill={C.yellow} fontSize="15" fontWeight="bold" fontFamily="Poppins, system-ui, sans-serif">{minsLeft}</text>
           </svg>
           {/* Bottom label mirrors the winner line on mined tiles */}
           <div style={s.blockCountry}>Pending miner</div>
@@ -680,7 +680,7 @@ function StatPill({ label, value, color }: { label: string; value: number; color
   return (
     <div style={s.statPill}>
       <div style={{ fontSize: 22, fontWeight: 'bold', color }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )
 }
@@ -1138,7 +1138,7 @@ function OnlineNodeCard({ node, onClick, wide }: { node: NodeRow; onClick: () =>
 function StatChip({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 1, minWidth: 0 }}>
-      <span style={{ fontSize: 10, color: '#9a9aa2', textTransform: 'uppercase' as const, letterSpacing: 0.6 }}>{label}</span>
+      <span style={{ fontSize: 10, color: '#9a9aa2', textTransform: 'uppercase', fontFamily: 'var(--tc-label)' as const, letterSpacing: 0.6 }}>{label}</span>
       <span style={{ fontSize: 13, fontWeight: 600, color: color ?? C.text,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
     </div>
@@ -1153,7 +1153,7 @@ function LeaderColumn({ title, nodes, right, onSelect }: {
 }) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10,
+      <div style={{ fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1.4, marginBottom: 10,
                     height: 16, lineHeight: '16px', display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>{title}</div>
       {nodes.map((node, idx) => (
         <div key={node.node_code} style={{ ...s.nodeRow, padding: '9px 10px' }} onClick={() => onSelect(node)} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && onSelect(node)}>
@@ -1205,7 +1205,7 @@ function CommunityAvatar({ c, size = 22 }: { c: CommunityRow; size?: number }) {
 function CommunityColumn({ title, rows }: { title: string; rows: CommunityRow[] }) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 10,
+      <div style={{ fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1.4, marginBottom: 10,
                     height: 16, lineHeight: '16px', display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>{title}</div>
       {rows.length === 0
         ? <p style={s.empty}>No communities yet.</p>
@@ -1380,7 +1380,7 @@ function NodeDetail({ node, fav, onClose }: { node: NodeRow; fav?: FavProject; o
         {/* Last block won */}
         {lastBlock && (
           <div style={s.lastBlockBox}>
-            <div style={{ fontSize: 10, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Last block won</div>
+            <div style={{ fontSize: 10, color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8, marginBottom: 6 }}>Last block won</div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>Block #{lastBlock.block_number}</span>
               <span style={{ fontSize: 12, color: C.muted }}>{timeSince(lastBlock.mined_at)}</span>
@@ -1417,7 +1417,7 @@ function DetailStat({ label, value, color }: { label: string; value: string; col
       {/* Fixed lineHeight so a value containing an emoji (e.g. "⚡ 98%") lines up
           vertically with the plain-text values instead of sitting slightly lower. */}
       <div style={{ fontSize: 16, fontWeight: 'bold', color, lineHeight: '22px', height: 22 }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )
 }
@@ -1453,7 +1453,7 @@ function FavTag({ fav }: { fav: FavProject }) {
 const NEXT_PILL_H = 38
 
 const s: Record<string, React.CSSProperties> = {
-  root: { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  root: { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
 
   header: {
     borderBottom: `1px solid ${C.border}`, position: 'sticky', top: 0, zIndex: 100,
@@ -1473,7 +1473,7 @@ const s: Record<string, React.CSSProperties> = {
     padding: '0 12px', borderRadius: 999, border: `1px solid ${C.yellow}55`, background: `${C.yellow}10`,
     whiteSpace: 'nowrap' as const,
   },
-  nextPillLabel: { fontSize: 9.5, color: C.muted, textTransform: 'uppercase' as const, letterSpacing: 1 },
+  nextPillLabel: { fontSize: 9.5, color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)' as const, letterSpacing: 1 },
   nextPillTimer: { fontSize: 15, fontWeight: 'bold', color: C.yellow, fontVariantNumeric: 'tabular-nums' as const },
 
   // Countdown
@@ -1481,7 +1481,7 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16,
     padding: '10px 20px', background: `${C.yellow}08`, borderBottom: `1px solid ${C.yellow}18`,
   },
-  countdownLabel: { fontSize: 11, color: C.muted, textTransform: 'uppercase', letterSpacing: 1 },
+  countdownLabel: { fontSize: 11, color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1 },
   countdownTimer: {
     fontSize: 32, fontWeight: 'bold', color: C.yellow, letterSpacing: -1,
     fontVariantNumeric: 'tabular-nums',
@@ -1543,7 +1543,7 @@ const s: Record<string, React.CSSProperties> = {
   // Content
   content:      { maxWidth: 800, margin: '0 auto', padding: '16px 16px 80px' },
   section:      { marginBottom: 40 },
-  sectionTitle: { fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 },
+  sectionTitle: { fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1.4, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 },
   count:        { background: C.surface, borderRadius: 20, padding: '1px 8px', fontSize: 11, color: C.muted },
   empty:        { color: C.muted, fontSize: 13 },
 

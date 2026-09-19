@@ -716,7 +716,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
               forever to find Save — now it's always in reach. */}
           <div style={{ position: 'sticky', bottom: 0, zIndex: 20, padding: '12px 0',
                         background: 'linear-gradient(to top, #000000 75%, transparent)' }}>
-            <button type="submit" disabled={saving} style={s.primaryBtn}>
+            <button type="submit" disabled={saving} className="tc-btn tc-btn--primary" style={{ width: '100%', marginTop: 4 }}>
               {saving ? 'Saving…' : 'Save changes'}
             </button>
             {saveMsg && (
@@ -754,7 +754,7 @@ export default function NodeSetupPage({ params }: { params: { nodeId: string } }
                     onChange={e => setTweetUrl(e.target.value)}
                   />
                 </Field>
-                <button type="submit" disabled={verifyBusy} style={s.outlineBtn}>
+                <button type="submit" disabled={verifyBusy} className="tc-btn tc-btn--ghost" style={{ width: '100%', marginTop: 4 }}>
                   {verifyBusy ? 'Submitting…' : 'Submit for review'}
                 </button>
                 {verifyMsg && (
@@ -911,14 +911,14 @@ function StatChip({ label, value, color }: { label: string; value: string; color
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{ fontSize: 15, fontWeight: 'bold', color }}>{value}</div>
-      <div style={{ fontSize: 10, color: '#6e7280', marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 10, color: '#6e7280', marginTop: 3, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )
 }
 
 function NotFound({ nodeCode }: { nodeCode: string }) {
   return (
-    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' }}>
       <header style={s.header}>
         <a href="/" style={s.back}>← Network</a>
         <span style={s.logo}>TurboUSD Node {nodeCode}</span>
@@ -944,7 +944,7 @@ function NotFound({ nodeCode }: { nodeCode: string }) {
 
 function AccessDenied({ nodeCode }: { nodeCode: string }) {
   return (
-    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' }}>
       <header style={s.header}>
         <a href="/" style={s.back}>← Network</a>
         <span style={s.logo}>TurboUSD Node {nodeCode}</span>
@@ -1991,7 +1991,7 @@ function NftPinlistEditor({ items, onChange }: { items: PinItem[]; onChange: (it
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--tc-sans)' }}>
       <p style={{ color: C.muted, padding: 24, textAlign: 'center' }}>{children}</p>
     </div>
   )
@@ -1999,7 +1999,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
-  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
   content: { maxWidth: 560, margin: '0 auto', padding: '28px 20px 80px' },
 
   header: {
@@ -2020,7 +2020,7 @@ const s: Record<string, React.CSSProperties> = {
     borderLeft: `3px solid ${C.green}`, paddingLeft: 16,
     marginBottom: 28,
   },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', letterSpacing: 1.2, textTransform: 'uppercase', color: '#ffffff', marginBottom: 16, marginTop: 0 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', letterSpacing: 1.2, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', color: '#ffffff', marginBottom: 16, marginTop: 0 },
 
   label: { display: 'block', fontSize: 13, color: C.muted, marginBottom: 6, fontWeight: 500 },
   hint:  { fontSize: 12, color: C.muted, marginTop: 5, lineHeight: 1.5, opacity: 0.7 },

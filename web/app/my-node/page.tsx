@@ -29,7 +29,7 @@ export default function MyNodePage() {
   }
 
   return (
-    <main style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+    <main style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' }}>
       <SiteHeader />
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '32px 20px' }}>
         <h1 style={{ fontSize: 24, margin: '0 0 6px' }}>My Node</h1>
@@ -43,7 +43,7 @@ export default function MyNodePage() {
             marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
           }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>Saved on this device</div>
+              <div style={{ fontSize: 11, color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8 }}>Saved on this device</div>
               <div style={{ fontSize: 18, fontWeight: 'bold' }}>{saved}</div>
             </div>
             <a href={`/node/${saved}`} style={{
@@ -63,7 +63,7 @@ export default function MyNodePage() {
             spellCheck={false}
             style={{
               flex: 1, minWidth: 0, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
-              padding: '11px 14px', color: C.text, fontSize: 15, outline: 'none', textTransform: 'uppercase',
+              padding: '11px 14px', color: C.text, fontSize: 15, outline: 'none', textTransform: 'uppercase', fontFamily: 'var(--tc-label)',
             }}
           />
           <button type="submit" style={{

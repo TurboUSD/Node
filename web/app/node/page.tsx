@@ -150,8 +150,8 @@ export default function NodeProductPage() {
             your clock and alarm, your NFT gallery and the most honest inflation monitor money can buy.
           </p>
           <div style={s.ctaRow}>
-            <Link href="/" style={s.ctaPrimary}>Live network →</Link>
-            <a href="/setup" style={s.ctaSecondary}>Flash NodeOS →</a>
+            <Link href="/" className="tc-btn tc-btn--primary">Live network ⚡️</Link>
+            <a href="/setup" className="tc-btn tc-btn--ghost">Flash NodeOS</a>
           </div>
           <p style={{ fontSize: 11, color: C.muted, marginTop: 14 }}>
             Runs on the Seeed SenseCAP Indicator D1. Off-the-shelf hardware, no soldering,
@@ -221,7 +221,7 @@ export default function NodeProductPage() {
               web flasher, and your node is registered and mining in minutes. All settings (tickers,
               NFTs, screens, alarm) are managed from a simple web page and sync to the device automatically.
             </p>
-            <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" style={{ ...s.ctaPrimary, display: 'inline-block', marginTop: 4 }}>
+            <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" className="tc-btn tc-btn--primary" style={{ marginTop: 4 }}>
               Get the hardware →
             </a>
           </div>
@@ -258,7 +258,7 @@ export default function NodeProductPage() {
             Everything is MIT-style permissive. Keeping a small &quot;powered by TurboUSD NodeOS&quot;
             reference is appreciated, but it&apos;s yours to build with.
           </p>
-          <a href={GITHUB_URL} target="_blank" rel="noreferrer" style={s.ctaSecondary}>Start from the source →</a>
+          <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="tc-btn tc-btn--ghost">Start from the source</a>
         </div>
       </section>
 
@@ -283,7 +283,7 @@ export default function NodeProductPage() {
         <MiniMap nodes={nodes} />
 
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
-          <Link href="/" style={s.ctaPrimary}>Explore the full network →</Link>
+          <Link href="/" className="tc-btn tc-btn--primary">Explore the full network ⚡️</Link>
         </div>
       </section>
 
@@ -291,8 +291,8 @@ export default function NodeProductPage() {
       <section style={{ ...s.section, textAlign: 'center', paddingBottom: 90 }}>
         <h2 style={{ ...s.h2, fontSize: 30 }}>Ready to put one on your desk?</h2>
         <div style={{ ...s.ctaRow, justifyContent: 'center', marginTop: 20 }}>
-          <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" style={s.ctaPrimary}>Get the hardware →</a>
-          <a href="/setup" style={s.ctaSecondary}>Flash NodeOS →</a>
+          <a href={SEEED_STORE_URL} target="_blank" rel="noreferrer" className="tc-btn tc-btn--primary">Get the hardware ⚡️</a>
+          <a href="/setup" className="tc-btn tc-btn--ghost">Flash NodeOS</a>
         </div>
         <p style={{ fontSize: 11, color: C.muted, marginTop: 22 }}>
           ₸USD rewards are for fun, not financial advice. The only guaranteed yield is a very cool desk.
@@ -478,7 +478,7 @@ function BlocksStrip({ mined, pending, circlePct, minsLeft }: {
               strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - Math.max(0, Math.min(1, circlePct)))}
               transform="rotate(-90 26 26)" />
             <text x="26" y="26" textAnchor="middle" dominantBaseline="central"
-              fill={C.yellow} fontSize="15" fontWeight="bold" fontFamily="system-ui, sans-serif">{minsLeft}</text>
+              fill={C.yellow} fontSize="15" fontWeight="bold" fontFamily="Poppins, system-ui, sans-serif">{minsLeft}</text>
           </svg>
           <div style={s.blockCountry}>Pending miner</div>
         </div>
@@ -502,7 +502,7 @@ function Spec({ value, label }: { value: string; label: string }) {
   return (
     <div style={s.specPill}>
       <div style={{ fontSize: 18, fontWeight: 'bold', color: C.text }} dangerouslySetInnerHTML={{ __html: value }} />
-      <div style={{ fontSize: 10, color: C.muted, marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 3, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.6 }}>{label}</div>
     </div>
   )
 }
@@ -511,7 +511,7 @@ function StatPill({ label, value, color }: { label: string; value: number | stri
   return (
     <div style={s.statPill}>
       <div style={{ fontSize: 20, fontWeight: 'bold', color }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.muted, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 2, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )
 }
@@ -606,7 +606,7 @@ function MiniMap({ nodes }: { nodes: NodeRow[] }) {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
-  root: { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  root: { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
 
   header: {
     borderBottom: `1px solid ${C.border}`, position: 'sticky', top: 0, zIndex: 100,
@@ -625,8 +625,8 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex', alignItems: 'center', gap: 36, flexWrap: 'wrap',
   },
   heroText:  { flex: '1 1 380px', minWidth: 300 },
-  kicker:    { fontSize: 11, fontWeight: 700, color: C.green, textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12 },
-  heroTitle: { fontSize: 40, fontWeight: 800, lineHeight: 1.12, letterSpacing: -1, margin: 0 },
+  kicker:    { fontSize: 13, fontWeight: 600, color: C.green, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: '0.18em', marginBottom: 12 },
+  heroTitle: { fontSize: 40, fontWeight: 600, lineHeight: 1.05, letterSpacing: '-0.03em', margin: 0, textWrap: 'balance' },
   heroSub:   { fontSize: 15, color: '#a8adb8', lineHeight: 1.6, marginTop: 18, maxWidth: 480 },
   ctaRow:    { display: 'flex', gap: 10, marginTop: 26, flexWrap: 'wrap' },
   ctaPrimary: {
@@ -641,7 +641,7 @@ const s: Record<string, React.CSSProperties> = {
 
   section:    { maxWidth: 800, margin: '0 auto', padding: '56px 20px 8px' },
   sectionAlt: { background: '#070a08', borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, padding: '56px 0 48px', marginTop: 56 },
-  h2:         { fontSize: 26, fontWeight: 800, letterSpacing: -0.5, margin: '0 0 8px' },
+  h2:         { fontSize: 28, fontWeight: 600, letterSpacing: '-0.03em', margin: '0 0 8px' },
   sectionSub: { fontSize: 14, color: C.muted, margin: '0 0 26px', lineHeight: 1.6 },
   p:          { fontSize: 14, color: '#a8adb8', lineHeight: 1.7, margin: '0 0 16px', maxWidth: 640 },
   inlineLink: { color: C.green, textDecoration: 'none', fontWeight: 600 },

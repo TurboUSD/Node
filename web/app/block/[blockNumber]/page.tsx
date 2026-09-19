@@ -128,7 +128,7 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
         ) : !block ? (
           <div style={{ textAlign: 'center', padding: '60px 20px' }}>
             <p style={s.dim}>Block #{blockNum} not found or not yet mined.</p>
-            <a href="/network" style={s.btn}>← Back to network</a>
+            <a href="/network" className="tc-btn tc-btn--ghost" style={{ marginTop: 16 }}>← Back to network</a>
           </div>
         ) : block.mined_at === null ? (
           <div style={{ ...s.card, textAlign: 'center', padding: 40 }}>
@@ -220,7 +220,7 @@ export default function BlockPage({ params }: { params: { blockNumber: string } 
 
             {/* How the winner was chosen */}
             <div style={s.infoBox}>
-              <div style={{ fontSize: 11, fontWeight: 'bold', color: C.muted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 'bold', color: C.muted, marginBottom: 6, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1 }}>
                 How the winner was chosen
               </div>
               <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.7, margin: 0 }}>
@@ -262,9 +262,9 @@ function Row({ label, value, mono, color, hint }: {
   return (
     <div style={s.row}>
       <div style={s.rowLabel}>{label}</div>
-      <div style={{ ...s.rowValue, fontFamily: mono ? 'monospace' : undefined, color: color ?? C.text }}>
+      <div style={{ ...s.rowValue, fontFamily: mono ? 'var(--tc-mono)' : undefined, color: color ?? C.text }}>
         {value}
-        {hint && <div style={{ fontSize: 11, color: C.muted, marginTop: 3, fontFamily: 'system-ui' }}>{hint}</div>}
+        {hint && <div style={{ fontSize: 11, color: C.muted, marginTop: 3, fontFamily: 'var(--tc-sans)' }}>{hint}</div>}
       </div>
     </div>
   )
@@ -273,7 +273,7 @@ function Row({ label, value, mono, color, hint }: {
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const s: Record<string, React.CSSProperties> = {
-  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
   content: { maxWidth: 640, margin: '0 auto', padding: '28px 20px 80px' },
 
   header: {
@@ -321,10 +321,10 @@ const s: Record<string, React.CSSProperties> = {
 
   link:     { color: C.green, textDecoration: 'none', fontWeight: 600 },
   nameBtn:  { background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: C.green, fontWeight: 600, fontSize: 14, fontFamily: 'inherit' },
-  hashLink: { color: C.blue, textDecoration: 'none', fontFamily: 'monospace', fontSize: 13 },
+  hashLink: { color: C.blue, textDecoration: 'none', fontFamily: 'var(--tc-mono)', fontSize: 13 },
   // break-all + a max width so the 66-char Base hash wraps instead of forcing
   // the whole page wider (it used to overflow to the right and let you zoom out).
-  code:     { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '2px 5px', fontFamily: 'monospace', fontSize: 12,
+  code:     { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '2px 5px', fontFamily: 'var(--tc-mono)', fontSize: 12,
               wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%' },
 
   dim: { color: C.muted, fontSize: 14 },

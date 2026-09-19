@@ -276,7 +276,7 @@ function MobileList({ rows, onOpen }: { rows: NodeRow[]; onOpen: (code: string) 
 }
 
 const s: Record<string, React.CSSProperties> = {
-  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
   header:  {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '0 20px', height: 56, borderBottom: `1px solid ${C.border}`,
@@ -307,7 +307,7 @@ const s: Record<string, React.CSSProperties> = {
 
   tableWrap: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', marginBottom: 4 },
   tr:        { display: 'flex', alignItems: 'center', gap: 8, padding: '11px 12px', borderBottom: `1px solid ${C.border}`, textDecoration: 'none', color: C.text, fontSize: 13 },
-  thead:     { color: C.muted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 },
+  thead:     { color: C.muted, fontSize: 11, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.5, fontWeight: 700 },
   td:        { minWidth: 0 },
   ellip:     { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   cNode:     { flex: '1 1 150px' },

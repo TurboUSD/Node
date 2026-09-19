@@ -9,6 +9,14 @@ import { useEffect, useState } from "react";
 
 export const TUSD_ORIGIN = "https://turbousd.com";
 
+/*
+ * The API is read from whichever host serves the site directly. Vercel redirects one of turbousd.com /
+ * www.turbousd.com to the other, and a cross-origin fetch fails on a redirect (the 308 carries no CORS
+ * header), so both are tried and the one that answers is remembered.
+ */
+const API_ORIGINS = ["https://www.turbousd.com", "https://turbousd.com"];
+let apiOrigin: string | null = null;
+
 export interface TusdLive {
   priceUsd: number;
   change24h: number;
@@ -41,12 +49,19 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let started = false;
 
 async function getJson<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(TUSD_ORIGIN + path, { cache: "no-store" });
-    return res.ok ? ((await res.json()) as T) : null;
-  } catch {
-    return null;
+  const origins = apiOrigin ? [apiOrigin, ...API_ORIGINS.filter((o) => o !== apiOrigin)] : API_ORIGINS;
+  for (const origin of origins) {
+    try {
+      const res = await fetch(origin + path, { cache: "no-store" });
+      if (!res.ok) continue;
+      const json = (await res.json()) as T;
+      apiOrigin = origin;
+      return json;
+    } catch {
+      /* redirect or network error: try the other host */
+    }
   }
+  return null;
 }
 
 async function refresh(withMacro: boolean) {

@@ -26,12 +26,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Android PWA */}
         <meta name="mobile-web-app-capable" content="yes" />
 
+        {/* turbousd.com's fonts: Poppins (text, titles), Space Grotesk (labels), JetBrains Mono (figures) */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Poppins:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+        />
+
         {/* Icons */}
         <link rel="icon" href="https://turbousd.com/wp-content/uploads/2026/04/cropped-TurboUSD_tc-32x32.png" sizes="32x32" />
         <link rel="icon" href="https://turbousd.com/wp-content/uploads/2026/04/cropped-TurboUSD_tc-192x192.png" sizes="192x192" />
         <link rel="apple-touch-icon" href="https://turbousd.com/wp-content/uploads/2026/04/cropped-TurboUSD_tc-180x180.png" />
       </head>
-      <body style={{ margin: 0, background: '#000' }}>
+      <body style={{ margin: 0, background: '#000', fontFamily: 'var(--tc-sans)', WebkitFontSmoothing: 'antialiased' }}>
         {children}
         {/* Shared on every page: turbousd.com link + socials */}
         <SiteFooter />

@@ -89,7 +89,7 @@ export default function NodeOverlay({ nodeCode, onClose }: { nodeCode: string; o
         background: C.card, border: `1px solid ${C.border}`, borderBottom: 'none',
         borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: '30px 22px calc(40px + env(safe-area-inset-bottom,0px))',
         zIndex: 2001, maxHeight: '82vh', overflowY: 'auto', color: C.text,
-        fontFamily: 'system-ui, -apple-system, sans-serif',
+        fontFamily: 'var(--tc-sans)',
       }}>
         <button onClick={onClose} aria-label="Close" style={{
           position: 'absolute', top: 14, right: 16, width: 32, height: 32, borderRadius: '50%',
@@ -178,7 +178,7 @@ function Stat({ label, value, color }: { label: string; value: string; color: st
         fontSize: 16, fontWeight: 'bold', color, lineHeight: 1.2, minHeight: 22,
         display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
       }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )
 }

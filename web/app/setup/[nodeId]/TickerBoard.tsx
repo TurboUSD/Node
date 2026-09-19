@@ -180,7 +180,7 @@ function CandlestickChart({ candles, width = 360, height = 160 }: { candles: Can
         return (
           <g key={i}>
             <line x1={0} y1={y} x2={cW} y2={y} stroke={C.border} strokeWidth={1} strokeDasharray="3,3" />
-            <text x={cW + 4} y={y + 4} fill={C.muted} fontSize={9} fontFamily="monospace">
+            <text x={cW + 4} y={y + 4} fill={C.muted} fontSize={9} fontFamily="JetBrains Mono, monospace">
               {fmtPrice(v).replace('$', '')}
             </text>
           </g>
@@ -210,8 +210,8 @@ function CandlestickChart({ candles, width = 360, height = 160 }: { candles: Can
         const x1  = ((candles.length - 0.5) / candles.length) * cW
         return (
           <>
-            <text x={x0} y={height - 4} fill={C.muted} fontSize={9} textAnchor="middle" fontFamily="system-ui">{fmt(candles[0].time)}</text>
-            <text x={x1} y={height - 4} fill={C.muted} fontSize={9} textAnchor="middle" fontFamily="system-ui">{fmt(candles[candles.length - 1].time)}</text>
+            <text x={x0} y={height - 4} fill={C.muted} fontSize={9} textAnchor="middle" fontFamily="Poppins, system-ui, sans-serif">{fmt(candles[0].time)}</text>
+            <text x={x1} y={height - 4} fill={C.muted} fontSize={9} textAnchor="middle" fontFamily="Poppins, system-ui, sans-serif">{fmt(candles[candles.length - 1].time)}</text>
           </>
         )
       })()}
@@ -336,7 +336,7 @@ function ExpandedCard({
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, marginBottom: 10, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>Market Cap (FDV)</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: C.text, letterSpacing: -0.5 }}>{fmtCap(live?.fdv ?? null)}</div>
+          <div style={{ fontSize: 26, fontWeight: 600, color: C.text, letterSpacing: -0.5 }}>{fmtCap(live?.fdv ?? null)}</div>
         </div>
         <div style={{ paddingBottom: 4 }}>
           <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>Price</div>
@@ -728,7 +728,7 @@ const s: Record<string, React.CSSProperties> = {
 
   sectionTitle: {
     fontSize: 16, fontWeight: 'bold', color: '#ffffff',
-    textTransform: 'uppercase', letterSpacing: 1.2, margin: 0,
+    textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1.2, margin: 0,
   },
   alertEditor: {
     display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',

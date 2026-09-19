@@ -148,7 +148,7 @@ export default function SetupPage() {
             <esp-web-install-button
               manifest="https://network.turbousd.com/firmware/manifest.json"
             >
-              <button slot="activate" style={s.flashBtn}>
+              <button slot="activate" className="tc-btn tc-btn--primary" style={{ width: '100%' }}>
                 ⚡ Install TurboUSD Firmware
               </button>
               <span slot="unsupported" style={{ color: C.red, fontSize: 13 }}>
@@ -300,7 +300,7 @@ export default function SetupPage() {
               placeholder="Node code (e.g. A3F2)"
               maxLength={6}
             />
-            <button type="submit" style={s.codeBtn}>Open →</button>
+            <button type="submit" className="tc-btn tc-btn--ghost">Open</button>
           </form>
         </div>
 
@@ -373,7 +373,7 @@ function Step({ icon, text }: { icon: string; text: string }) {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
   content: { maxWidth: 680, margin: '0 auto', padding: '32px 20px 80px' },
 
   header: {
@@ -392,12 +392,12 @@ const s: Record<string, React.CSSProperties> = {
   heroSub:   { fontSize: 15, color: C.muted, lineHeight: 1.65, maxWidth: 460, margin: '0 auto' },
 
   returnCard:  { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '18px 20px', marginBottom: 32, marginTop: 16 },
-  returnLabel: { fontSize: 11, color: C.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600 },
+  returnLabel: { fontSize: 11, color: C.muted, marginBottom: 8, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1, fontWeight: 600 },
   returnDesc:  { fontSize: 13, color: '#9aa0b0', marginBottom: 12, marginTop: 0, lineHeight: 1.5 },
   codeInput: {
     flex: 1, padding: '10px 14px', background: C.surface, color: C.text,
     border: '1px solid #3a3a3a', borderRadius: 8, fontSize: 16,
-    fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: 4,
+    fontFamily: 'var(--tc-mono)', textTransform: 'uppercase', letterSpacing: 4,
   },
   codeBtn:    { padding: '10px 20px', background: C.surface, color: C.text, border: '1px solid #3a3a3a', borderRadius: 8, fontWeight: 'bold', fontSize: 14, cursor: 'pointer' },
   returnHint: { fontSize: 12, color: '#9aa0b0', marginTop: 8, marginBottom: 0 },
@@ -430,7 +430,7 @@ const s: Record<string, React.CSSProperties> = {
   tipBox: { background: '#5b8dee10', border: '1px solid #5b8dee30', borderRadius: 8, padding: '10px 14px', fontSize: 13, marginTop: 10 },
 
   link:   { color: C.green, textDecoration: 'none' },
-  code:   { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '2px 6px', fontFamily: 'monospace', fontSize: 12, color: C.muted },
+  code:   { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: '2px 6px', fontFamily: 'var(--tc-mono)', fontSize: 12, color: C.muted },
   footer: { textAlign: 'center', fontSize: 13, color: '#9aa0b0', marginTop: 36 },
 }
 

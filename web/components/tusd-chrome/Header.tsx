@@ -25,15 +25,15 @@ export default function TusdHeader({
   site,
   tabs,
   connect,
-  subStyle = "default",
   Link,
 }: {
-  /** this site's name in the section bar, e.g. "Treasury" */
+  /** this site's name: labels the section bar for screen readers */
   site: { label: string; href: string };
-  tabs: TcTab[];
+  /** this site's sections, shown centred in a bar under the ticker; none (or empty) = no bar */
+  tabs?: TcTab[];
   /** the wallet button, when the site has one */
   connect?: ReactNode;
-  /** "centered": the section bar sits in the middle, with more air above it and no dot before the site name */
+  /** kept for older callers: the section bar is always centred now */
   subStyle?: "default" | "centered";
   /** the host's client-side link (next/link); plain <a> otherwise. Typed loosely: next/link's own props differ between Next versions. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,7 +43,7 @@ export default function TusdHeader({
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const L: LinkLike = (Link as LinkLike | undefined) ?? PlainLink;
   const sub = useRef<HTMLDivElement>(null);
-  const activeHref = tabs.find((t) => t.active)?.href;
+  const activeHref = tabs?.find((t) => t.active)?.href;
 
   // on a phone the section bar scrolls sideways: bring the current section into view
   useEffect(() => {
@@ -51,7 +51,7 @@ export default function TusdHeader({
     const el = bar?.querySelector<HTMLElement>(".tc-tab.is-active");
     if (!bar || !el) return;
     const end = el.offsetLeft + el.offsetWidth + 16;
-    // only move when the tab would otherwise sit off-screen, so the site name stays visible when it can
+    // only move when the tab would otherwise sit off-screen
     bar.scrollLeft = end > bar.clientWidth ? end - bar.clientWidth : 0;
   }, [activeHref]);
 
@@ -172,25 +172,25 @@ export default function TusdHeader({
 
       <TcTicker />
 
-      <div ref={sub} className={`tc-wrap tc-sub ${subStyle === "centered" ? "tc-sub--centered" : ""}`}>
-        <L href={site.href} className="tc-sub-site">
-          {subStyle === "centered" ? null : <span className="tc-sub-dot" />}
-          {site.label}
-        </L>
-        <nav className="tc-sub-tabs" aria-label={site.label}>
-          {tabs.map((t) =>
-            t.external ? (
-              <a key={t.href} href={t.href} className="tc-tab">
-                {t.label}
-              </a>
-            ) : (
-              <L key={t.href} href={t.href} className={`tc-tab ${t.active ? "is-active" : ""}`} onClick={() => setOpen(false)}>
-                {t.label}
-              </L>
-            ),
-          )}
-        </nav>
-      </div>
+      {tabs?.length ? (
+        // only this site's sections, centred, the active one underlined in green. The bar is locked
+        // vertically: it can only scroll sideways, and only when the tabs do not fit
+        <div ref={sub} className="tc-wrap tc-sub">
+          <nav className="tc-sub-tabs" aria-label={site.label}>
+            {tabs.map((t) =>
+              t.external ? (
+                <a key={t.href} href={t.href} className="tc-tab">
+                  {t.label}
+                </a>
+              ) : (
+                <L key={t.href} href={t.href} className={`tc-tab ${t.active ? "is-active" : ""}`} onClick={() => setOpen(false)}>
+                  {t.label}
+                </L>
+              ),
+            )}
+          </nav>
+        </div>
+      ) : null}
     </header>
   );
 }

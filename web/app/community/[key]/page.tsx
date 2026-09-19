@@ -129,7 +129,7 @@ export default function CommunityPage({ params }: { params: { key: string } }) {
         ) : !community && members.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px' }}>
             <p style={s.dim}>No nodes have added this community yet.</p>
-            <a href="/" style={s.btn}>← Back to network</a>
+            <a href="/" className="tc-btn tc-btn--ghost" style={{ marginTop: 16 }}>← Back to network</a>
           </div>
         ) : (
           <>
@@ -185,7 +185,7 @@ function StatPill({ label, value, color }: { label: string; value: string; color
   return (
     <div style={s.statPill}>
       <div style={{ fontSize: 18, fontWeight: 'bold', color }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.muted, marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 3, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )
 }
@@ -254,7 +254,7 @@ function MobileList({ rows }: { rows: MemberRow[] }) {
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const s: Record<string, React.CSSProperties> = {
-  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
   header:  {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '0 20px', height: 56, borderBottom: `1px solid ${C.border}`,
@@ -274,12 +274,12 @@ const s: Record<string, React.CSSProperties> = {
     padding: '10px 8px', textAlign: 'center', flex: '1 1 0', minWidth: 100,
   },
 
-  sectionTitle: { fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 12 },
+  sectionTitle: { fontSize: 10, fontWeight: 'bold', color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1.4, marginBottom: 12 },
 
   // Table (desktop) — same pattern as /blocks
   tableWrap: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', marginBottom: 4 },
   tr:        { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: `1px solid ${C.border}`, textDecoration: 'none', color: C.text, fontSize: 13 },
-  thead:     { color: C.muted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 },
+  thead:     { color: C.muted, fontSize: 11, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.5, fontWeight: 700 },
   td:        { minWidth: 0 },
   ellip:     { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   cRank:     { flex: '0 0 24px', textAlign: 'center' },

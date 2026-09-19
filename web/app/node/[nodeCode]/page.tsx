@@ -160,7 +160,7 @@ export default function PublicNodePage() {
           <p style={{ color: C.muted, fontSize: 14, margin: '0 0 20px' }}>
             This node isn’t registered on the TurboUSD network yet. If you just set it up, give it a minute to check in.
           </p>
-          <a href="/" style={s.linkBtn}>← Back to the network</a>
+          <a href="/" className="tc-btn tc-btn--ghost">← Back to the network</a>
         </div>
       </main>
     )
@@ -228,7 +228,7 @@ export default function PublicNodePage() {
         {/* Last block won — same area the map overlay card shows. */}
         {lastBlock && (
           <div style={s.lastBlockBox}>
-            <div style={{ fontSize: 10, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Last block won</div>
+            <div style={{ fontSize: 10, color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8, marginBottom: 6 }}>Last block won</div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>Block #{lastBlock.block_number}</span>
               <span style={{ fontSize: 12, color: C.muted }}>{timeSince(lastBlock.mined_at)}</span>
@@ -290,13 +290,13 @@ function Stat({ label, value, color }: { label: string; value: string; color: st
         fontSize: 16, fontWeight: 'bold', color, lineHeight: 1.2, minHeight: 22,
         display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
       }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 4, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.8 }}>{label}</div>
     </div>
   )
 }
 
 const s: Record<string, React.CSSProperties> = {
-  page:   { maxWidth: 560, margin: '0 auto', padding: 20, minHeight: '100vh', background: C.bg, color: C.text, fontFamily: '-apple-system, system-ui, sans-serif' },
+  page:   { maxWidth: 560, margin: '0 auto', padding: 20, minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   back:   { color: C.green, textDecoration: 'none', fontSize: 14 },
   card:   { background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22 },
@@ -307,7 +307,7 @@ const s: Record<string, React.CSSProperties> = {
 
   // "Part of" communities section (favourite first, ★).
   projCard:  { background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 22, marginTop: 14 },
-  projTitle: { fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 },
+  projTitle: { fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 1, marginBottom: 14 },
   projList:  { display: 'flex', flexWrap: 'wrap', gap: 8 },
   projTagFav: {
     display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px',

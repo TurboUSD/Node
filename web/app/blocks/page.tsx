@@ -153,7 +153,7 @@ function DesktopTable({ rows }: { rows: BlockRow[] }) {
           <div style={{ ...s.td, ...s.cWinner, ...s.ellip }}>{winnerLabel(b)}</div>
           <div style={{ ...s.td, ...s.cReward, color: C.green, fontWeight: 700 }}>₸{b.reward_tusd}</div>
           <div style={{ ...s.td, ...s.cCand, color: C.muted }}>{b.candidates_count ?? '—'}</div>
-          <div style={{ ...s.td, ...s.cRand, ...s.ellip, color: C.muted, fontFamily: 'monospace' }}>{shortHash(b.randomness_source)}</div>
+          <div style={{ ...s.td, ...s.cRand, ...s.ellip, color: C.muted, fontFamily: 'var(--tc-mono)' }}>{shortHash(b.randomness_source)}</div>
         </a>
       ))}
     </div>
@@ -173,7 +173,7 @@ function MobileList({ rows }: { rows: BlockRow[] }) {
           <div style={s.mMeta}>
             <span>{b.mined_at ? timeSince(b.mined_at) : '—'}</span>
             <span>· {b.candidates_count ?? '—'} online</span>
-            <span style={{ fontFamily: 'monospace' }}>· {shortHash(b.randomness_source)}</span>
+            <span style={{ fontFamily: 'var(--tc-mono)' }}>· {shortHash(b.randomness_source)}</span>
           </div>
         </a>
       ))}
@@ -182,7 +182,7 @@ function MobileList({ rows }: { rows: BlockRow[] }) {
 }
 
 const s: Record<string, React.CSSProperties> = {
-  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  root:    { minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'var(--tc-sans)' },
   header:  {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '0 20px', height: 56, borderBottom: `1px solid ${C.border}`,
@@ -204,7 +204,7 @@ const s: Record<string, React.CSSProperties> = {
   // Table (desktop): flex rows with fixed-ish columns; long cells ellipsise.
   tableWrap: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', marginBottom: 4 },
   tr:        { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: `1px solid ${C.border}`, textDecoration: 'none', color: C.text, fontSize: 13 },
-  thead:     { color: C.muted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 },
+  thead:     { color: C.muted, fontSize: 11, textTransform: 'uppercase', fontFamily: 'var(--tc-label)', letterSpacing: 0.5, fontWeight: 700 },
   td:        { minWidth: 0 },
   ellip:     { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   cBlock:    { flex: '0 0 64px' },
